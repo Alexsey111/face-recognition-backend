@@ -1,0 +1,65 @@
+# Development Dockerfile для Face Recognition Service
+FROM python:3.11-slim
+
+# Установка системных зависимостей для разработки
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    libgtk-3-0 \
+    libavcodec-dev \
+    libavformat-dev \
+    libswscale-dev \
+    libv4l-dev \
+    libxvidcore-dev \
+    libx264-dev \
+    libjpeg-dev \
+    libtiff-dev \
+    git \
+    vim \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Создание пользователя для приложения
+RUN groupadd -r app && useradd -r -g app -s /bin/bash app
+
+# Установка рабочей директории
+WORKDIR /app
+
+# Копирование файлов зависимостей
+COPY requirements.txt requirements-dev.txt ./
+
+# Установка Python зависимостей для разработки
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements-dev.txt
+
+# Копирование исходного кода
+COPY . .
+
+# Создание необходимых директорий
+RUN mkdir -p /app/logs /app/uploads /app/temp && \
+    chown -R app:app /app
+
+# Переключение на пользователя app
+USER app
+
+# Переменные окружения для разработки
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+ENV ENVIRONMENT=development
+ENV DEBUG=true
+
+# Проверка здоровья контейнера для разработки
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
+CMD curl -f http://localhost:8000/health || exit 1
+
+# Экспорт порта для разработки
+EXPOSE 8000 5678
+
+# Команда запуска для разработки с hot reload
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--log-level", "debug"]

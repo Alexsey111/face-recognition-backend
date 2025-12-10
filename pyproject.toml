@@ -1,0 +1,309 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "face-recognition-service"
+version = "1.0.0"
+description = "Face Recognition API Service with ML verification"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [
+    {name = "Face Recognition Team", email = "team@face-recognition.local"}
+]
+maintainers = [
+    {name = "Face Recognition Team", email = "team@face-recognition.local"}
+]
+keywords = ["face-recognition", "ml", "api", "fastapi", "verification"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+]
+requires-python = ">=3.11"
+dependencies = [
+    # Core Framework
+    "fastapi==0.109.0",
+    "uvicorn[standard]==0.27.0",
+    "pydantic==2.6.0",
+    "pydantic-settings==2.2.0",
+    
+    # Database
+    "sqlalchemy[asyncio]==2.0.25",
+    "asyncpg==0.29.0",
+    "aiosqlite==0.19.0",
+    "alembic==1.12.1",
+    
+    # Redis & Cache
+    "redis==5.0.1",
+    "hiredis==2.2.3",
+    
+    # HTTP Client & External Services
+    "httpx==0.25.2",
+    "aiohttp==3.9.1",
+    
+    # AWS S3 / Storage
+    "boto3==1.34.25",
+    "botocore==1.34.25",
+    "minio==7.2.0",
+    
+    # Image Processing
+    "opencv-python==4.8.1.78",
+    "Pillow==10.1.0",
+    "pillow-heif==0.18.0",
+    "python-magic==0.4.27",
+    
+    # Authentication & Security
+    "PyJWT==2.8.0",
+    "passlib[bcrypt]==1.7.4",
+    "cryptography==41.0.8",
+    
+    # Data Validation & Serialization
+    "email-validator==2.1.0",
+    "marshmallow==3.20.2",
+    
+    # Date/Time
+    "python-dateutil==2.8.2",
+    "pytz==2023.3",
+    
+    # Configuration & Environment
+    "python-dotenv==1.0.0",
+    
+    # Logging & Monitoring
+    "structlog==23.2.0",
+    
+    # ML & AI (optional, for local development)
+    "numpy==1.24.4",
+    "scipy==1.11.4",
+    "scikit-learn==1.3.2",
+    
+    # Utilities
+    "python-multipart==0.0.6",
+    "orjson==3.9.10",
+    "python-json-logger==2.0.7",
+    
+    # Background Tasks
+    "celery==5.3.4",
+    "dramatiq==1.15.0",
+    
+    # Metrics & Monitoring
+    "prometheus-client==0.19.0",
+    
+    # File Processing
+    "chardet==5.2.0",
+    "filetype==1.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==7.4.3",
+    "pytest-asyncio==0.21.1",
+    "pytest-cov==4.1.0",
+    "pytest-mock==3.12.0",
+    "httpx==0.25.2",
+    "black==23.11.0",
+    "isort==5.12.0",
+    "flake8==6.1.0",
+    "flake8-docstrings==1.7.0",
+    "flake8-import-order==0.18.2",
+    "mypy==1.7.1",
+    "bandit==1.7.5",
+    "alembic==1.12.1",
+    "ipdb==0.13.13",
+    "pdb++==0.10.3",
+    "py-spy==0.3.14",
+    "memory-profiler==0.61.0",
+    "jupyter==1.0.0",
+    "jupyterlab==4.0.9",
+    "locust==2.17.0",
+    "safety==2.3.5",
+    "pip-audit==2.6.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/face-recognition/service"
+Documentation = "https://face-recognition-service.readthedocs.io"
+Repository = "https://github.com/face-recognition/service.git"
+"Bug Tracker" = "https://github.com/face-recognition/service/issues"
+
+[project.scripts]
+face-recognition-service = "app.main:main"
+face-recognition-migrate = "alembic.command:main"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = ["tests*", "docs*"]
+
+[tool.setuptools.package-data]
+"app.static" = ["*.css", "*.js", "*.png", "*.jpg", "*.gif", "*.ico"]
+"app.templates" = ["*.html", "*.xml"]
+
+# Tool configurations
+[tool.black]
+line-length = 88
+target-version = ['py311']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
+known_first_party = ["app"]
+skip_glob = ["*/migrations/*"]
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = ["E203", "E501", "W503"]
+exclude = [
+    ".git",
+    "__pycache__",
+    "build",
+    "dist",
+    ".venv",
+    "venv",
+    ".tox",
+    "docs",
+    "*.egg-info"
+]
+per-file-ignores = [
+    "__init__.py:F401",
+    "tests/*:F401,F811"
+]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = [
+    "opencv-python.*",
+    "PIL.*",
+    "cv2.*",
+    "minio.*",
+    "boto3.*",
+    "botocore.*"
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "--strict-config",
+    "--disable-warnings",
+    "--color=yes",
+    "--durations=10",
+    "--cov=app",
+    "--cov-report=term-missing",
+    "--cov-report=html:htmlcov",
+    "--cov-report=xml:coverage.xml",
+    "--cov-fail-under=80"
+]
+markers = [
+    "unit: Unit tests (быстрые тесты без внешних зависимостей)",
+    "integration: Integration tests (тесты с внешними сервисами)",
+    "slow: Slow tests (долгие тесты, требующие много времени)",
+    "api: API endpoint tests",
+    "database: Database-related tests",
+    "ml: Machine Learning model tests",
+    "security: Security-related tests",
+    "performance: Performance and load tests",
+    "smoke: Smoke tests (быстрая проверка основного функционала)",
+    "regression: Regression tests",
+    "auth: Authentication and authorization tests"
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning", 
+    "ignore::UserWarning:sqlalchemy.*",
+    "ignore::RuntimeWarning"
+]
+asyncio_mode = "auto"
+env = [
+    "ENVIRONMENT = test",
+    "DEBUG = true",
+    "DATABASE_URL = postgresql://test:test@localhost:5432/test_db",
+    "REDIS_URL = redis://localhost:6379/0",
+    "S3_ENDPOINT_URL = http://localhost:9000",
+    "S3_ACCESS_KEY = test",
+    "S3_SECRET_KEY = test",
+    "JWT_SECRET_KEY = test-jwt-secret-key-for-testing",
+    "ENCRYPTION_KEY = test-encryption-key-256-bits-long"
+]
+omit = [
+    "*/tests/*",
+    "*/venv/*",
+    "*/virtualenv/*",
+    "*/__pycache__/*",
+    "*/migrations/*",
+    "*/alembic/*",
+    "*/node_modules/*",
+    "*/.*"
+]
+
+[tool.coverage.run]
+source = ["app"]
+omit = [
+    "*/tests/*",
+    "*/venv/*",
+    "*/virtualenv/*",
+    "*/__pycache__/*",
+    "*/migrations/*",
+    "*/alembic/*",
+    "*/node_modules/*",
+    "*/.*",
+    "*/conftest.py"
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod"
+]
+show_missing = true
+precision = 2
+
+[tool.coverage.html]
+directory = "htmlcov"

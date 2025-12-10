@@ -1,0 +1,153 @@
+# Development Docker Compose для Face Recognition Service
+version: '3.8'
+
+services:
+  # Основное приложение для разработки
+  face-recognition-api-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: face-recognition-api-dev
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+      - "5678:5678"  # Порт для отладки
+    environment:
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - DATABASE_URL=postgresql://face_user:${DEV_DB_PASSWORD}@postgres-dev:5432/face_recognition_dev_db
+      - REDIS_URL=redis://redis-dev:6379/0
+      - S3_ENDPOINT_URL=http://minio-dev:9000
+    depends_on:
+      postgres-dev:
+        condition: service_healthy
+      redis-dev:
+        condition: service_healthy
+      minio-dev:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/__pycache__
+      - /app/.venv  # Предотвращает конфликт локальных venv
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+    networks:
+      - face-recognition-dev-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # База данных PostgreSQL для разработки
+  postgres-dev:
+    image: postgres:15-alpine
+    container_name: face-recognition-postgres-dev
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=face_recognition_dev_db
+      - POSTGRES_USER=face_user
+      - POSTGRES_PASSWORD=${DEV_DB_PASSWORD}
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d
+    ports:
+      - "5433:5432"  # Другой порт для избежания конфликтов
+    networks:
+      - face-recognition-dev-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U face_user -d face_recognition_dev_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis для разработки
+  redis-dev:
+    image: redis:7-alpine
+    container_name: face-recognition-redis-dev
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_dev_data:/data
+    ports:
+      - "6380:6379"  # Другой порт для избежания конфликтов
+    networks:
+      - face-recognition-dev-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # MinIO для разработки
+  minio-dev:
+    image: minio/minio:latest
+    container_name: face-recognition-minio-dev
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${DEV_MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${DEV_MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_dev_data:/data
+    ports:
+      - "9001:9000"
+      - "9002:9001"  # Консоль на другом порту
+    networks:
+      - face-recognition-dev-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # pgAdmin для управления базой данных (опционально)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: face-recognition-pgadmin
+    restart: unless-stopped
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=${DEV_PGADMIN_EMAIL}
+      - PGADMIN_DEFAULT_PASSWORD=${DEV_PGADMIN_PASSWORD}
+      - PGADMIN_CONFIG_SERVER_MODE=False
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres-dev
+    networks:
+      - face-recognition-dev-network
+
+  # Redis Commander для управления Redis (опционально)
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: face-recognition-redis-commander
+    restart: unless-stopped
+    environment:
+      - REDIS_HOSTS=local:redis-dev:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis-dev
+    networks:
+      - face-recognition-dev-network
+
+volumes:
+  postgres_dev_data:
+    driver: local
+  redis_dev_data:
+    driver: local
+  minio_dev_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  face-recognition-dev-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16

@@ -1,0 +1,216 @@
+# Production Docker Compose для Face Recognition Service
+version: '3.8'
+
+services:
+  # Основное приложение
+  face-recognition-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: face-recognition-api
+    restart: unless-stopped
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - DEBUG=false
+      - DB_PASSWORD_FILE=/run/secrets/db_password
+      - REDIS_PASSWORD_FILE=/run/secrets/redis_password
+      - MINIO_ROOT_PASSWORD_FILE=/run/secrets/minio_root_password
+      - GRAFANA_PASSWORD_FILE=/run/secrets/grafana_password
+      - DATABASE_URL=postgresql://face_user:$(cat ${DB_PASSWORD_FILE})@postgres:5432/face_recognition_db
+      - REDIS_URL=redis://:$(cat ${REDIS_PASSWORD_FILE})@redis:6379/0
+      - S3_ENDPOINT_URL=http://minio:9000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+    networks:
+      - face-recognition-network
+    secrets:
+      - db_password
+      - redis_password
+      - minio_root_password
+      - grafana_password
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # База данных PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: face-recognition-postgres
+    restart: unless-stopped
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+    environment:
+      - POSTGRES_DB=face_recognition_db
+      - POSTGRES_USER=face_user
+      - POSTGRES_PASSWORD_FILE=/run/secrets/db_password
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    networks:
+      - face-recognition-network
+    secrets:
+      - db_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U face_user -d face_recognition_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis для кэширования
+  redis:
+    image: redis:7-alpine
+    container_name: face-recognition-redis
+    restart: unless-stopped
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+    command: redis-server --requirepass $(cat /run/secrets/redis_password) --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - face-recognition-network
+    secrets:
+      - redis_password
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "$(cat /run/secrets/redis_password)", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # MinIO для объектного хранилища
+  minio:
+    image: minio/minio:latest
+    container_name: face-recognition-minio
+    restart: unless-stopped
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD_FILE=/run/secrets/minio_root_password
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - face-recognition-network
+    secrets:
+      - minio_root_password
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # Nginx для reverse proxy и статических файлов
+  nginx:
+    image: nginx:alpine
+    container_name: face-recognition-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./uploads:/var/www/uploads:ro
+    depends_on:
+      - face-recognition-api
+    networks:
+      - face-recognition-network
+
+  # Prometheus для мониторинга
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: face-recognition-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - face-recognition-network
+
+  # Grafana для визуализации метрик
+  grafana:
+    image: grafana/grafana:latest
+    container_name: face-recognition-grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD_FILE=/run/secrets/grafana_password
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    ports:
+      - "3000:3000"
+    networks:
+      - face-recognition-network
+    secrets:
+      - grafana_password
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  minio_data:
+    driver: local
+
+networks:
+  face-recognition-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+  redis_password:
+    file: ./secrets/redis_password.txt
+  minio_root_password:
+    file: ./secrets/minio_root_password.txt
+  grafana_password:
+    file: ./secrets/grafana_password.txt

@@ -1,0 +1,169 @@
+# Test Docker Compose для Face Recognition Service
+# Специально для тестирования и evaluation
+version: '3.8'
+
+services:
+  # Основное приложение для тестирования
+  face-recognition-api-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: face-recognition-api-test
+    restart: "no"  # Не перезапускать в тестах
+    environment:
+      - ENVIRONMENT=test
+      - DEBUG=false
+      - DATABASE_URL=postgresql://face_user:${TEST_DB_PASSWORD}@postgres-test:5432/face_recognition_test_db
+      - REDIS_URL=redis://redis-test:6379/0
+      - S3_ENDPOINT_URL=http://minio-test:9000
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+      minio-test:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - ./test_data:/app/test_data
+      - ./evaluation_results:/app/evaluation_results
+      - /app/__pycache__
+    networks:
+      - face-recognition-test-network
+    command: >
+      sh -c "
+        echo 'Waiting for services...' &&
+        sleep 10 &&
+        echo 'Running tests...' &&
+        python -m pytest tests/ -v --tb=short &&
+        echo 'Running evaluation...' &&
+        python evaluate.py --synthetic --output /app/evaluation_results --generate-plots
+      "
+
+  # База данных PostgreSQL для тестов
+  postgres-test:
+    image: postgres:15-alpine
+    container_name: face-recognition-postgres-test
+    restart: "no"
+    environment:
+      - POSTGRES_DB=face_recognition_test_db
+      - POSTGRES_USER=face_user
+      - POSTGRES_PASSWORD=${TEST_DB_PASSWORD}
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d
+    ports:
+      - "5434:5432"  # Другой порт для тестов
+    networks:
+      - face-recognition-test-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U face_user -d face_recognition_test_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis для тестов
+  redis-test:
+    image: redis:7-alpine
+    container_name: face-recognition-redis-test
+    restart: "no"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_test_data:/data
+    ports:
+      - "6381:6379"  # Другой порт для тестов
+    networks:
+      - face-recognition-test-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # MinIO для тестов
+  minio-test:
+    image: minio/minio:latest
+    container_name: face-recognition-minio-test
+    restart: "no"
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${TEST_MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${TEST_MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_test_data:/data
+    ports:
+      - "9003:9000"
+      - "9004:9001"  # Консоль на другом порту
+    networks:
+      - face-recognition-test-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 10s
+      retries: 3
+
+  # Service для настройки тестового окружения
+  test-setup:
+    image: python:3.11-slim
+    container_name: face-recognition-test-setup
+    restart: "no"
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+      minio-test:
+        condition: service_healthy
+    environment:
+      - TEST_DB_PASSWORD=${TEST_DB_PASSWORD}
+      - TEST_MINIO_ROOT_USER=${TEST_MINIO_ROOT_USER}
+      - TEST_MINIO_ROOT_PASSWORD=${TEST_MINIO_ROOT_PASSWORD}
+    volumes:
+      - .:/app
+    networks:
+      - face-recognition-test-network
+    command: >
+      sh -c "
+        echo 'Setting up test environment...' &&
+        pip install -r requirements.txt &&
+        python setup_minio.py &&
+        echo 'Test environment ready'
+      "
+
+  # Service для выполнения тестов производительности
+  performance-test:
+    image: python:3.11-slim
+    container_name: face-recognition-performance-test
+    restart: "no"
+    depends_on:
+      - face-recognition-api-test
+    environment:
+      - API_URL=http://face-recognition-api-test:8000
+      - TEST_DURATION=60
+      - CONCURRENT_USERS=10
+    volumes:
+      - ./performance_tests:/app/performance_tests
+    networks:
+      - face-recognition-test-network
+    command: >
+      sh -c "
+        pip install locust &&
+        cd /app/performance_tests &&
+        locust -f locust_test.py --headless -u \$${CONCURRENT_USERS:-10} -t \$${TEST_DURATION:-60}s --host \$${API_URL}
+      "
+
+volumes:
+  postgres_test_data:
+    driver: local
+  redis_test_data:
+    driver: local
+  minio_test_data:
+    driver: local
+
+networks:
+  face-recognition-test-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.22.0.0/16
