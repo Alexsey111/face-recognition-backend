@@ -3,47 +3,84 @@
 Общие утилиты для всего приложения.
 """
 
-from .validators import *
-from .exceptions import *
-from .constants import *
-from .logger import *
-from .decorators import *
+# Exceptions
+from .exceptions import (
+    BaseAppException,
+    ValidationError,
+    ProcessingError,
+    DatabaseError,
+    NotFoundError,
+    UnauthorizedError,
+    ForbiddenError,
+    ConflictError,
+    EncryptionError,
+    StorageError,
+    CacheError,
+    MLServiceError,
+    WebhookError,
+    RateLimitError,
+    ConfigurationError,
+    ExternalServiceError,
+    BusinessLogicError,
+    QuotaExceededError,
+    MaintenanceModeError,
+    TimeoutError,
+    UnsupportedOperationError,
+    RetryExhaustedError,
+    DataIntegrityError,
+)
+
+# Logger
+from .logger import (
+    setup_logger,
+    get_logger,
+    LoggerMixin,
+    StructuredLogger,
+    structured_logger,
+    log_function_call,
+    configure_logging_for_environment,
+)
+
+# Aliases for backward compatibility
+AppException = BaseAppException
+
+# TODO Phase 3: Добавить validators, constants, decorators
+# from .validators import *
+# from .constants import *
+# from .decorators import *
 
 __all__ = [
-    # Validators
-    "validate_email",
-    "validate_username", 
-    "validate_password",
-    "validate_image_format",
-    "validate_image_size",
-    
     # Exceptions
+    "AppException",
+    "BaseAppException",
     "ValidationError",
     "ProcessingError",
     "DatabaseError",
     "NotFoundError",
     "UnauthorizedError",
+    "ForbiddenError",
+    "ConflictError",
     "EncryptionError",
     "StorageError",
     "CacheError",
     "MLServiceError",
     "WebhookError",
-    
-    # Constants
-    "IMAGE_FORMATS",
-    "DEFAULT_THRESHOLDS",
-    "API_LIMITS",
-    "FILE_LIMITS",
-    "CACHE_TTL",
-    
+    "RateLimitError",
+    "ConfigurationError",
+    "ExternalServiceError",
+    "BusinessLogicError",
+    "QuotaExceededError",
+    "MaintenanceModeError",
+    "TimeoutError",
+    "UnsupportedOperationError",
+    "RetryExhaustedError",
+    "DataIntegrityError",
     # Logger
-    "get_logger",
     "setup_logger",
-    
-    # Decorators
-    "validate_input",
-    "log_request",
-    "measure_time",
-    "retry_on_failure",
-    "cache_result"
+    "get_logger",
+    "LoggerMixin",
+    "StructuredLogger",
+    "structured_logger",
+    "log_function_call",
+    "configure_logging_for_environment",
 ]

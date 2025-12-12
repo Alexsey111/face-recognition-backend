@@ -1,22 +1,17 @@
-"""
-Точка входа для Face Recognition Service API.
-Создание FastAPI приложения и настройка всех компонентов.
-"""
+"""Точка входа для Face Recognition Service API."""
 
-from fastapi import FastAPI, Request
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 import uvicorn
 
+from . import __version__
 from .config import settings
-from .routes import (
-    health, 
-    upload, 
-    verify, 
-    liveness, 
-    reference, 
-    admin
-)
+from .routes import health
+
+# TODO Phase 3+: Добавить остальные роуты
+# from .routes import upload, verify, liveness, reference, admin
 from .middleware.auth import AuthMiddleware
 from .middleware.rate_limit import RateLimitMiddleware
 from .middleware.logging import LoggingMiddleware
@@ -24,111 +19,87 @@ from .middleware.error_handler import ErrorHandlerMiddleware
 from .utils.logger import setup_logger
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifecycle manager для приложения."""
+    # Startup
+    logger = setup_logger()
+    app.state.logger = logger
+    logger.info("🚀 Face Recognition Service starting up...")
+
+    # TODO Phase 3: Инициализация подключений
+    # await init_database()
+    # await init_redis()
+
+    logger.info("✅ Service started successfully")
+    yield
+
+    # Shutdown
+    logger.info("🛑 Service shutting down...")
+    # TODO Phase 3: Закрытие подключений
+    # await close_database()
+    # await close_redis()
+    logger.info("✅ Shutdown completed")
+
+
 def create_app() -> FastAPI:
-    """
-    Создание и настройка FastAPI приложения.
-    
-    Returns:
-        FastAPI: Настроенное приложение
-    """
-    # Создание приложения
+    """Создание и настройка FastAPI приложения."""
     app = FastAPI(
         title="Face Recognition Service",
         description="API для распознавания лиц, верификации и проверки живости",
-        version="1.0.0",
+        version=__version__,
         docs_url="/docs",
         redoc_url="/redoc",
-        openapi_url="/openapi.json"
+        openapi_url="/openapi.json",
+        lifespan=lifespan,
     )
 
-    # Настройка логгера
-    logger = setup_logger()
-    app.logger = logger
-
-    # Добавление middleware
-    setup_middleware(app)
-
-    # Регистрация роутов
-    register_routes(app)
-
-    # Настройка обработчиков
-    setup_handlers(app)
-
-    return app
-
-
-def setup_middleware(app: FastAPI) -> None:
-    """
-    Настройка middleware для приложения.
-    
-    Args:
-        app: FastAPI приложение
-    """
     # CORS middleware
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.CORS_ORIGINS,
+        allow_origins=settings.cors_origins_list,
         allow_credentials=True,
-        allow_methods=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
         allow_headers=["*"],
+        expose_headers=["X-Request-ID", "X-New-Access-Token"],
     )
 
-    # Custom middleware
+    # Custom middleware (порядок важен: снизу вверх)
     app.add_middleware(AuthMiddleware)
     app.add_middleware(RateLimitMiddleware)
     app.add_middleware(LoggingMiddleware)
     app.add_middleware(ErrorHandlerMiddleware)
 
+    # Root endpoint
+    @app.get("/")
+    async def root():
+        """Корневой endpoint."""
+        return {
+            "message": "Face Recognition Service API",
+            "version": __version__,
+            "docs": "/docs",
+            "health": "/health",
+            "status": "/status",
+        }
 
-def register_routes(app: FastAPI) -> None:
-    """
-    Регистрация всех роутов приложения.
-    
-    Args:
-        app: FastAPI приложение
-    """
-    # Health check endpoints
+    # Регистрация роутов
     app.include_router(health.router, prefix="/api/v1")
-    # Аллиасы без префикса для совместимости с внешними требованиями (/status, /health)
+
+    # Алиасы для совместимости
     app.add_api_route("/status", health.detailed_status_check, methods=["GET"])
     app.add_api_route("/health", health.health_check, methods=["GET"])
-    
-    # Core functionality
-    app.include_router(upload.router, prefix="/api/v1")
-    app.include_router(verify.router, prefix="/api/v1")
-    app.include_router(liveness.router, prefix="/api/v1")
-    app.include_router(reference.router, prefix="/api/v1")
-    
-    # Admin endpoints
-    app.include_router(admin.router, prefix="/api/v1")
+    app.add_api_route("/ready", health.readiness_check, methods=["GET"])
+    app.add_api_route("/live", health.liveness_check, methods=["GET"])
+    app.add_api_route("/metrics", health.get_metrics, methods=["GET"])
 
+    # TODO Phase 3+: Добавить остальные роуты
+    # app.include_router(upload.router, prefix="/api/v1")
+    # app.include_router(verify.router, prefix="/api/v1")
+    # app.include_router(liveness.router, prefix="/api/v1")
+    # app.include_router(reference.router, prefix="/api/v1")
+    # app.include_router(admin.router, prefix="/api/v1")
 
-def setup_handlers(app: FastAPI) -> None:
-    """
-    Настройка обработчиков событий приложения.
-    
-    Args:
-        app: FastAPI приложение
-    """
-    
-    @app.on_event("startup")
-    async def startup_event():
-        """Действия при запуске приложения."""
-        app.logger.info("Face Recognition Service starting up...")
-        
-        # Инициализация подключений к внешним сервисам
-        # (БД, Redis, S3, etc.)
-        
-        app.logger.info("Face Recognition Service started successfully")
-
-    @app.on_event("shutdown")
-    async def shutdown_event():
-        """Действия при остановке приложения."""
-        app.logger.info("Face Recognition Service shutting down...")
-        
-        # Закрытие подключений к внешним сервисам
-        
-        app.logger.info("Face Recognition Service shutdown completed")
+    return app
 
 
 # Создание экземпляра приложения
@@ -140,5 +111,5 @@ if __name__ == "__main__":
         host=settings.HOST,
         port=settings.PORT,
         reload=settings.DEBUG,
-        log_level=settings.LOG_LEVEL.lower()
+        log_level=settings.LOG_LEVEL.lower(),
     )

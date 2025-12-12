@@ -4,6 +4,8 @@
 """
 
 from typing import Dict, List, Tuple
+import logging
+from datetime import timezone
 
 # =============================================================================
 # IMAGE CONSTANTS
@@ -19,7 +21,7 @@ IMAGE_DIMENSIONS = {
     "max_width": 4096,
     "max_height": 4096,
     "optimal_width": 512,
-    "optimal_height": 512
+    "optimal_height": 512,
 }
 
 # Качество изображений
@@ -27,7 +29,7 @@ IMAGE_QUALITY = {
     "excellent_threshold": 0.9,
     "good_threshold": 0.7,
     "fair_threshold": 0.5,
-    "poor_threshold": 0.3
+    "poor_threshold": 0.3,
 }
 
 # =============================================================================
@@ -38,15 +40,15 @@ FILE_LIMITS = {
     "max_image_size": 10 * 1024 * 1024,  # 10MB
     "max_batch_size": 50,  # Максимум файлов в батче
     "max_filename_length": 255,
-    "allowed_extensions": [".jpg", ".jpeg", ".png", ".webp"]
+    "allowed_extensions": [".jpg", ".jpeg", ".png", ".webp"],
 }
 
 # MIME типы
 MIME_TYPES = {
     "image/jpeg": "JPEG",
-    "image/jpg": "JPEG", 
+    "image/jpg": "JPEG",
     "image/png": "PNG",
-    "image/webp": "WEBP"
+    "image/webp": "WEBP",
 }
 
 # =============================================================================
@@ -60,16 +62,16 @@ API_LIMITS = {
     "upload_requests_per_minute": 30,
     "verify_requests_per_minute": 100,
     "admin_requests_per_minute": 20,
-    "health_requests_per_minute": 1000
+    "health_requests_per_minute": 1000,
 }
 
 # Заголовки ответов
 RESPONSE_HEADERS = {
     "request_id": "X-Request-ID",
     "rate_limit_limit": "X-RateLimit-Limit",
-    "rate_limit_remaining": "X-RateLimit-Remaining", 
+    "rate_limit_remaining": "X-RateLimit-Remaining",
     "rate_limit_reset": "X-RateLimit-Reset",
-    "new_access_token": "X-New-Access-Token"
+    "new_access_token": "X-New-Access-Token",
 }
 
 # =============================================================================
@@ -86,7 +88,7 @@ CACHE_TTL = {
     "rate_limit": 60,  # 1 минута
     "user_stats": 300,  # 5 минут
     "system_config": 3600,  # 1 час
-    "maintenance_mode": 86400  # 24 часа
+    "maintenance_mode": 86400,  # 24 часа
 }
 
 # Ключи кэша
@@ -98,7 +100,7 @@ CACHE_KEYS = {
     "embedding": "embedding:{image_hash}",
     "rate_limit": "rate_limit:{identifier}",
     "maintenance_mode": "system:maintenance_mode",
-    "revoked_token": "revoked_token:{jti}"
+    "revoked_token": "revoked_token:{jti}",
 }
 
 # =============================================================================
@@ -106,17 +108,13 @@ CACHE_KEYS = {
 # =============================================================================
 
 # Размеры страниц для пагинации
-PAGINATION = {
-    "default_page_size": 20,
-    "max_page_size": 100,
-    "min_page_size": 1
-}
+PAGINATION = {"default_page_size": 20, "max_page_size": 100, "min_page_size": 1}
 
 # Время жизни сессий в БД
 SESSION_LIFETIME = {
     "verification_session": 1800,  # 30 минут
     "user_session": 86400,  # 24 часа
-    "api_key": 2592000  # 30 дней
+    "api_key": 2592000,  # 30 дней
 }
 
 # =============================================================================
@@ -129,19 +127,15 @@ ML_CONFIG = {
         "name": "face_recognition_model",
         "version": "v1.0",
         "input_size": 512,
-        "output_size": 512
+        "output_size": 512,
     },
     "liveness_model": {
-        "name": "liveness_detection_model", 
+        "name": "liveness_detection_model",
         "version": "v1.0",
         "input_size": 224,
-        "confidence_threshold": 0.8
+        "confidence_threshold": 0.8,
     },
-    "face_detection": {
-        "min_face_size": 30,
-        "scale_factor": 1.1,
-        "min_neighbors": 5
-    }
+    "face_detection": {"min_face_size": 30, "scale_factor": 1.1, "min_neighbors": 5},
 }
 
 # Пороговые значения для ML
@@ -151,19 +145,10 @@ THRESHOLDS = {
         "strict": 0.9,
         "lenient": 0.7,
         "min": 0.5,
-        "max": 0.95
+        "max": 0.95,
     },
-    "liveness": {
-        "default": 0.8,
-        "strict": 0.9,
-        "lenient": 0.7
-    },
-    "image_quality": {
-        "excellent": 0.9,
-        "good": 0.7,
-        "acceptable": 0.5,
-        "poor": 0.3
-    }
+    "liveness": {"default": 0.8, "strict": 0.9, "lenient": 0.7},
+    "image_quality": {"excellent": 0.9, "good": 0.7, "acceptable": 0.5, "poor": 0.3},
 }
 
 # =============================================================================
@@ -178,7 +163,7 @@ SECURITY = {
     "max_login_attempts": 5,
     "lockout_duration": 900,  # 15 минут
     "session_timeout": 1800,  # 30 минут
-    "api_key_length": 32
+    "api_key_length": 32,
 }
 
 # Алгоритмы шифрования
@@ -186,7 +171,7 @@ ENCRYPTION_ALGORITHMS = {
     "primary": "AES-256-GCM",
     "fallback": "AES-256-CBC",
     "hash": "SHA-256",
-    "hmac": "HMAC-SHA256"
+    "hmac": "HMAC-SHA256",
 }
 
 # =============================================================================
@@ -201,15 +186,14 @@ TIME_PERIODS = {
     "day": 86400,
     "week": 604800,
     "month": 2592000,  # 30 дней
-    "year": 31536000   # 365 дней
+    "year": 31536000,  # 365 дней
 }
 
 # Форматы времени
 TIME_FORMATS = {
-    "iso_format": "%Y-%m-%dT%H:%M:%S.%fZ",
-    "date_only": "%Y-%m-%d",
-    "time_only": "%H:%M:%S",
-    "datetime_display": "%Y-%m-%d %H:%M:%S"
+    "ISO8601": "%Y-%m-%dT%H:%M:%SZ",
+    "SIMPLE": "%Y-%m-%d %H:%M:%S",
+    "DETAILED": "%Y-%m-%d %H:%M:%S.%f",
 }
 
 # =============================================================================
@@ -219,9 +203,9 @@ TIME_FORMATS = {
 # Роли пользователей
 USER_ROLES = {
     "USER": "user",
-    "ADMIN": "admin", 
+    "ADMIN": "admin",
     "MODERATOR": "moderator",
-    "SERVICE": "service"
+    "SERVICE": "service",
 }
 
 # Статусы пользователей
@@ -230,7 +214,7 @@ USER_STATUS = {
     "INACTIVE": False,
     "PENDING": "pending",
     "SUSPENDED": "suspended",
-    "DELETED": "deleted"
+    "DELETED": "deleted",
 }
 
 # =============================================================================
@@ -240,9 +224,9 @@ USER_STATUS = {
 # Статусы системы
 SYSTEM_STATUS = {
     "HEALTHY": "healthy",
-    "DEGRADED": "degraded", 
+    "DEGRADED": "degraded",
     "UNHEALTHY": "unhealthy",
-    "MAINTENANCE": "maintenance"
+    "MAINTENANCE": "maintenance",
 }
 
 # Статусы сессий верификации
@@ -252,7 +236,7 @@ SESSION_STATUS = {
     "COMPLETED": "completed",
     "FAILED": "failed",
     "EXPIRED": "expired",
-    "CANCELLED": "cancelled"
+    "CANCELLED": "cancelled",
 }
 
 # Типы сессий
@@ -260,7 +244,7 @@ SESSION_TYPES = {
     "VERIFICATION": "verification",
     "LIVENESS": "liveness",
     "ENROLLMENT": "enrollment",
-    "IDENTIFICATION": "identification"
+    "IDENTIFICATION": "identification",
 }
 
 # =============================================================================
@@ -269,14 +253,10 @@ SESSION_TYPES = {
 
 # Правила валидации
 VALIDATION_RULES = {
-    "username": {
-        "min_length": 3,
-        "max_length": 50,
-        "pattern": r'^[a-zA-Z0-9_-]+$'
-    },
+    "username": {"min_length": 3, "max_length": 50, "pattern": r"^[a-zA-Z0-9_-]+$"},
     "email": {
         "max_length": 255,
-        "pattern": r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        "pattern": r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$",
     },
     "password": {
         "min_length": 8,
@@ -284,13 +264,9 @@ VALIDATION_RULES = {
         "require_uppercase": True,
         "require_lowercase": True,
         "require_digit": True,
-        "require_special": True
+        "require_special": True,
     },
-    "phone": {
-        "pattern": r'^\+?[\d\s\-()]+$',
-        "min_length": 10,
-        "max_length": 15
-    }
+    "phone": {"pattern": r"^\+?[\d\s\-()]+$", "min_length": 10, "max_length": 15},
 }
 
 # =============================================================================
@@ -299,11 +275,11 @@ VALIDATION_RULES = {
 
 # Уровни логирования
 LOG_LEVELS = {
-    "DEBUG": 10,
-    "INFO": 20,
-    "WARNING": 30,
-    "ERROR": 40,
-    "CRITICAL": 50
+    "DEBUG": logging.DEBUG,
+    "INFO": logging.INFO,
+    "WARNING": logging.WARNING,
+    "ERROR": logging.ERROR,
+    "CRITICAL": logging.CRITICAL,
 }
 
 # Категории событий для аудита
@@ -314,12 +290,12 @@ AUDIT_EVENTS = {
     "USER_UPDATE": "user.update",
     "USER_DELETE": "user.delete",
     "REFERENCE_CREATE": "reference.create",
-    "REFERENCE_UPDATE": "reference.update", 
+    "REFERENCE_UPDATE": "reference.update",
     "REFERENCE_DELETE": "reference.delete",
     "VERIFICATION_REQUEST": "verification.request",
     "VERIFICATION_RESULT": "verification.result",
     "SYSTEM_ERROR": "system.error",
-    "SECURITY_EVENT": "security.event"
+    "SECURITY_EVENT": "security.event",
 }
 
 # =============================================================================
@@ -332,7 +308,7 @@ SERVICE_TIMEOUTS = {
     "storage_service": 60,
     "webhook_service": 10,
     "database": 30,
-    "cache": 5
+    "cache": 5,
 }
 
 # Статусы ответов внешних сервисов
@@ -340,7 +316,7 @@ SERVICE_STATUS = {
     "SUCCESS": "success",
     "FAILED": "failed",
     "TIMEOUT": "timeout",
-    "UNAVAILABLE": "unavailable"
+    "UNAVAILABLE": "unavailable",
 }
 
 # =============================================================================
@@ -354,7 +330,7 @@ WEBHOOK_EVENTS = {
     "VERIFICATION_COMPLETED": "verification.completed",
     "LIVENESS_COMPLETED": "liveness.completed",
     "REFERENCE_CREATED": "reference.created",
-    "SYSTEM_ALERT": "system.alert"
+    "SYSTEM_ALERT": "system.alert",
 }
 
 # Стандартные webhook поля
@@ -363,7 +339,7 @@ WEBHOOK_FIELDS = {
     "event_id": "event_id",
     "timestamp": "timestamp",
     "user_id": "user_id",
-    "data": "data"
+    "data": "data",
 }
 
 # =============================================================================
@@ -373,7 +349,7 @@ WEBHOOK_FIELDS = {
 # Коды ошибок
 ERROR_CODES = {
     "VALIDATION_ERROR": "VALIDATION_ERROR",
-    "PROCESSING_ERROR": "PROCESSING_ERROR", 
+    "PROCESSING_ERROR": "PROCESSING_ERROR",
     "DATABASE_ERROR": "DATABASE_ERROR",
     "NOT_FOUND": "NOT_FOUND",
     "UNAUTHORIZED": "UNAUTHORIZED",
@@ -381,7 +357,7 @@ ERROR_CODES = {
     "CONFLICT": "CONFLICT",
     "RATE_LIMIT_EXCEEDED": "RATE_LIMIT_EXCEEDED",
     "INTERNAL_ERROR": "INTERNAL_ERROR",
-    "SERVICE_UNAVAILABLE": "SERVICE_UNAVAILABLE"
+    "SERVICE_UNAVAILABLE": "SERVICE_UNAVAILABLE",
 }
 
 # =============================================================================
@@ -391,11 +367,11 @@ ERROR_CODES = {
 # Метрики производительности
 PERFORMANCE_METRICS = {
     "response_time": "response_time",
-    "throughput": "throughput", 
+    "throughput": "throughput",
     "error_rate": "error_rate",
     "cpu_usage": "cpu_usage",
     "memory_usage": "memory_usage",
-    "disk_usage": "disk_usage"
+    "disk_usage": "disk_usage",
 }
 
 # =============================================================================
@@ -412,7 +388,7 @@ CONFIG_KEYS = {
     "ENCRYPTION_KEY": "ENCRYPTION_KEY",
     "CORS_ORIGINS": "CORS_ORIGINS",
     "DEBUG": "DEBUG",
-    "LOG_LEVEL": "LOG_LEVEL"
+    "LOG_LEVEL": "LOG_LEVEL",
 }
 
 # =============================================================================
@@ -427,7 +403,7 @@ FEATURE_FLAGS = {
     "enable_audit_logging": True,
     "enable_rate_limiting": True,
     "enable_cors": True,
-    "maintenance_mode": False
+    "maintenance_mode": False,
 }
 
 # =============================================================================
@@ -436,12 +412,12 @@ FEATURE_FLAGS = {
 
 # Регулярные выражения
 REGEX_PATTERNS = {
-    "email": r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
-    "username": r'^[a-zA-Z0-9_-]{3,50}$',
-    "uuid": r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
-    "phone": r'^\+?[\d\s\-()]+$',
-    "url": r'^https?://(?:[-\w.])+(?:\:[0-9]+)?(?:/(?:[\w/_.])*(?:\?(?:[\w&=%.])*)?(?:\#(?:[\w.])*)?)?$',
-    "image_data_url": r'^data:image/[a-z]+;base64,[a-zA-Z0-9+/=]+$'
+    "email": r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$",
+    "username": r"^[a-zA-Z0-9_-]{3,50}$",
+    "uuid": r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    "phone": r"^\+?[\d\s\-()]+$",
+    "url": r"^https?://(?:[-\w.])+(?:\:[0-9]+)?(?:/(?:[\w/_.])*(?:\?(?:[\w&=%.])*)?(?:\#(?:[\w.])*)?)?$",
+    "image_data_url": r"^data:image/[a-z]+;base64,[a-zA-Z0-9+/=]+$",
 }
 
 # =============================================================================
@@ -456,7 +432,7 @@ DEFAULT_VALUES = {
     "max_retries": 3,
     "retry_delay": 5,
     "quality_threshold": 0.8,
-    "confidence_threshold": 0.8
+    "confidence_threshold": 0.8,
 }
 
 # Минимальные числовые значения

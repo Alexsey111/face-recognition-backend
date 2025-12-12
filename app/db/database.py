@@ -23,54 +23,67 @@ Base = declarative_base()
 # Настройки подключения к БД
 DATABASE_URL = settings.DATABASE_URL
 
-# Создание sync engine для общих операций
+# Создание sync engine для общих операций (временно отключено для Phase 2)
 sync_database_url = settings.DATABASE_URL
-sync_engine = create_engine(
-    sync_database_url,
-    pool_pre_ping=True,
-    pool_recycle=300,
-    echo=settings.DEBUG,
-)
+# sync_engine = create_engine(
+#     sync_database_url,
+#     pool_pre_ping=True,
+#     pool_recycle=300,
+#     echo=settings.DEBUG,
+# )
+
+# Заглушка для Phase 2
+sync_engine = None
 
 # Создание async engine ОДИН раз при импорте
 async_database_url = sync_database_url.replace("postgresql://", "postgresql+asyncpg://")
 async_database_url = async_database_url.replace("sqlite:///", "sqlite+aiosqlite:///")
 
-async_engine = create_async_engine(
-    async_database_url,
-    pool_pre_ping=True,
-    pool_recycle=300,
-    echo=settings.DEBUG,
-    pool_size=10,
-    max_overflow=20,
-)
+# Временно отключено для Phase 2
+# async_engine = create_async_engine(
+#     async_database_url,
+#     pool_pre_ping=True,
+#     pool_recycle=300,
+#     echo=settings.DEBUG,
+#     pool_size=10,
+#     max_overflow=20,
+# )
 
-AsyncSessionMaker = sessionmaker(
-    async_engine,
-    class_=AsyncSession,
-    expire_on_commit=False
-)
+# Заглушка для Phase 2
+async_engine = None
 
-# Создание SessionLocal
-SessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=sync_engine
-)
+AsyncSessionMaker = None
+# AsyncSessionMaker = sessionmaker(
+#     async_engine,
+#     class_=AsyncSession,
+#     expire_on_commit=False
+# )
+
+# Создание SessionLocal (временно отключено)
+SessionLocal = None
+# SessionLocal = sessionmaker(
+#     autocommit=False,
+#     autoflush=False,
+#     bind=sync_engine
+# )
 
 
 def get_db() -> Generator[Session, None, None]:
     """
     Получение сессии базы данных.
-    
+
     Yields:
         Session: Сессия базы данных
     """
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    # Временно отключено для Phase 2
+    # db = SessionLocal()
+    # try:
+    #     yield db
+    # finally:
+    #     db.close()
+
+    # Заглушка для Phase 2
+    yield None
 
 
 # Асинхронная сессия для работы с async/await
@@ -78,11 +91,11 @@ class AsyncSessionLocal:
     """
     Асинхронная сессия базы данных.
     """
-    
+
     def __init__(self):
         self._session = None
         self._engine = None
-    
+
     async def __aenter__(self):
         """Асинхронный контекстный менеджер - вход."""
         # Создаем асинхронный engine
@@ -91,19 +104,17 @@ class AsyncSessionLocal:
             async_database_url,
             pool_pre_ping=True,
             pool_recycle=300,
-            echo=settings.DEBUG
+            echo=settings.DEBUG,
         )
-        
+
         # Создаем асинхронную сессию
         async_session = sessionmaker(
-            self._engine,
-            class_=AsyncSession,
-            expire_on_commit=False
+            self._engine, class_=AsyncSession, expire_on_commit=False
         )
-        
+
         self._session = async_session()
         return self._session
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Асинхронный контекстный менеджер - выход."""
         if self._session:
@@ -116,7 +127,7 @@ class AsyncSessionLocal:
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     """
     Получение асинхронной сессии базы данных.
-    
+
     Yields:
         AsyncSession: Асинхронная сессия базы данных
     """
@@ -124,14 +135,14 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
-# Создание таблиц при импорте (для development)
-@event.listens_for(sync_engine, "connect")
-def set_sqlite_pragma(dbapi_connection, connection_record):
-    """Настройка SQLite для production."""
-    if "sqlite" in str(sync_database_url):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+# Создание таблиц при импорте (для development) - временно отключено для Phase 2
+# @event.listens_for(sync_engine, "connect")
+# def set_sqlite_pragma(dbapi_connection, connection_record):
+#     """Настройка SQLite для production."""
+#     if "sqlite" in str(sync_database_url):
+#         cursor = dbapi_connection.cursor()
+#         cursor.execute("PRAGMA foreign_keys=ON")
+#         cursor.close()
 
 
 def create_tables():
@@ -173,7 +184,7 @@ async def check_database_connection() -> bool:
 def get_database_info() -> dict:
     """
     Получение информации о базе данных.
-    
+
     Returns:
         dict: Информация о БД
     """
@@ -181,19 +192,19 @@ def get_database_info() -> dict:
         # Получаем информацию из engine
         url = sync_engine.url
         driver = url.get_backend_name()
-        
+
         return {
             "url": str(url),
             "driver": driver,
-            "database": url.database if hasattr(url, 'database') else None,
-            "host": url.host if hasattr(url, 'host') else None,
-            "port": url.port if hasattr(url, 'port') else None,
-            "username": url.username if hasattr(url, 'username') else None,
+            "database": url.database if hasattr(url, "database") else None,
+            "host": url.host if hasattr(url, "host") else None,
+            "port": url.port if hasattr(url, "port") else None,
+            "username": url.username if hasattr(url, "username") else None,
             "pool_size": sync_engine.pool.size(),
             "checked_in": sync_engine.pool.checkedin(),
             "checked_out": sync_engine.pool.checkedout(),
             "overflow": sync_engine.pool.overflow(),
-            "invalid": sync_engine.pool.invalid()
+            "invalid": sync_engine.pool.invalid(),
         }
     except Exception as e:
         logger.error(f"Failed to get database info: {str(e)}")
@@ -204,43 +215,48 @@ class DatabaseManager:
     """
     Менеджер базы данных для управления подключениями.
     """
-    
+
     def __init__(self):
-        self.engine = sync_engine
-        self.SessionLocal = SessionLocal
-    
+        # Временно отключено для Phase 2
+        # self.engine = sync_engine
+        # self.SessionLocal = SessionLocal
+
+        # Заглушки для Phase 2
+        self.engine = None
+        self.SessionLocal = None
+
     async def health_check(self) -> bool:
         """
         Проверка здоровья базы данных.
-        
+
         Returns:
             bool: True если БД доступна
         """
         return await check_database_connection()
-    
+
     def get_session(self) -> Session:
         """
         Получение сессии БД.
-        
+
         Returns:
             Session: Сессия базы данных
         """
         return self.SessionLocal()
-    
+
     async def get_async_session(self):
         """
         Получение асинхронной сессии БД.
-        
+
         Yields:
             AsyncSession: Асинхронная сессия
         """
         async with AsyncSessionLocal() as session:
             yield session
-    
+
     def execute_raw_sql(self, sql: str, params: dict = None):
         """
         Выполнение сырого SQL запроса.
-        
+
         Args:
             sql: SQL запрос
             params: Параметры запроса
@@ -250,11 +266,11 @@ class DatabaseManager:
                 return connection.execute(sql, params)
             else:
                 return connection.execute(sql)
-    
+
     async def execute_raw_sql_async(self, sql: str, params: dict = None):
         """
         Выполнение сырого SQL запроса асинхронно.
-        
+
         Args:
             sql: SQL запрос
             params: Параметры запроса
@@ -266,7 +282,7 @@ class DatabaseManager:
                 result = await session.execute(sql)
             await session.commit()
             return result
-    
+
     def close_connections(self):
         """
         Закрытие всех подключений к базе данных.
