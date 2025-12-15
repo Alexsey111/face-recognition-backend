@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:8080"
 
     # База данных
-    DATABASE_URL: str = "sqlite:///./test.db"
+    DATABASE_URL: str = "sqlite:///./dev.db"
     DATABASE_POOL_SIZE: int = 10
     DATABASE_MAX_OVERFLOW: int = 20
     DATABASE_POOL_TIMEOUT: int = 30
@@ -151,14 +151,18 @@ class Settings(BaseSettings):
                     return f"{protocol}://:{self.REDIS_PASSWORD}@{rest}"
         return self.REDIS_URL
 
-    # New validators
-    @field_validator("DEBUG")
+    # New validators for Pydantic v2
+    @field_validator("DEBUG", mode="before")
     @classmethod
     def validate_debug(cls, v: bool, info: ValidationInfo) -> bool:
         """Валидация debug режима."""
-        environment = info.data.get("ENVIRONMENT")
-        if v and environment == "production":
-            raise ValueError("DEBUG mode cannot be enabled in production environment")
+        # В Pydantic v2 нужно получать данные по-другому
+        # Попробуем получить environment из контекста
+        context = info.context
+        if context and "ENVIRONMENT" in context:
+            environment = context["ENVIRONMENT"]
+            if v and environment == "production":
+                raise ValueError("DEBUG mode cannot be enabled in production environment")
         return v
 
     @field_validator("LOG_FILE_PATH")

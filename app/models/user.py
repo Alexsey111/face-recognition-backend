@@ -18,13 +18,9 @@ class UserModel(BaseModel):
         default_factory=lambda: str(uuid.uuid4()),
         description="Уникальный ID пользователя",
     )
-    username: str = Field(
-        ..., min_length=3, max_length=50, description="Имя пользователя"
-    )
     email: EmailStr = Field(..., description="Email адрес")
-    first_name: Optional[str] = Field(None, max_length=100, description="Имя")
-    last_name: Optional[str] = Field(None, max_length=100, description="Фамилия")
-    role: str = Field(default="user", description="Роль пользователя")
+    phone: Optional[str] = Field(None, description="Телефон")
+    full_name: Optional[str] = Field(None, max_length=255, description="Полное имя")
     is_active: bool = Field(default=True, description="Активен ли пользователь")
     is_verified: bool = Field(
         default=False, description="Верифицирован ли пользователь"
@@ -35,10 +31,7 @@ class UserModel(BaseModel):
     updated_at: Optional[datetime] = Field(
         None, description="Дата последнего обновления"
     )
-    last_login: Optional[datetime] = Field(None, description="Последний вход")
-    metadata: Optional[Dict[str, Any]] = Field(
-        None, description="Дополнительные метаданные"
-    )
+    last_verified_at: Optional[datetime] = Field(None, description="Последняя верификация")
 
     # Статистика использования
     total_uploads: int = Field(default=0, description="Общее количество загрузок")
@@ -55,69 +48,15 @@ class UserModel(BaseModel):
     class Config:
         orm_mode = True
 
-    @validator("username")
-    def validate_username(cls, v):
-        """Валидация имени пользователя."""
-        if not v.replace("_", "").replace("-", "").isalnum():
-            raise ValueError(
-                "Username can only contain letters, numbers, underscores, and hyphens"
-            )
-        return v.lower()
-
-    @validator("role")
-    def validate_role(cls, v):
-        """Валидация роли пользователя."""
-        allowed_roles = ["user", "admin", "moderator", "service"]
-        if v not in allowed_roles:
-            raise ValueError(f"Role must be one of: {allowed_roles}")
-        return v
-
 
 class UserCreate(BaseModel):
     """
     Модель для создания пользователя.
     """
 
-    username: str = Field(
-        ..., min_length=3, max_length=50, description="Имя пользователя"
-    )
     email: EmailStr = Field(..., description="Email адрес")
-    password: str = Field(..., min_length=8, description="Пароль")
-    first_name: Optional[str] = Field(None, max_length=100, description="Имя")
-    last_name: Optional[str] = Field(None, max_length=100, description="Фамилия")
-    role: str = Field(default="user", description="Роль пользователя")
-    metadata: Optional[Dict[str, Any]] = Field(
-        None, description="Дополнительные метаданные"
-    )
-
-    @validator("username")
-    def validate_username(cls, v):
-        """Валидация имени пользователя."""
-        return UserModel.validate_username(v)
-
-    @validator("password")
-    def validate_password(cls, v):
-        """Валидация пароля."""
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters long")
-
-        # Проверяем наличие разных типов символов
-        has_upper = any(c.isupper() for c in v)
-        has_lower = any(c.islower() for c in v)
-        has_digit = any(c.isdigit() for c in v)
-        has_special = any(c in "!@#$%^&*()_+-=[]{}|;:,.<>?" for c in v)
-
-        if not (has_upper and has_lower and has_digit):
-            raise ValueError(
-                "Password must contain at least one uppercase letter, one lowercase letter, and one digit"
-            )
-
-        return v
-
-    @validator("role")
-    def validate_role(cls, v):
-        """Валидация роли пользователя."""
-        return UserModel.validate_role(v)
+    phone: Optional[str] = Field(None, description="Телефон")
+    full_name: Optional[str] = Field(None, max_length=255, description="Полное имя")
 
 
 class UserUpdate(BaseModel):
@@ -126,14 +65,11 @@ class UserUpdate(BaseModel):
     """
 
     email: Optional[EmailStr] = Field(None, description="Email адрес")
-    first_name: Optional[str] = Field(None, max_length=100, description="Имя")
-    last_name: Optional[str] = Field(None, max_length=100, description="Фамилия")
+    phone: Optional[str] = Field(None, description="Телефон")
+    full_name: Optional[str] = Field(None, max_length=255, description="Полное имя")
     is_active: Optional[bool] = Field(None, description="Активен ли пользователь")
     is_verified: Optional[bool] = Field(
         None, description="Верифицирован ли пользователь"
-    )
-    metadata: Optional[Dict[str, Any]] = Field(
-        None, description="Дополнительные метаданные"
     )
     settings: Optional[Dict[str, Any]] = Field(
         None, description="Настройки пользователя"
@@ -145,7 +81,7 @@ class UserLogin(BaseModel):
     Модель для входа пользователя.
     """
 
-    username: str = Field(..., description="Имя пользователя или email")
+    email: EmailStr = Field(..., description="Email адрес")
     password: str = Field(..., description="Пароль")
     remember_me: bool = Field(default=False, description="Запомнить меня")
 
@@ -169,7 +105,20 @@ class UserPasswordChange(BaseModel):
     @validator("new_password")
     def validate_new_password(cls, v):
         """Валидация нового пароля."""
-        return UserCreate.validate_password(v)
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+
+        # Проверяем наличие разных типов символов
+        has_upper = any(c.isupper() for c in v)
+        has_lower = any(c.islower() for c in v)
+        has_digit = any(c.isdigit() for c in v)
+
+        if not (has_upper and has_lower and has_digit):
+            raise ValueError(
+                "Password must contain at least one uppercase letter, one lowercase letter, and one digit"
+            )
+
+        return v
 
 
 class UserPasswordReset(BaseModel):
@@ -199,7 +148,20 @@ class UserPasswordResetConfirm(BaseModel):
     @validator("new_password")
     def validate_new_password(cls, v):
         """Валидация нового пароля."""
-        return UserCreate.validate_password(v)
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+
+        # Проверяем наличие разных типов символов
+        has_upper = any(c.isupper() for c in v)
+        has_lower = any(c.islower() for c in v)
+        has_digit = any(c.isdigit() for c in v)
+
+        if not (has_upper and has_lower and has_digit):
+            raise ValueError(
+                "Password must contain at least one uppercase letter, one lowercase letter, and one digit"
+            )
+
+        return v
 
 
 class UserStats(BaseModel):
@@ -228,11 +190,9 @@ class UserProfile(BaseModel):
     """
 
     id: str = Field(..., description="ID пользователя")
-    username: str = Field(..., description="Имя пользователя")
-    first_name: Optional[str] = Field(None, description="Имя")
-    last_name: Optional[str] = Field(None, description="Фамилия")
-    avatar_url: Optional[str] = Field(None, description="URL аватара")
-    bio: Optional[str] = Field(None, max_length=500, description="Описание")
+    email: EmailStr = Field(..., description="Email адрес")
+    full_name: Optional[str] = Field(None, description="Полное имя")
+    phone: Optional[str] = Field(None, description="Телефон")
     created_at: datetime = Field(..., description="Дата регистрации")
     is_verified: bool = Field(..., description="Верифицирован ли пользователь")
     stats: Optional[UserStats] = Field(None, description="Статистика пользователя")

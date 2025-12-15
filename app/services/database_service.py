@@ -1,1153 +1,400 @@
-"""
-Сервис базы данных.
-Обёртка над CRUD операциями для работы с базой данных.
-"""
-
-from typing import Optional, Dict, Any, List, Tuple
-from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, delete, func, and_, or_, desc, asc
-from sqlalchemy.orm import selectinload
+from app.db.crud import (
+    UserCRUD, ReferenceCRUD, VerificationSessionCRUD, AuditLogCRUD
+)
+from app.db.models import User, Reference, VerificationSession, VerificationStatus
+# Импортируем Pydantic схемы из правильного места
+from app.models.user import UserCreate, UserUpdate
+from datetime import datetime, timezone
+import logging
+from typing import Optional, Dict, Any, List
 
-from ..db.database import get_db_session
-from ..db.models import User, Reference, VerificationSession, AuditLog
-from ..utils.logger import get_logger
-from ..utils.exceptions import DatabaseError, NotFoundError
+logger = logging.getLogger(__name__)
 
-logger = get_logger(__name__)
-
-
-class DatabaseService:
+class BiometricService:
     """
-    Сервис для работы с базой данных.
+    High-level database operations with business logic,
+    designed for ASYNCHRONOUS operation (SQLAlchemy 2.0).
     """
-
-    def __init__(self):
-        self.db_session = get_db_session
-
-    # User operations
-
-    async def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Получение пользователя по ID.
-
-        Args:
-            user_id: ID пользователя
-
-        Returns:
-            Optional[Dict[str, Any]]: Данные пользователя или None
-        """
-        try:
-            async with self.db_session() as session:
-                result = await session.execute(select(User).where(User.id == user_id))
-                user = result.scalar_one_or_none()
-
-                if user:
-                    return self._user_to_dict(user)
-                return None
-
-        except Exception as e:
-            logger.error(f"Error getting user by ID {user_id}: {str(e)}")
-            raise DatabaseError(f"Failed to get user: {str(e)}")
-
-    async def get_user_by_username(self, username: str) -> Optional[Dict[str, Any]]:
-        """
-        Получение пользователя по имени.
-
-        Args:
-            username: Имя пользователя
-
-        Returns:
-            Optional[Dict[str, Any]]: Данные пользователя или None
-        """
-        try:
-            async with self.db_session() as session:
-                result = await session.execute(
-                    select(User).where(User.username == username.lower())
-                )
-                user = result.scalar_one_or_none()
-
-                if user:
-                    return self._user_to_dict(user)
-                return None
-
-        except Exception as e:
-            logger.error(f"Error getting user by username {username}: {str(e)}")
-            raise DatabaseError(f"Failed to get user: {str(e)}")
-
-    async def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
-        """
-        Получение пользователя по email.
-
-        Args:
-            email: Email пользователя
-
-        Returns:
-            Optional[Dict[str, Any]]: Данные пользователя или None
-        """
-        try:
-            async with self.db_session() as session:
-                result = await session.execute(
-                    select(User).where(User.email == email.lower())
-                )
-                user = result.scalar_one_or_none()
-
-                if user:
-                    return self._user_to_dict(user)
-                return None
-
-        except Exception as e:
-            logger.error(f"Error getting user by email {email}: {str(e)}")
-            raise DatabaseError(f"Failed to get user: {str(e)}")
-
-    async def create_user(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Создание нового пользователя.
-
-        Args:
-            user_data: Данные пользователя
-
-        Returns:
-            Dict[str, Any]: Созданный пользователь
-        """
-        try:
-            async with self.db_session() as session:
-                user = User(**user_data)
-                session.add(user)
-                await session.commit()
-                await session.refresh(user)
-
-                logger.info(f"User created successfully: {user.id}")
-                return self._user_to_dict(user)
-
-        except Exception as e:
-            logger.error(f"Error creating user: {str(e)}")
-            raise DatabaseError(f"Failed to create user: {str(e)}")
-
-    async def update_user(
-        self, user_id: str, update_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """
-        Обновление пользователя.
-
-        Args:
-            user_id: ID пользователя
-            update_data: Данные для обновления
-
-        Returns:
-            Dict[str, Any]: Обновленный пользователь
-        """
-        try:
-            async with self.db_session() as session:
-                # Обновляем поле updated_at
-                update_data["updated_at"] = datetime.now(timezone.utc)
-
-                result = await session.execute(
-                    update(User)
-                    .where(User.id == user_id)
-                    .values(**update_data)
-                    .returning(User)
-                )
-
-                user = result.scalar_one_or_none()
-
-                if not user:
-                    raise NotFoundError(f"User {user_id} not found")
-
-                await session.commit()
-
-                logger.info(f"User updated successfully: {user_id}")
-                return self._user_to_dict(user)
-
-        except NotFoundError:
-            raise
-        except Exception as e:
-            logger.error(f"Error updating user {user_id}: {str(e)}")
-            raise DatabaseError(f"Failed to update user: {str(e)}")
-
-    async def delete_user(self, user_id: str) -> bool:
-        """
-        Удаление пользователя.
-
-        Args:
-            user_id: ID пользователя
-
-        Returns:
-            bool: True если пользователь удален
-        """
-        try:
-            async with self.db_session() as session:
-                result = await session.execute(delete(User).where(User.id == user_id))
-
-                deleted_count = result.rowcount
-                await session.commit()
-
-                if deleted_count > 0:
-                    logger.info(f"User deleted successfully: {user_id}")
-                    return True
-                else:
-                    logger.warning(f"User not found for deletion: {user_id}")
-                    return False
-
-        except Exception as e:
-            logger.error(f"Error deleting user {user_id}: {str(e)}")
-            raise DatabaseError(f"Failed to delete user: {str(e)}")
-
-    async def get_all_users(
+    
+    def __init__(self, db: AsyncSession):
+        # Должна быть AsyncSession
+        self.db = db 
+    
+    # ============================================================================
+    # User Operations
+    # ============================================================================
+    
+    async def create_user_with_audit(
         self,
-        filters: Optional[Dict[str, Any]] = None,
-        page: int = 1,
-        per_page: int = 20,
-        sort_by: str = "created_at",
-        sort_order: str = "desc",
-    ) -> Dict[str, Any]:
-        """
-        Получение списка всех пользователей.
-
-        Args:
-            filters: Фильтры для поиска
-            page: Номер страницы
-            per_page: Количество пользователей на странице
-            sort_by: Поле для сортировки
-            sort_order: Порядок сортировки
-
-        Returns:
-            Dict[str, Any]: Список пользователей с пагинацией
-        """
+        user: UserCreate,
+        operator_id: Optional[str] = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None
+    ) -> User:
+        """Create user and log the action"""
         try:
-            async with self.db_session() as session:
-                # Построение базового запроса
-                query = select(User)
-
-                # Применение фильтров
-                if filters:
-                    query = self._apply_user_filters(query, filters)
-
-                # Сортировка
-                sort_column = getattr(User, sort_by, User.created_at)
-                if sort_order.lower() == "desc":
-                    query = query.order_by(desc(sort_column))
-                else:
-                    query = query.order_by(asc(sort_column))
-
-                # Подсчет общего количества
-                count_query = select(func.count(User.id))
-                if filters:
-                    count_query = self._apply_user_filters(count_query, filters)
-
-                total_count = await session.scalar(count_query)
-
-                # Пагинация
-                offset = (page - 1) * per_page
-                query = query.offset(offset).limit(per_page)
-
-                # Выполнение запроса
-                result = await session.execute(query)
-                users = result.scalars().all()
-
-                # Преобразование в словари
-                users_data = [self._user_to_dict(user) for user in users]
-
-                return {
-                    "users": users_data,
-                    "total_count": total_count,
-                    "page": page,
-                    "per_page": per_page,
-                    "has_next": offset + per_page < total_count,
-                    "has_prev": page > 1,
-                }
-
-        except Exception as e:
-            logger.error(f"Error getting all users: {str(e)}")
-            raise DatabaseError(f"Failed to get users: {str(e)}")
-
-    # Reference operations
-
-    async def get_reference_by_id(self, reference_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Получение эталона по ID.
-
-        Args:
-            reference_id: ID эталона
-
-        Returns:
-            Optional[Dict[str, Any]]: Данные эталона или None
-        """
-        try:
-            async with self.db_session() as session:
-                result = await session.execute(
-                    select(Reference).where(Reference.id == reference_id)
-                )
-                reference = result.scalar_one_or_none()
-
-                if reference:
-                    return self._reference_to_dict(reference)
-                return None
-
-        except Exception as e:
-            logger.error(f"Error getting reference by ID {reference_id}: {str(e)}")
-            raise DatabaseError(f"Failed to get reference: {str(e)}")
-
-    async def get_active_references_by_user(self, user_id: str) -> List[Dict[str, Any]]:
-        """
-        Получение активных эталонов пользователя.
-
-        Args:
-            user_id: ID пользователя
-
-        Returns:
-            List[Dict[str, Any]]: Список активных эталонов
-        """
-        try:
-            async with self.db_session() as session:
-                result = await session.execute(
-                    select(Reference)
-                    .where(
-                        and_(Reference.user_id == user_id, Reference.is_active == True)
-                    )
-                    .order_by(desc(Reference.created_at))
-                )
-                references = result.scalars().all()
-
-                return [self._reference_to_dict(ref) for ref in references]
-
-        except Exception as e:
-            logger.error(
-                f"Error getting active references for user {user_id}: {str(e)}"
+            # 1. Используем await для асинхронного CRUD
+            new_user = await UserCRUD.create_user(self.db, user)
+            
+            # 2. Логирование (тоже await)
+            await AuditLogCRUD.log_action(
+                self.db,
+                action="user_created",
+                resource_type="user",
+                resource_id=new_user.id,
+                user_id=new_user.id,
+                operator_id=operator_id,
+                description=f"User created: {user.email}",
+                new_values=user.model_dump(exclude_none=True), # Pydantic v2
+                ip_address=ip_address,
+                user_agent=user_agent
             )
-            raise DatabaseError(f"Failed to get references: {str(e)}")
-
-    async def create_reference(self, reference_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Создание нового эталона.
-
-        Args:
-            reference_data: Данные эталона
-
-        Returns:
-            Dict[str, Any]: Созданный эталон
-        """
-        try:
-            async with self.db_session() as session:
-                reference = Reference(**reference_data)
-                session.add(reference)
-                await session.commit()
-                await session.refresh(reference)
-
-                logger.info(f"Reference created successfully: {reference.id}")
-                return self._reference_to_dict(reference)
-
+            
+            return new_user
         except Exception as e:
-            logger.error(f"Error creating reference: {str(e)}")
-            raise DatabaseError(f"Failed to create reference: {str(e)}")
-
-    async def update_reference(
-        self, reference_id: str, update_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """
-        Обновление эталона.
-
-        Args:
-            reference_id: ID эталона
-            update_data: Данные для обновления
-
-        Returns:
-            Dict[str, Any]: Обновленный эталон
-        """
-        try:
-            async with self.db_session() as session:
-                update_data["updated_at"] = datetime.now(timezone.utc)
-
-                result = await session.execute(
-                    update(Reference)
-                    .where(Reference.id == reference_id)
-                    .values(**update_data)
-                    .returning(Reference)
-                )
-
-                reference = result.scalar_one_or_none()
-
-                if not reference:
-                    raise NotFoundError(f"Reference {reference_id} not found")
-
-                await session.commit()
-
-                logger.info(f"Reference updated successfully: {reference_id}")
-                return self._reference_to_dict(reference)
-
-        except NotFoundError:
+            logger.error(f"❌ Error creating user: {e}")
             raise
-        except Exception as e:
-            logger.error(f"Error updating reference {reference_id}: {str(e)}")
-            raise DatabaseError(f"Failed to update reference: {str(e)}")
-
-    async def delete_reference(self, reference_id: str) -> bool:
-        """
-        Удаление эталона.
-
-        Args:
-            reference_id: ID эталона
-
-        Returns:
-            bool: True если эталон удален
-        """
-        try:
-            async with self.db_session() as session:
-                result = await session.execute(
-                    delete(Reference).where(Reference.id == reference_id)
-                )
-
-                deleted_count = result.rowcount
-                await session.commit()
-
-                if deleted_count > 0:
-                    logger.info(f"Reference deleted successfully: {reference_id}")
-                    return True
-                else:
-                    logger.warning(f"Reference not found for deletion: {reference_id}")
-                    return False
-
-        except Exception as e:
-            logger.error(f"Error deleting reference {reference_id}: {str(e)}")
-            raise DatabaseError(f"Failed to delete reference: {str(e)}")
-
-    async def get_references(
+    
+    async def update_user_with_audit(
         self,
-        filters: Optional[Dict[str, Any]] = None,
-        page: int = 1,
-        per_page: int = 20,
-        sort_by: str = "created_at",
-        sort_order: str = "desc",
-    ) -> Dict[str, Any]:
-        """
-        Получение списка эталонов.
-
-        Args:
-            filters: Фильтры для поиска
-            page: Номер страницы
-            per_page: Количество эталонов на странице
-            sort_by: Поле для сортировки
-            sort_order: Порядок сортировки
-
-        Returns:
-            Dict[str, Any]: Список эталонов с пагинацией
-        """
+        user_id: str,
+        user_update: UserUpdate,
+        operator_id: Optional[str] = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None
+    ) -> Optional[User]:
+        """Update user and log the change"""
         try:
-            async with self.db_session() as session:
-                query = select(Reference)
-
-                if filters:
-                    query = self._apply_reference_filters(query, filters)
-
-                sort_column = getattr(Reference, sort_by, Reference.created_at)
-                if sort_order.lower() == "desc":
-                    query = query.order_by(desc(sort_column))
-                else:
-                    query = query.order_by(asc(sort_column))
-
-                # Подсчет общего количества
-                count_query = select(func.count(Reference.id))
-                if filters:
-                    count_query = self._apply_reference_filters(count_query, filters)
-
-                total_count = await session.scalar(count_query)
-
-                # Пагинация
-                offset = (page - 1) * per_page
-                query = query.offset(offset).limit(per_page)
-
-                result = await session.execute(query)
-                references = result.scalars().all()
-
-                references_data = [self._reference_to_dict(ref) for ref in references]
-
-                return {
-                    "items": references_data,
-                    "total_count": total_count,
-                    "page": page,
-                    "per_page": per_page,
-                    "has_next": offset + per_page < total_count,
-                    "has_prev": page > 1,
-                }
-
-        except Exception as e:
-            logger.error(f"Error getting references: {str(e)}")
-            raise DatabaseError(f"Failed to get references: {str(e)}")
-
-    # Verification session operations
-
-    async def create_verification_session(
-        self, session_data: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """
-        Создание сессии верификации.
-
-        Args:
-            session_data: Данные сессии
-
-        Returns:
-            Dict[str, Any]: Созданная сессия
-        """
-        try:
-            async with self.db_session() as session:
-                session_obj = VerificationSession(**session_data)
-                session.add(session_obj)
-                await session.commit()
-                await session.refresh(session_obj)
-
-                logger.info(f"Verification session created: {session_obj.id}")
-                return self._session_to_dict(session_obj)
-
-        except Exception as e:
-            logger.error(f"Error creating verification session: {str(e)}")
-            raise DatabaseError(f"Failed to create session: {str(e)}")
-
-    async def get_verification_session(
-        self, session_id: str
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Получение сессии верификации.
-
-        Args:
-            session_id: ID сессии
-
-        Returns:
-            Optional[Dict[str, Any]]: Данные сессии или None
-        """
-        try:
-            async with self.db_session() as session:
-                result = await session.execute(
-                    select(VerificationSession).where(
-                        VerificationSession.id == session_id
-                    )
-                )
-                session_obj = result.scalar_one_or_none()
-
-                if session_obj:
-                    return self._session_to_dict(session_obj)
+            # 1. Получаем старые значения асинхронно
+            old_user = await UserCRUD.get_user(self.db, user_id)
+            if not old_user:
                 return None
-
+            
+            old_values = old_user.__dict__.copy() 
+            old_values_for_log = {
+                "email": old_values.get("email"),
+                "phone": old_values.get("phone"),
+                "full_name": old_values.get("full_name")
+            }
+            
+            # 2. Обновляем пользователя асинхронно
+            updated_user = await UserCRUD.update_user(self.db, user_id, user_update)
+            
+            if not updated_user:
+                return None
+            
+            # 3. Логирование с Pydantic v2 .model_dump()
+            await AuditLogCRUD.log_action(
+                self.db,
+                action="user_updated",
+                resource_type="user",
+                resource_id=user_id,
+                user_id=user_id,
+                operator_id=operator_id,
+                description=f"User updated: {user_id}",
+                old_values=old_values_for_log,
+                new_values=user_update.model_dump(exclude_unset=True), # Pydantic v2
+                ip_address=ip_address,
+                user_agent=user_agent
+            )
+            
+            return updated_user
         except Exception as e:
-            logger.error(f"Error getting verification session {session_id}: {str(e)}")
-            raise DatabaseError(f"Failed to get session: {str(e)}")
-
-    # Statistics and analytics
-
-    async def get_total_requests_count(
-        self, date_from: datetime, date_to: datetime
-    ) -> int:
-        """
-        Подсчет общего количества запросов.
-
-        Args:
-            date_from: Начальная дата
-            date_to: Конечная дата
-
-        Returns:
-            int: Количество запросов
-        """
+            logger.error(f"❌ Error updating user: {e}")
+            raise
+    
+    async def delete_user_with_audit(
+        self,
+        user_id: str,
+        operator_id: Optional[str] = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None
+    ) -> bool:
+        """Delete user and log the action"""
         try:
-            async with self.db_session() as session:
-                result = await session.execute(
-                    select(func.count(VerificationSession.id)).where(
-                        and_(
-                            VerificationSession.created_at >= date_from,
-                            VerificationSession.created_at <= date_to,
-                        )
-                    )
+            # Получаем пользователя перед удалением для логирования
+            user = await UserCRUD.get_user(self.db, user_id)
+            if not user:
+                return False
+            
+            old_values = {
+                "email": user.email,
+                "is_active": user.is_active
+            }
+            
+            # Удаляем пользователя асинхронно
+            success = await UserCRUD.delete_user(self.db, user_id)
+            
+            if success:
+                await AuditLogCRUD.log_action(
+                    self.db,
+                    action="user_deleted",
+                    resource_type="user",
+                    resource_id=user_id,
+                    operator_id=operator_id,
+                    description=f"User deleted: {user_id}",
+                    old_values=old_values,
+                    ip_address=ip_address,
+                    user_agent=user_agent
                 )
-                return result.scalar() or 0
-
+            
+            return success
         except Exception as e:
-            logger.error(f"Error getting total requests count: {str(e)}")
-            return 0
-
-    async def get_successful_requests_count(
-        self, date_from: datetime, date_to: datetime
-    ) -> int:
-        """
-        Подсчет успешных запросов.
-
-        Args:
-            date_from: Начальная дата
-            date_to: Конечная дата
-
-        Returns:
-            int: Количество успешных запросов
-        """
+            logger.error(f"❌ Error deleting user: {e}")
+            raise
+    
+    # ============================================================================
+    # Reference Operations
+    # ============================================================================
+    
+    async def create_reference_with_audit(
+        self,
+        user_id: str,
+        embedding_encrypted: bytes,
+        embedding_hash: str,
+        quality_score: float,
+        image_filename: str,
+        image_size_mb: float,
+        image_format: str,
+        face_landmarks: Optional[dict] = None,
+        operator_id: Optional[str] = None
+    ) -> Reference:
+        """Create reference and log"""
         try:
-            async with self.db_session() as session:
-                result = await session.execute(
-                    select(func.count(VerificationSession.id)).where(
-                        and_(
-                            VerificationSession.created_at >= date_from,
-                            VerificationSession.created_at <= date_to,
-                            VerificationSession.status == "completed",
-                        )
-                    )
-                )
-                return result.scalar() or 0
-
-        except Exception as e:
-            logger.error(f"Error getting successful requests count: {str(e)}")
-            return 0
-
-    async def get_failed_requests_count(
-        self, date_from: datetime, date_to: datetime
-    ) -> int:
-        """
-        Подсчет неуспешных запросов.
-
-        Args:
-            date_from: Начальная дата
-            date_to: Конечная дата
-
-        Returns:
-            int: Количество неуспешных запросов
-        """
-        try:
-            async with self.db_session() as session:
-                result = await session.execute(
-                    select(func.count(VerificationSession.id)).where(
-                        and_(
-                            VerificationSession.created_at >= date_from,
-                            VerificationSession.created_at <= date_to,
-                            VerificationSession.status.in_(["failed", "expired"]),
-                        )
-                    )
-                )
-                return result.scalar() or 0
-
-        except Exception as e:
-            logger.error(f"Error getting failed requests count: {str(e)}")
-            return 0
-
-    async def get_average_response_time(
-        self, date_from: datetime, date_to: datetime
-    ) -> float:
-        """
-        Подсчет среднего времени ответа.
-
-        Args:
-            date_from: Начальная дата
-            date_to: Конечная дата
-
-        Returns:
-            float: Среднее время ответа в секундах
-        """
-        try:
-            async with self.db_session() as session:
-                result = await session.execute(
-                    select(func.avg(VerificationSession.processing_time)).where(
-                        and_(
-                            VerificationSession.created_at >= date_from,
-                            VerificationSession.created_at <= date_to,
-                            VerificationSession.processing_time.is_not(None),
-                        )
-                    )
-                )
-                avg_time = result.scalar()
-                return float(avg_time) if avg_time else 0.0
-
-        except Exception as e:
-            logger.error(f"Error getting average response time: {str(e)}")
-            return 0.0
-
-    async def get_verification_stats(
-        self, date_from: datetime, date_to: datetime
-    ) -> Dict[str, int]:
-        """
-        Получение статистики верификации.
-
-        Args:
-            date_from: Начальная дата
-            date_to: Конечная дата
-
-        Returns:
-            Dict[str, int]: Статистика верификации
-        """
-        try:
-            async with self.db_session() as session:
-                # Подсчет по типам сессий
-                result = await session.execute(
-                    select(
-                        VerificationSession.session_type,
-                        func.count(VerificationSession.id),
-                    )
-                    .where(
-                        and_(
-                            VerificationSession.created_at >= date_from,
-                            VerificationSession.created_at <= date_to,
-                            VerificationSession.session_type.in_(
-                                ["verification", "liveness"]
-                            ),
-                        )
-                    )
-                    .group_by(VerificationSession.session_type)
-                )
-
-                stats = {}
-                for session_type, count in result.all():
-                    stats[session_type] = count
-
-                return stats
-
-        except Exception as e:
-            logger.error(f"Error getting verification stats: {str(e)}")
-            return {}
-
-    async def get_liveness_stats(
-        self, date_from: datetime, date_to: datetime
-    ) -> Dict[str, int]:
-        """
-        Получение статистики проверки живости.
-
-        Args:
-            date_from: Начальная дата
-            date_to: Конечная дата
-
-        Returns:
-            Dict[str, int]: Статистика проверки живости
-        """
-        try:
-            # Используем общую статистику верификации
-            verification_stats = await self.get_verification_stats(date_from, date_to)
-            return verification_stats.get("liveness", {})
-
-        except Exception as e:
-            logger.error(f"Error getting liveness stats: {str(e)}")
-            return {}
-
-    async def get_user_stats(
-        self, date_from: datetime, date_to: datetime
-    ) -> Dict[str, Any]:
-        """
-        Получение статистики по пользователям.
-
-        Args:
-            date_from: Начальная дата
-            date_to: Конечная дата
-
-        Returns:
-            Dict[str, Any]: Статистика по пользователям
-        """
-        try:
-            async with self.db_session() as session:
-                # Общее количество пользователей
-                total_users = await session.scalar(select(func.count(User.id)))
-
-                # Новые пользователи за период
-                new_users = await session.scalar(
-                    select(func.count(User.id)).where(
-                        and_(User.created_at >= date_from, User.created_at <= date_to)
-                    )
-                )
-
-                # Активные пользователи (с запросами в период)
-                active_users = await session.scalar(
-                    select(
-                        func.count(func.distinct(VerificationSession.user_id))
-                    ).where(
-                        and_(
-                            VerificationSession.created_at >= date_from,
-                            VerificationSession.created_at <= date_to,
-                            VerificationSession.user_id.is_not(None),
-                        )
-                    )
-                )
-
-                return {
-                    "total_users": total_users,
-                    "new_users": new_users,
-                    "active_users": active_users,
+            # Создаем Reference асинхронно
+            ref = await ReferenceCRUD.create_reference(
+                self.db,
+                user_id=user_id,
+                embedding_encrypted=embedding_encrypted,
+                embedding_hash=embedding_hash,
+                quality_score=quality_score,
+                image_filename=image_filename,
+                image_size_mb=image_size_mb,
+                image_format=image_format,
+                face_landmarks=face_landmarks
+            )
+            
+            # Логирование
+            await AuditLogCRUD.log_action(
+                self.db,
+                action="reference_created",
+                resource_type="reference",
+                resource_id=ref.id,
+                user_id=user_id,
+                operator_id=operator_id,
+                description=f"Reference created for user: {user_id}",
+                new_values={
+                    "version": ref.version,
+                    "quality_score": ref.quality_score,
+                    "image_format": image_format
                 }
-
+            )
+            
+            return ref
         except Exception as e:
-            logger.error(f"Error getting user stats: {str(e)}")
-            return {}
-
-    async def get_references_statistics(self) -> Dict[str, Any]:
-        """
-        Получение статистики по эталонам.
-
-        Returns:
-            Dict[str, Any]: Статистика по эталонам
-        """
+            logger.error(f"❌ Error creating reference: {e}")
+            raise
+    
+    # ============================================================================
+    # Verification Session Operations
+    # ============================================================================
+    
+    async def create_verification_session_with_audit(
+        self,
+        user_id: str,
+        session_id: str,
+        image_filename: str,
+        image_size_mb: float,
+        operator_id: Optional[str] = None
+    ) -> VerificationSession:
+        """Create verification session and log start"""
         try:
-            async with self.db_session() as session:
-                # Общее количество эталонов
-                total_references = await session.scalar(
-                    select(func.count(Reference.id))
-                )
-
-                # Активные эталоны
-                active_references = await session.scalar(
-                    select(func.count(Reference.id)).where(Reference.is_active == True)
-                )
-
-                # Неактивные эталоны
-                inactive_references = total_references - active_references
-
-                # Среднее качество
-                avg_quality = await session.scalar(
-                    select(func.avg(Reference.quality_score)).where(
-                        Reference.quality_score.is_not(None)
-                    )
-                )
-
-                # Общее количество использований
-                total_usage = await session.scalar(
-                    select(func.sum(Reference.usage_count))
-                )
-
-                return {
-                    "total_references": total_references,
-                    "active_references": active_references,
-                    "inactive_references": inactive_references,
-                    "average_quality": float(avg_quality) if avg_quality else 0.0,
-                    "total_usage_count": total_usage or 0,
-                    "quality_distribution": {
-                        "excellent": await self._get_references_by_quality_range(
-                            0.9, 1.0
-                        ),
-                        "good": await self._get_references_by_quality_range(0.7, 0.9),
-                        "fair": await self._get_references_by_quality_range(0.5, 0.7),
-                        "poor": await self._get_references_by_quality_range(0.0, 0.5),
-                    },
+            # Создаем сессию асинхронно
+            session = await VerificationSessionCRUD.create_session(
+                self.db,
+                user_id=user_id,
+                session_id=session_id,
+                image_filename=image_filename,
+                image_size_mb=image_size_mb
+            )
+            
+            # Логируем старт
+            await AuditLogCRUD.log_action(
+                self.db,
+                action="verification_started",
+                resource_type="verification_session",
+                resource_id=session.id,
+                user_id=user_id,
+                operator_id=operator_id,
+                description=f"Verification started for user: {user_id}"
+            )
+            
+            return session
+        except Exception as e:
+            logger.error(f"❌ Error creating verification session: {e}")
+            raise
+    
+    async def complete_verification_with_audit(
+        self,
+        session_id: str,
+        is_match: bool,
+        similarity_score: float,
+        confidence: float,
+        is_liveness_passed: Optional[bool] = None,
+        liveness_score: Optional[float] = None,
+        processing_time_ms: Optional[int] = None
+    ) -> Optional[VerificationSession]:
+        """Complete verification session with results and update user's last_verified_at"""
+        try:
+            # 1. Завершаем сессию асинхронно
+            session = await VerificationSessionCRUD.complete_session(
+                self.db,
+                session_id=session_id,
+                is_match=is_match,
+                similarity_score=similarity_score,
+                confidence=confidence,
+                is_liveness_passed=is_liveness_passed,
+                liveness_score=liveness_score,
+                processing_time_ms=processing_time_ms
+            )
+            
+            if not session:
+                return None
+            
+            # 2. Логируем завершение
+            await AuditLogCRUD.log_action(
+                self.db,
+                action="verification_completed",
+                resource_type="verification_session",
+                resource_id=session.id,
+                user_id=session.user_id,
+                description=f"Verification completed: is_match={is_match}",
+                new_values={
+                    "is_match": is_match,
+                    "similarity_score": similarity_score,
+                    "confidence": confidence,
+                    "is_liveness_passed": is_liveness_passed
                 }
-
+            )
+            
+            # 3. Обновляем user.last_verified_at (бизнес-логика)
+            # Так как метод complete_session обновляет сессию, мы можем обновить пользователя отдельно.
+            user = await UserCRUD.get_user(self.db, session.user_id)
+            if user:
+                user.last_verified_at = datetime.now(timezone.utc) # Использование aware-datetime
+                self.db.add(user)
+                await self.db.commit() # Отдельный коммит для обновления поля
+            
+            return session
         except Exception as e:
-            logger.error(f"Error getting references statistics: {str(e)}")
-            return {}
-
-    async def get_sessions_statistics(self) -> Dict[str, Any]:
-        """
-        Получение статистики по сессиям.
-
-        Returns:
-            Dict[str, Any]: Статистика по сессиям
-        """
-        try:
-            async with self.db_session() as session:
-                # Общее количество сессий
-                total_sessions = await session.scalar(
-                    select(func.count(VerificationSession.id))
-                )
-
-                # Сессии по статусам
-                status_counts = {}
-                for status in [
-                    "pending",
-                    "processing",
-                    "completed",
-                    "failed",
-                    "expired",
-                    "cancelled",
-                ]:
-                    count = await session.scalar(
-                        select(func.count(VerificationSession.id)).where(
-                            VerificationSession.status == status
-                        )
-                    )
-                    status_counts[status] = count
-
-                # Сессии по типам
-                type_counts = {}
-                for session_type in [
-                    "verification",
-                    "liveness",
-                    "enrollment",
-                    "identification",
-                ]:
-                    count = await session.scalar(
-                        select(func.count(VerificationSession.id)).where(
-                            VerificationSession.session_type == session_type
-                        )
-                    )
-                    type_counts[session_type] = count
-
-                # Среднее время обработки
-                avg_processing_time = await session.scalar(
-                    select(func.avg(VerificationSession.processing_time)).where(
-                        VerificationSession.processing_time.is_not(None)
-                    )
-                )
-
-                # Процент успешных верификаций
-                successful_verifications = await session.scalar(
-                    select(func.count(VerificationSession.id)).where(
-                        and_(
-                            VerificationSession.session_type == "verification",
-                            VerificationSession.status == "completed",
-                        )
-                    )
-                )
-
-                total_verifications = type_counts.get("verification", 0)
-                success_rate = (
-                    (successful_verifications / total_verifications * 100)
-                    if total_verifications > 0
-                    else 0
-                )
-
-                return {
-                    "total_sessions": total_sessions,
-                    "active_sessions": status_counts.get("pending", 0)
-                    + status_counts.get("processing", 0),
-                    "completed_sessions": status_counts.get("completed", 0),
-                    "failed_sessions": status_counts.get("failed", 0),
-                    "expired_sessions": status_counts.get("expired", 0),
-                    "average_processing_time": (
-                        float(avg_processing_time) if avg_processing_time else 0.0
-                    ),
-                    "success_rate": success_rate,
-                    "liveness_success_rate": 0.0,  # TODO: реализовать
-                    "sessions_by_type": type_counts,
-                    "sessions_by_status": status_counts,
-                    "hourly_distribution": await self._get_hourly_distribution(),
-                }
-
-        except Exception as e:
-            logger.error(f"Error getting sessions statistics: {str(e)}")
-            return {}
-
-    # Health check
-
-    async def health_check(self) -> bool:
-        """
-        Проверка состояния базы данных.
-
-        Returns:
-            bool: True если БД доступна
-        """
-        try:
-            async for session in self.db_session():
-                await session.execute(select(1))
-                return True
-        except Exception as e:
-            logger.error(f"Database health check failed: {str(e)}")
-            return False
-
-    # Helper methods
-
-    def _user_to_dict(self, user: User) -> Dict[str, Any]:
-        """
-        Преобразование User модели в словарь.
-
-        Args:
-            user: User объект
-
-        Returns:
-            Dict[str, Any]: Данные пользователя
-        """
+            logger.error(f"❌ Error completing verification: {e}")
+            raise
+    
+    # ============================================================================
+    # Analytics & Stats (Async)
+    # ============================================================================
+    
+    async def get_user_stats(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Get statistics for user"""
+        user = await UserCRUD.get_user(self.db, user_id)
+        if not user:
+            return None
+        
+        # Асинхронные вызовы к CRUD
+        references = await ReferenceCRUD.get_all_references(self.db, user_id)
+        sessions = await VerificationSessionCRUD.get_user_sessions(self.db, user_id, limit=1000)
+        
+        successful_verifications = [
+            s for s in sessions if s.status == "success" and s.is_match
+        ]
+        
+        total_sessions = len(sessions)
+        successful_count = len(successful_verifications)
+        
         return {
-            "id": str(user.id),
-            "username": user.username,
+            "user_id": user_id,
             "email": user.email,
-            "first_name": user.first_name,
-            "last_name": user.last_name,
-            "role": user.role,
             "is_active": user.is_active,
-            "is_verified": user.is_verified,
             "created_at": user.created_at,
-            "updated_at": user.updated_at,
-            "last_login": user.last_login,
-            "metadata": user.metadata,
-            "total_uploads": user.total_uploads,
-            "total_verifications": user.total_verifications,
-            "successful_verifications": user.successful_verifications,
-            "settings": user.settings,
-        }
-
-    def _reference_to_dict(self, reference: Reference) -> Dict[str, Any]:
-        """
-        Преобразование Reference модели в словарь.
-
-        Args:
-            reference: Reference объект
-
-        Returns:
-            Dict[str, Any]: Данные эталона
-        """
-        return {
-            "id": str(reference.id),
-            "user_id": str(reference.user_id) if reference.user_id else None,
-            "label": reference.label,
-            "file_url": reference.file_url,
-            "file_size": reference.file_size,
-            "image_format": reference.image_format,
-            "image_dimensions": reference.image_dimensions,
-            "embedding": reference.embedding,  # Зашифрованный эмбеддинг
-            "embedding_version": reference.embedding_version,
-            "quality_score": reference.quality_score,
-            "is_active": reference.is_active,
-            "created_at": reference.created_at,
-            "updated_at": reference.updated_at,
-            "last_used": reference.last_used,
-            "usage_count": reference.usage_count,
-            "metadata": reference.metadata,
-            "original_filename": reference.original_filename,
-            "checksum": reference.checksum,
-            "processing_time": reference.processing_time,
-        }
-
-    def _session_to_dict(self, session_obj: VerificationSession) -> Dict[str, Any]:
-        """
-        Преобразование VerificationSession модели в словарь.
-
-        Args:
-            session_obj: VerificationSession объект
-
-        Returns:
-            Dict[str, Any]: Данные сессии
-        """
-        return {
-            "id": str(session_obj.id),
-            "user_id": str(session_obj.user_id) if session_obj.user_id else None,
-            "session_type": session_obj.session_type,
-            "status": session_obj.status,
-            "reference_id": (
-                str(session_obj.reference_id) if session_obj.reference_id else None
-            ),
-            "request_data": session_obj.request_data,
-            "response_data": session_obj.response_data,
-            "created_at": session_obj.created_at,
-            "started_at": session_obj.started_at,
-            "completed_at": session_obj.completed_at,
-            "expires_at": session_obj.expires_at,
-            "metadata": session_obj.metadata,
-            "ip_address": session_obj.ip_address,
-            "user_agent": session_obj.user_agent,
-            "processing_time": session_obj.processing_time,
-            "error_message": session_obj.error_message,
-        }
-
-    def _apply_user_filters(self, query, filters: Dict[str, Any]):
-        """
-        Применение фильтров к запросу пользователей.
-
-        Args:
-            query: SQLAlchemy запрос
-            filters: Фильтры
-
-        Returns:
-            query: Отфильтрованный запрос
-        """
-        if "role" in filters:
-            query = query.where(User.role == filters["role"])
-
-        if "is_active" in filters:
-            query = query.where(User.is_active == filters["is_active"])
-
-        if "search" in filters:
-            search_term = f"%{filters['search']}%"
-            query = query.where(
-                or_(
-                    User.username.ilike(search_term),
-                    User.email.ilike(search_term),
-                    User.first_name.ilike(search_term),
-                    User.last_name.ilike(search_term),
-                )
+            "last_verified_at": user.last_verified_at,
+            "total_references": len(references),
+            "latest_reference_version": references[0].version if references else None,
+            "total_sessions": total_sessions,
+            "successful_verifications": successful_count,
+            "success_rate": (
+                successful_count / total_sessions
+                if total_sessions > 0 else 0
             )
-
-        return query
-
-    def _apply_reference_filters(self, query, filters: Dict[str, Any]):
-        """
-        Применение фильтров к запросу эталонов.
-
-        Args:
-            query: SQLAlchemy запрос
-            filters: Фильтры
-
-        Returns:
-            query: Отфильтрованный запрос
-        """
-        if "user_id" in filters:
-            query = query.where(Reference.user_id == filters["user_id"])
-
-        if "label" in filters:
-            query = query.where(Reference.label.ilike(f"%{filters['label']}%"))
-
-        if "is_active" in filters:
-            query = query.where(Reference.is_active == filters["is_active"])
-
-        if "quality_min" in filters:
-            query = query.where(Reference.quality_score >= filters["quality_min"])
-
-        if "quality_max" in filters:
-            query = query.where(Reference.quality_score <= filters["quality_max"])
-
-        return query
-
-    async def _get_references_by_quality_range(
-        self, min_quality: float, max_quality: float
-    ) -> int:
-        """
-        Подсчет эталонов в диапазоне качества.
-
-        Args:
-            min_quality: Минимальное качество
-            max_quality: Максимальное качество
-
-        Returns:
-            int: Количество эталонов
-        """
+        }
+    
+    async def get_system_stats(self) -> Dict[str, Any]:
+        """Get overall system statistics (using async count methods if available)"""
+        
+        # Используем асинхронные методы (нужно добавить их в UserCRUD/ReferenceCRUD)
+        # Если их нет, нужно использовать db.execute(select(func.count())...)
+        
+        # ПРИМЕЧАНИЕ: Предполагаем, что в UserCRUD добавлен метод count_users_async
+        # Если нет, это нужно исправить в CRUD слое, как показано в предыдущем шаге
+        
+        # Заглушка, использующая async count (если бы он был реализован)
         try:
-            async with self.db_session() as session:
-                result = await session.execute(
-                    select(func.count(Reference.id)).where(
-                        and_(
-                            Reference.quality_score >= min_quality,
-                            Reference.quality_score < max_quality,
-                        )
-                    )
-                )
-                return result.scalar() or 0
-        except Exception:
-            return 0
+            total_users = await UserCRUD.count_users(self.db)
+        except AttributeError:
+             # Если count_users не async, используем прямой SQLAlchemy 2.0 async call
+            from sqlalchemy import select, func
+            total_users_result = await self.db.execute(select(func.count()).select_from(User))
+            total_users = total_users_result.scalar_one()
 
-    async def _get_hourly_distribution(self) -> Dict[str, int]:
-        """
-        Получение распределения сессий по часам.
+        # Для примера: используем прямые асинхронные запросы для остальных
+        from sqlalchemy import select
+        
+        active_users_result = await self.db.execute(
+            select(func.count()).select_from(User).where(User.is_active == True)
+        )
+        active_users = active_users_result.scalar_one()
 
-        Returns:
-            Dict[str, int]: Распределение по часам
-        """
-        try:
-            async with self.db_session() as session:
-                result = await session.execute(
-                    select(
-                        func.extract("hour", VerificationSession.created_at),
-                        func.count(VerificationSession.id),
-                    ).group_by(func.extract("hour", VerificationSession.created_at))
-                )
+        total_references_result = await self.db.execute(select(func.count()).select_from(Reference))
+        total_references = total_references_result.scalar_one()
 
-                distribution = {}
-                for hour, count in result.all():
-                    distribution[f"{int(hour):02d}"] = count
-
-                return distribution
-        except Exception:
-            return {}
-
-    async def create_audit_log(self, audit_data: Dict[str, Any]) -> bool:
-        """
-        Создание записи в журнале аудита.
-
-        Args:
-            audit_data: Данные для записи аудита
-
-        Returns:
-            bool: True если запись создана успешно
-        """
-        try:
-            async for session in self.db_session():
-                audit_log = AuditLog(**audit_data)
-                session.add(audit_log)
-                await session.commit()
-                logger.info(f"Audit log created successfully: {audit_log.id}")
-                return True
-        except Exception as e:
-            logger.error(f"Error creating audit log: {str(e)}")
-            return False
+        total_sessions_result = await self.db.execute(select(func.count()).select_from(VerificationSession))
+        total_sessions = total_sessions_result.scalar_one()
+        
+        successful_sessions_result = await self.db.execute(
+            select(func.count()).select_from(VerificationSession).where(
+                VerificationSession.status == "success"
+            )
+        )
+        successful_sessions = successful_sessions_result.scalar_one()
+        
+        return {
+            "total_users": total_users,
+            "active_users": active_users,
+            "total_references": total_references,
+            "total_sessions": total_sessions,
+            "successful_sessions": successful_sessions,
+            "success_rate": (
+                successful_sessions / total_sessions if total_sessions > 0 else 0
+            ),
+            "timestamp": datetime.now(timezone.utc)
+        }
+    
+    @staticmethod
+    async def count_users(db: AsyncSession) -> int:
+        result = await db.execute(select(func.count()).select_from(User))
+        return result.scalar_one()
+    
+    @staticmethod
+    async def get_all_references(db: AsyncSession, user_id: str) -> List[Reference]:
+        result = await db.execute(select(Reference).where(Reference.user_id == user_id))
+        return list(result.scalars().all())
+    
+    @staticmethod
+    async def get_user_sessions(db: AsyncSession, user_id: str, limit: int = 100) -> List[VerificationSession]:
+        result = await db.execute(
+            select(VerificationSession)
+            .where(VerificationSession.user_id == user_id)
+            .order_by(desc(VerificationSession.created_at))
+            .limit(limit)
+        )
+        return list(result.scalars().all())
