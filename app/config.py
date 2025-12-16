@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import List, Optional
 from pydantic import field_validator, ValidationInfo
 from pydantic_settings import BaseSettings
+import os
+import secrets
 
 
 class Settings(BaseSettings):
@@ -15,15 +17,15 @@ class Settings(BaseSettings):
     """
 
     # Базовые настройки приложения
-    APP_NAME: str = "Face Recognition Service"
-    DEBUG: bool = False
+    APP_NAME: str = "Face Recognition API"
+    DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
     ENVIRONMENT: str = "production"
     HOST: str = "0.0.0.0"
     PORT: int = 8000
-    LOG_LEVEL: str = "INFO"
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 
     # CORS настройки
-    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:8080"
+    CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:8000")
 
     # База данных
     DATABASE_URL: str = "sqlite:///./dev.db"
@@ -56,14 +58,14 @@ class Settings(BaseSettings):
     ML_SERVICE_API_KEY: Optional[str] = None
 
     # JWT токены
-    JWT_SECRET_KEY: str = "your-super-secret-jwt-key-for-development"
+    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", secrets.token_urlsafe(32))
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
     # Шифрование
-    ENCRYPTION_KEY: str = "your-super-secret-encryption-key-for-development"
-    ENCRYPTION_ALGORITHM: str = "AES-256-GCM"
+    ENCRYPTION_KEY: str = os.getenv("ENCRYPTION_KEY", secrets.token_urlsafe(32))
+    ENCRYPTION_ALGORITHM: str = "fernet"
 
     # Rate limiting
     RATE_LIMIT_REQUESTS_PER_MINUTE: int = 60
@@ -72,6 +74,7 @@ class Settings(BaseSettings):
     # Безопасность
     MAX_UPLOAD_SIZE: int = 10 * 1024 * 1024  # 10MB
     ALLOWED_IMAGE_FORMATS: str = "JPEG,JPG,PNG,WEBP,HEIC,HEIF"
+    ALLOWED_EXTENSIONS: List[str] = [".jpg", ".jpeg", ".png", ".webp"]
     MIN_IMAGE_WIDTH: int = 224
     MIN_IMAGE_HEIGHT: int = 224
     MAX_IMAGE_WIDTH: int = 4096
@@ -122,6 +125,11 @@ class Settings(BaseSettings):
     def allowed_image_formats_list(self) -> List[str]:
         """Получение списка допустимых форматов изображений."""
         return [fmt.strip().upper() for fmt in self.ALLOWED_IMAGE_FORMATS.split(",")]
+
+    @property
+    def allowed_extensions_list(self) -> List[str]:
+        """Получение списка допустимых расширений файлов."""
+        return self.ALLOWED_EXTENSIONS
 
     @property
     def async_database_url(self) -> str:

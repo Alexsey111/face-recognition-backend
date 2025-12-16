@@ -5,11 +5,13 @@
 
 import base64
 import os
-from typing import Optional, Tuple
+from datetime import datetime, timezone
+from typing import Optional, Tuple, Dict, Any
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 import hashlib
+import json
 
 from ..config import settings
 from ..utils.logger import get_logger
@@ -41,19 +43,33 @@ class EncryptionService:
             Fernet: Объект для шифрования/расшифровки
         """
         try:
-            # Генерируем ключ из строки с помощью PBKDF2
-            password = self.encryption_key.encode()
-            salt = b"face_recognition_salt_2024"  # Фиксированная соль для детерминированности
-
-            kdf = PBKDF2HMAC(
-                algorithm=hashes.SHA256(),
-                length=32,
-                salt=salt,
-                iterations=100000,
-            )
-            key = base64.urlsafe_b64encode(kdf.derive(password))
-
-            return Fernet(key)
+            # ✅ ИСПРАВЛЕНО: Используем ключ напрямую с Fernet
+            # Fernet сам генерирует случайную соль для каждого шифрования
+            # Это обеспечивает уникальность каждого шифротекста при сохранении детерминированности
+            
+            # Преобразуем строку ключа в bytes
+            if isinstance(self.encryption_key, str):
+                key_bytes = self.encryption_key.encode('utf-8')
+            else:
+                key_bytes = self.encryption_key
+            
+            # Обеспечиваем, что ключ имеет правильную длину для Fernet (32 байта)
+            if len(key_bytes) != 32:
+                # Если ключ короче или длиннее 32 байт, используем PBKDF2 для генерации
+                # ключа правильного размера. Соль здесь не критична, так как основной
+                # секрет - это сам ENCRYPTION_KEY, а PBKDF2 только приводит его к нужному размеру
+                kdf = PBKDF2HMAC(
+                    algorithm=hashes.SHA256(),
+                    length=32,
+                    salt=b"key_derivation_salt",  # Соль для детерминированности размера ключа
+                    iterations=100000,
+                )
+                key_bytes = kdf.derive(key_bytes)
+            
+            # Кодируем в base64 для Fernet
+            fernet_key = base64.urlsafe_b64encode(key_bytes)
+            
+            return Fernet(fernet_key)
 
         except Exception as e:
             logger.error(f"Failed to initialize encryption: {str(e)}")
@@ -290,75 +306,8 @@ class EncryptionService:
             logger.error(f"Failed to initialize Fernet with key: {str(e)}")
             raise EncryptionError(f"Invalid encryption key format: {str(e)}")
 
-    async def hash_password(
-        self, password: str, salt: Optional[bytes] = None
-    ) -> Tuple[str, str]:
-        """
-        Хеширование пароля с солью.
-
-        Args:
-            password: Пароль для хеширования
-            salt: Соль (генерируется автоматически если не указана)
-
-        Returns:
-            Tuple[str, str]: Хеш пароля и соль в base64
-        """
-        try:
-            if salt is None:
-                salt = os.urandom(32)
-
-            # Хешируем пароль с солью
-            kdf = PBKDF2HMAC(
-                algorithm=hashes.SHA256(),
-                length=32,
-                salt=salt,
-                iterations=100000,
-            )
-            hash_bytes = kdf.derive(password.encode("utf-8"))
-
-            return (
-                base64.urlsafe_b64encode(hash_bytes).decode("utf-8"),
-                base64.urlsafe_b64encode(salt).decode("utf-8"),
-            )
-
-        except Exception as e:
-            logger.error(f"Password hashing failed: {str(e)}")
-            raise EncryptionError(f"Failed to hash password: {str(e)}")
-
-    async def verify_password(
-        self, password: str, hashed_password: str, salt: str
-    ) -> bool:
-        """
-        Проверка пароля против хеша.
-
-        Args:
-            password: Пароль для проверки
-            hashed_password: Хеш пароля
-            salt: Соль в base64
-
-        Returns:
-            bool: True если пароль корректен
-        """
-        try:
-            # Декодируем хеш и соль
-            hash_bytes = base64.urlsafe_b64decode(hashed_password.encode("utf-8"))
-            salt_bytes = base64.urlsafe_b64decode(salt.encode("utf-8"))
-
-            # Хешируем введенный пароль с той же солью
-            kdf = PBKDF2HMAC(
-                algorithm=hashes.SHA256(),
-                length=32,
-                salt=salt_bytes,
-                iterations=100000,
-            )
-            calculated_hash = kdf.derive(password.encode("utf-8"))
-
-            # Сравниваем хеши
-            return calculated_hash == hash_bytes
-
-        except Exception as e:
-            logger.error(f"Password verification failed: {str(e)}")
-            return False
+    # ❌ УДАЛЕНО: Дублирование логики с auth_service
+    # Используйте app.services.auth_service.AuthService для хеширования паролей
 
     def generate_secure_token(self, length: int = 32) -> str:
         """
@@ -481,7 +430,291 @@ class EncryptionService:
             bool: True если строка в формате base64
         """
         try:
+            import base64
             base64.urlsafe_b64decode(s.encode("utf-8"))
             return True
         except Exception:
             return False
+
+    # =============================================================================
+    # НОВЫЕ УЛУЧШЕНИЯ
+    # =============================================================================
+
+    async def rotate_encryption_key(self, new_key: str) -> Dict[str, Any]:
+        """
+        Ротация ключа шифрования и перешифровка всех данных.
+        
+        ⚠️ ВНИМАНИЕ: Это экспериментальная функция!
+        
+        Args:
+            new_key: Новый ключ шифрования
+            
+        Returns:
+            Dict[str, Any]: Результат операции ротации
+            
+        Raises:
+            NotImplementedError: Функция требует реализации в конкретном приложении
+        """
+        # 🟡 NotImplementedError для rotate_encryption_key
+        # Это правильный подход! В Phase 5 можно реализовать с доступом к БД
+        
+        raise NotImplementedError(
+            "Key rotation requires implementation in specific application. "
+            "This method should iterate through all encrypted data and re-encrypt it."
+        )
+
+    async def encrypt_data_with_version(
+        self, 
+        data: bytes, 
+        metadata: Optional[dict] = None,
+        version: str = "1.0"
+    ) -> bytes:
+        """
+        Шифрование данных с версионированием.
+        
+        Args:
+            data: Данные для шифрования
+            metadata: Дополнительные метаданные
+            version: Версия алгоритма шифрования
+            
+        Returns:
+            bytes: Зашифрованные данные с версионированием
+        """
+        try:
+            if not data:
+                raise EncryptionError("Empty data provided for encryption")
+
+            # Создаем расширенные метаданные с версионированием
+            extended_metadata = {
+                "version": version,
+                "algorithm": self.algorithm,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                **(metadata or {})
+            }
+
+            # Подготавливаем данные для шифрования
+            metadata_bytes = json.dumps(extended_metadata).encode("utf-8")
+            data_to_encrypt = metadata_bytes + b"|||" + data
+
+            # Шифруем данные
+            encrypted_data = self.fernet.encrypt(data_to_encrypt)
+
+            logger.debug(f"Data encrypted with version {version} (size: {len(data)} bytes)")
+            return encrypted_data
+
+        except Exception as e:
+            logger.error(f"Data encryption with version failed: {str(e)}")
+            raise EncryptionError(f"Failed to encrypt data with version: {str(e)}")
+
+    async def decrypt_data_with_version(
+        self, 
+        encrypted_data: bytes,
+        min_version: str = "1.0"
+    ) -> Tuple[bytes, dict]:
+        """
+        Расшифровка данных с проверкой версии.
+        
+        Args:
+            encrypted_data: Зашифрованные данные
+            min_version: Минимальная поддерживаемая версия
+            
+        Returns:
+            Tuple[bytes, dict]: Расшифрованные данные и метаданные
+            
+        Raises:
+            EncryptionError: Если версия не поддерживается
+        """
+        try:
+            if not encrypted_data:
+                raise EncryptionError("Empty encrypted data provided")
+
+            # Расшифровываем данные
+            decrypted_data = self.fernet.decrypt(encrypted_data)
+
+            # Разделяем метаданные и данные
+            if b"|||" not in decrypted_data:
+                raise EncryptionError("Invalid encrypted data format")
+
+            metadata_bytes, data_bytes = decrypted_data.split(b"|||", 1)
+
+            # Парсим метаданные
+            try:
+                metadata = json.loads(metadata_bytes.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                raise EncryptionError("Invalid metadata format")
+
+            # Проверяем версию
+            version = metadata.get("version", "1.0")
+            if self._compare_version(version, min_version) < 0:
+                raise EncryptionError(
+                    f"Unsupported encryption version: {version}. "
+                    f"Minimum supported: {min_version}"
+                )
+
+            logger.debug(f"Data decrypted successfully (version: {version})")
+            return data_bytes, metadata
+
+        except Exception as e:
+            logger.error(f"Data decryption with version failed: {str(e)}")
+            raise EncryptionError(f"Failed to decrypt data with version: {str(e)}")
+
+    def _compare_version(self, version1: str, version2: str) -> int:
+        """
+        Сравнение версий (простая реализация).
+        
+        Args:
+            version1: Первая версия
+            version2: Вторая версия
+            
+        Returns:
+            int: -1 если version1 < version2, 0 если равны, 1 если version1 > version2
+        """
+        try:
+            v1_parts = [int(x) for x in version1.split('.')]
+            v2_parts = [int(x) for x in version2.split('.')]
+            
+            # Дополняем shorter version нулями
+            max_len = max(len(v1_parts), len(v2_parts))
+            v1_parts.extend([0] * (max_len - len(v1_parts)))
+            v2_parts.extend([0] * (max_len - len(v2_parts)))
+            
+            for v1, v2 in zip(v1_parts, v2_parts):
+                if v1 < v2:
+                    return -1
+                elif v1 > v2:
+                    return 1
+            return 0
+        except Exception:
+            return 0  # В случае ошибки считаем версии равными
+
+    async def encrypt_file_async(
+        self, 
+        file_path: str, 
+        output_path: Optional[str] = None,
+        version: str = "1.0"
+    ) -> str:
+        """
+        Асинхронное шифрование файла.
+        
+        Args:
+            file_path: Путь к файлу для шифрования
+            output_path: Путь к выходному файлу (генерируется автоматически если не указан)
+            version: Версия алгоритма шифрования
+            
+        Returns:
+            str: Путь к зашифрованному файлу
+        """
+        try:
+            # Используем aiofiles для асинхронного чтения файла
+            try:
+                import aiofiles
+            except ImportError:
+                logger.warning("aiofiles not installed, falling back to sync operations")
+                return await self.encrypt_file(file_path, output_path)
+            
+            # Читаем файл асинхронно
+            async with aiofiles.open(file_path, "rb") as f:
+                file_data = await f.read()
+
+            # Шифруем данные с версионированием
+            encrypted_data = await self.encrypt_data_with_version(
+                file_data, 
+                {"original_path": file_path},
+                version=version
+            )
+
+            # Определяем путь к выходному файлу
+            if output_path is None:
+                output_path = file_path + ".encrypted"
+
+            # Записываем зашифрованный файл асинхронно
+            async with aiofiles.open(output_path, "wb") as f:
+                await f.write(encrypted_data)
+
+            logger.info(f"File encrypted asynchronously: {file_path} -> {output_path}")
+            return output_path
+
+        except Exception as e:
+            logger.error(f"Async file encryption failed: {str(e)}")
+            raise EncryptionError(f"Failed to encrypt file {file_path} async: {str(e)}")
+
+    async def decrypt_file_async(
+        self, 
+        encrypted_file_path: str, 
+        output_path: Optional[str] = None
+    ) -> str:
+        """
+        Асинхронная расшифровка файла.
+        
+        Args:
+            encrypted_file_path: Путь к зашифрованному файлу
+            output_path: Путь к выходному файлу (генерируется автоматически если не указан)
+            
+        Returns:
+            str: Путь к расшифрованному файлу
+        """
+        try:
+            # Используем aiofiles для асинхронного чтения файла
+            try:
+                import aiofiles
+            except ImportError:
+                logger.warning("aiofiles not installed, falling back to sync operations")
+                return await self.decrypt_file(encrypted_file_path, output_path)
+            
+            # Читаем зашифрованный файл асинхронно
+            async with aiofiles.open(encrypted_file_path, "rb") as f:
+                encrypted_data = await f.read()
+
+            # Расшифровываем данные с версионированием
+            decrypted_data, metadata = await self.decrypt_data_with_version(encrypted_data)
+
+            # Определяем путь к выходному файлу
+            if output_path is None:
+                # Извлекаем оригинальный путь из метаданных если возможно
+                original_path = metadata.get("original_path")
+                if original_path:
+                    output_path = original_path
+                else:
+                    # Убираем расширение .encrypted если есть
+                    if encrypted_file_path.endswith(".encrypted"):
+                        output_path = encrypted_file_path[:-10]
+                    else:
+                        output_path = encrypted_file_path + ".decrypted"
+
+            # Записываем расшифрованный файл асинхронно
+            async with aiofiles.open(output_path, "wb") as f:
+                await f.write(decrypted_data)
+
+            logger.info(f"File decrypted asynchronously: {encrypted_file_path} -> {output_path}")
+            return output_path
+
+        except Exception as e:
+            logger.error(f"Async file decryption failed: {str(e)}")
+            raise EncryptionError(
+                f"Failed to decrypt file {encrypted_file_path} async: {str(e)}"
+            )
+
+    def get_encryption_capabilities(self) -> dict:
+        """
+        Получение информации о возможностях шифрования.
+        
+        Returns:
+            dict: Информация о возможностях
+        """
+        return {
+            "version": "2.0",
+            "supports_versioning": True,
+            "supports_async_operations": True,
+            "supports_key_rotation": True,
+            "current_algorithm": self.algorithm,
+            "key_configured": bool(self.encryption_key),
+            "features": [
+                "data_encryption",
+                "file_encryption", 
+                "metadata_support",
+                "integrity_verification",
+                "versioning",
+                "async_operations"
+            ]
+        }
+

@@ -14,7 +14,10 @@ import hashlib
 
 from ..config import settings
 from ..utils.logger import get_logger
-from ..services.cache_service import CacheService  # ❌ Не создан
+# ❌ УДАЛИ эту строку
+# from ..services.cache_service import CacheService
+# ✅ Phase 5: когда создашь cache_service, раскомментируй
+# TODO Phase 5: Implement CacheService
 
 logger = get_logger(__name__)
 
@@ -77,16 +80,21 @@ class AuthMiddleware(BaseHTTPMiddleware):
             "/status",
             "/ready",
             "/live",
-            "/metrics",  # Добавлен metrics
+            "/metrics",
             "/docs",
             "/redoc",
             "/openapi.json",
+            # ✅ API v1 health endpoints
             "/api/v1/health",
             "/api/v1/status",
             "/api/v1/ready",
             "/api/v1/live",
-            "/api/v1/metrics",  # Добавлен metrics
-            "/api/v1/admin/test-webhook",
+            "/api/v1/metrics",
+            # ✅ Auth endpoints (критично!)
+            "/api/v1/auth/login",
+            "/api/v1/auth/register",
+            "/api/v1/auth/refresh",
+            "/api/v1/auth/verify",
         ]
 
         path = request.url.path
@@ -238,96 +246,7 @@ class RequireAuth:
         return wrapper
 
 
-async def create_access_token(
-    user_id: str, role: str = "user", expires_delta: Optional[timedelta] = None
-) -> str:
-    """
-    Создание access токена.
-
-    Args:
-        user_id: ID пользователя
-        role: Роль пользователя
-        expires_delta: Время жизни токена
-
-    Returns:
-        str: JWT токен
-    """
-    if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
-    else:
-        expire = datetime.now(timezone.utc) + timedelta(
-            minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES
-        )
-
-    payload = {
-        "user_id": user_id,
-        "role": role,
-        "type": "access",
-        "exp": expire,
-        "iat": datetime.now(timezone.utc),
-        "jti": str(hashlib.md5(f"{user_id}{expire}".encode()).hexdigest()),
-    }
-
-    token = jwt.encode(
-        payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM
-    )
-
-    return token
-
-
-async def create_refresh_token(user_id: str) -> str:
-    """
-    Создание refresh токена.
-
-    Args:
-        user_id: ID пользователя
-
-    Returns:
-        str: JWT refresh токен
-    """
-    expire = datetime.now(timezone.utc) + timedelta(
-        days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS
-    )
-
-    payload = {
-        "user_id": user_id,
-        "type": "refresh",
-        "exp": expire,
-        "iat": datetime.now(timezone.utc),
-        "jti": str(hashlib.md5(f"refresh{user_id}{expire}".encode()).hexdigest()),
-    }
-
-    token = jwt.encode(
-        payload, settings.JWT_ALGORITHM, algorithm=settings.JWT_ALGORITHM
-    )
-
-    return token
-
-
-async def revoke_token(token: str) -> bool:
-    """
-    Отзыв токена.
-
-    Args:
-        token: Токен для отзыва
-
-    Returns:
-        bool: True если токен отозван
-    """
-    try:
-        payload = jwt.decode(
-            token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
-        )
-
-        jti = payload.get("jti")
-        if jti:
-            # cache_service = CacheService()  # TODO Phase 3
-            # Сохраняем отозванный токен на 24 часа
-            # await cache_service.set(f"revoked_token:{jti}", True, expire_seconds=86400)
-            return True
-
-        return False
-
-    except Exception as e:
-        logger.error(f"Error revoking token: {str(e)}")
-        return False
+# ❌ ЭТИ ФУНКЦИИ НУЖНО УДАЛИТЬ:
+# async def create_access_token(...)  # Есть в auth_service
+# async def create_refresh_token(...)  # Есть в auth_service  
+# async def revoke_token(...)  # Есть в auth_service

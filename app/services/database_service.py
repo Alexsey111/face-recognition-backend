@@ -388,13 +388,3 @@ class BiometricService:
     async def get_all_references(db: AsyncSession, user_id: str) -> List[Reference]:
         result = await db.execute(select(Reference).where(Reference.user_id == user_id))
         return list(result.scalars().all())
-    
-    @staticmethod
-    async def get_user_sessions(db: AsyncSession, user_id: str, limit: int = 100) -> List[VerificationSession]:
-        result = await db.execute(
-            select(VerificationSession)
-            .where(VerificationSession.user_id == user_id)
-            .order_by(desc(VerificationSession.created_at))
-            .limit(limit)
-        )
-        return list(result.scalars().all())

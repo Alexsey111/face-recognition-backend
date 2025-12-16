@@ -3,8 +3,6 @@ API роуты.
 Все endpoints приложения.
 """
 
-# TODO Phase 2: Создать остальные роуты
-# from . import upload, verify, liveness, reference, admin
-from . import health
+from . import health, upload, verify, liveness, reference, admin
 
-__all__ = ["health"]
+__all__ = ["health", "upload", "verify", "liveness", "reference", "admin"]

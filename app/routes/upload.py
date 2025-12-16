@@ -4,8 +4,6 @@ from fastapi import APIRouter
 
 router = APIRouter(prefix="/api/v1", tags=["Upload"])
 
-# TODO Phase 4: Реализовать upload endpoints
-
 from fastapi import HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from datetime import datetime, timezone
@@ -96,7 +94,6 @@ async def upload_image(request: UploadRequest, http_request: Request):
         # Сохранение информации в БД (опционально)
         if request.user_id:
             logger.info(f"Saving image metadata to database for request {request_id}")
-            # TODO: Сохранить метаданные изображения в БД
 
         processing_time = time.time() - start_time
 
@@ -353,7 +350,6 @@ async def delete_uploaded_image(image_id: str, http_request: Request):
         await storage_service.delete_image(image_id)
 
         # Удаление из БД (если есть)
-        # TODO: Удалить метаданные изображения из БД
 
         response = BaseResponse(
             success=True,

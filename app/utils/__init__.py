@@ -44,7 +44,8 @@ from .logger import (
 # Aliases for backward compatibility
 AppException = BaseAppException
 
-# TODO Phase 3: Добавить validators, constants, decorators
+# Constants and validators are available but not imported by default
+# to avoid circular imports and keep imports explicit
 # from .validators import *
 # from .constants import *
 # from .decorators import *

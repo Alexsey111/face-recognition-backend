@@ -22,7 +22,13 @@ class CORSMiddleware:
     """
 
     def __init__(self):
-        self.allowed_origins = settings.CORS_ORIGINS
+        # Преобразуем строку CORS_ORIGINS в список
+        if isinstance(settings.CORS_ORIGINS, str):
+            self.allowed_origins = [
+                origin.strip() for origin in settings.CORS_ORIGINS.split(",")
+            ]
+        else:
+            self.allowed_origins = settings.CORS_ORIGINS
         self.allowed_methods = [
             "GET",
             "POST",

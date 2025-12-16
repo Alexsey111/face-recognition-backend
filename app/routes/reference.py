@@ -19,8 +19,6 @@ from ..utils.logger import get_logger
 from ..utils.exceptions import ValidationError, ProcessingError, NotFoundError
 
 router = APIRouter(prefix="/api/v1", tags=["Reference"])
-# TODO Phase 4: Реализовать reference endpoints
-
 logger = get_logger(__name__)
 
 

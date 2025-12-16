@@ -112,3 +112,23 @@ async def test_user(db_session: AsyncSession, test_user_data: UserCreate):
     # Используем CRUD для создания пользователя
     user = await UserCRUD.create_user(db_session, test_user_data)
     return user
+
+# 🟢 Добавь фикстуру для auth testing
+@pytest.fixture
+async def authenticated_client(client, test_user):
+    """Client with authentication headers"""
+    from app.services.auth_service import AuthService
+    auth_service = AuthService()
+    tokens = await auth_service.create_user_session(test_user.id)
+    client.headers = {
+        "Authorization": f"Bearer {tokens['access_token']}"
+    }
+    return client
+
+# 🟢 Добавь cleanup fixture
+@pytest.fixture(autouse=True)
+async def cleanup_database(db_session):
+    """Clean up database after each test"""
+    yield
+    # Rollback any changes
+    await db_session.rollback()

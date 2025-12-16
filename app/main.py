@@ -10,12 +10,11 @@ from . import __version__
 from .config import settings
 from .routes import health
 
-# TODO Phase 3+: Добавить остальные роуты
-# from .routes import upload, verify, liveness, reference, admin
+from .routes import health, upload, verify, liveness, reference, admin
 from .middleware.auth import AuthMiddleware
-from .middleware.rate_limit import RateLimitMiddleware
-from .middleware.logging import LoggingMiddleware
-from .middleware.error_handler import ErrorHandlerMiddleware
+# Phase 5: Add these when fully implemented
+# from .middleware.rate_limit import RateLimitMiddleware
+# from .middleware.logging import LoggingMiddleware
 from .utils.logger import setup_logger
 
 
@@ -27,7 +26,7 @@ async def lifespan(app: FastAPI):
     app.state.logger = logger
     logger.info("🚀 Face Recognition Service starting up...")
 
-    # TODO Phase 3: Инициализация подключений
+    # Инициализация подключений (если нужно)
     # await init_database()
     # await init_redis()
 
@@ -36,7 +35,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("🛑 Service shutting down...")
-    # TODO Phase 3: Закрытие подключений
+    # Закрытие подключений (если нужно)
     # await close_database()
     # await close_redis()
     logger.info("✅ Shutdown completed")
@@ -65,10 +64,10 @@ def create_app() -> FastAPI:
     )
 
     # Custom middleware (порядок важен: снизу вверх)
+    # ✅ Только существующие middleware
     app.add_middleware(AuthMiddleware)
-    app.add_middleware(RateLimitMiddleware)
-    app.add_middleware(LoggingMiddleware)
-    app.add_middleware(ErrorHandlerMiddleware)
+    # Phase 5: Uncomment when ready
+    # app.add_middleware(RateLimitMiddleware)
 
     # Root endpoint
     @app.get("/")
@@ -92,12 +91,12 @@ def create_app() -> FastAPI:
     app.add_api_route("/live", health.liveness_check, methods=["GET"])
     app.add_api_route("/metrics", health.get_metrics, methods=["GET"])
 
-    # TODO Phase 3+: Добавить остальные роуты
-    # app.include_router(upload.router, prefix="/api/v1")
-    # app.include_router(verify.router, prefix="/api/v1")
-    # app.include_router(liveness.router, prefix="/api/v1")
-    # app.include_router(reference.router, prefix="/api/v1")
-    # app.include_router(admin.router, prefix="/api/v1")
+    # Основные роуты
+    app.include_router(upload.router, prefix="/api/v1")
+    app.include_router(verify.router, prefix="/api/v1")
+    app.include_router(liveness.router, prefix="/api/v1")
+    app.include_router(reference.router, prefix="/api/v1")
+    app.include_router(admin.router, prefix="/api/v1")
 
     return app
 

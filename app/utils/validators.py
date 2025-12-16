@@ -9,16 +9,16 @@ from typing import Optional, List, Dict, Any, Union
 from datetime import datetime, date
 import uuid
 import hashlib
+import html
 
-from .constants import IMAGE_FORMATS, FILE_LIMITS
+from .constants import (
+    IMAGE_FORMATS, FILE_LIMITS, MAGIC_NUMBERS, SIMILARITY_LIMITS, 
+    RATE_LIMITS, PASSWORD_REGEX, EMAIL_REGEX, USERNAME_REGEX
+)
 from .exceptions import ValidationError
 
-# Регулярные выражения для валидации
-EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
-USERNAME_REGEX = re.compile(r"^[a-zA-Z0-9_-]{3,50}$")
-PASSWORD_REGEX = re.compile(
-    r"^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$"
-)
+# 🟡 Регулярные выражения для валидации теперь импортируются из constants.py
+# PASSWORD_REGEX определен в constants.py с расширенными спецсимволами
 
 
 def validate_email(email: str) -> bool:
@@ -501,40 +501,365 @@ def validate_coordinates(lat: float, lng: float) -> bool:
     return True
 
 
+# =============================================================================
+# НОВЫЕ ФУНКЦИИ БЕЗОПАСНОСТИ
+# =============================================================================
+
+def sanitize_html(text: str) -> str:
+    """
+    Защита от XSS - удаление HTML тегов и экранирование специальных символов.
+    
+    Args:
+        text: Текст для санитизации
+        
+    Returns:
+        str: Санитизированный текст
+    """
+    if not text or not isinstance(text, str):
+        return ""
+    
+    # Удаляем HTML теги
+    text = re.sub(r"<[^>]+>", "", text)
+    
+    # Экранируем специальные HTML символы
+    return html.escape(text, quote=True)
+
+
+def validate_sql_safe(text: str) -> bool:
+    """
+    Защита от SQL injection - проверка на опасные паттерны.
+    
+    Args:
+        text: Текст для проверки
+        
+    Returns:
+        bool: True если текст безопасен
+        
+    Raises:
+        ValidationError: Если обнаружены потенциально опасные паттерны
+    """
+    if not text or not isinstance(text, str):
+        return True
+    
+    # Паттерны SQL injection
+    dangerous_patterns = [
+        r"(\bOR\b|\bAND\b).*=.*",  # OR 1=1, AND password=...
+        r";\s*(DROP|DELETE|UPDATE|INSERT|SELECT|CREATE|ALTER)",  # ; DROP TABLE
+        r"--",  # SQL комментарии
+        r"/\*.*\*/",  # Блочные комментарии
+        r"UNION\s+SELECT",  # UNION атаки
+        r"EXEC(UTE)?\s+",  # EXECUTE команды
+        r"INFORMATION_SCHEMA",  # Попытки доступа к метаданным
+        r"XP_CMDSHELL",  # Опасные системные процедуры
+    ]
+    
+    text_upper = text.upper()
+    for pattern in dangerous_patterns:
+        if re.search(pattern, text_upper, re.IGNORECASE):
+            raise ValidationError("Potentially dangerous input detected")
+    
+    return True
+
+
+def validate_embedding(embedding: List[float]) -> bool:
+    """
+    Валидация вектора эмбеддинга для ML моделей.
+    
+    Args:
+        embedding: Вектор эмбеддинга
+        
+    Returns:
+        bool: True если эмбеддинг валиден
+        
+    Raises:
+        ValidationError: Если эмбеддинг невалиден
+    """
+    if not isinstance(embedding, (list, tuple)):
+        raise ValidationError("Embedding must be a list or tuple")
+    
+    if not embedding:
+        raise ValidationError("Embedding cannot be empty")
+    
+    # Проверяем размер
+    embedding_size = len(embedding)
+    if embedding_size < FILE_LIMITS["min_embedding_size"]:
+        raise ValidationError(
+            f"Embedding too small: {embedding_size}. "
+            f"Minimum required: {FILE_LIMITS['min_embedding_size']}"
+        )
+    
+    if embedding_size > FILE_LIMITS["max_embedding_size"]:
+        raise ValidationError(
+            f"Embedding too large: {embedding_size}. "
+            f"Maximum allowed: {FILE_LIMITS['max_embedding_size']}"
+        )
+    
+    # Проверяем, что все значения - числа
+    if not all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in embedding):
+        raise ValidationError("Embedding must contain only numeric values")
+    
+    # Проверяем на NaN и бесконечность
+    import math
+    for i, value in enumerate(embedding):
+        if math.isnan(value) or math.isinf(value):
+            raise ValidationError(f"Embedding contains invalid value at index {i}")
+    
+    return True
+
+
+def validate_similarity_threshold(threshold: float) -> bool:
+    """
+    Валидация порога схожести для сравнения эмбеддингов.
+    
+    Args:
+        threshold: Порог схожести (0.0 - 1.0)
+        
+    Returns:
+        bool: True если порог валиден
+        
+    Raises:
+        ValidationError: Если порог вне допустимых пределов
+    """
+    if not isinstance(threshold, (int, float)) or isinstance(threshold, bool):
+        raise ValidationError("Threshold must be a number")
+    
+    min_threshold = SIMILARITY_LIMITS["min_threshold"]
+    max_threshold = SIMILARITY_LIMITS["max_threshold"]
+    
+    if not (min_threshold <= threshold <= max_threshold):
+        raise ValidationError(
+            f"Threshold must be between {min_threshold} and {max_threshold}"
+        )
+    
+    return True
+
+
+def validate_file_upload(filename: str, content_type: str, file_size: int) -> bool:
+    """
+    Комплексная валидация загружаемого файла.
+    
+    Args:
+        filename: Имя файла
+        content_type: MIME тип файла
+        file_size: Размер файла в байтах
+        
+    Returns:
+        bool: True если файл валиден
+        
+    Raises:
+        ValidationError: Если файл невалиден
+    """
+    if not filename or not isinstance(filename, str):
+        raise ValidationError("Filename is required")
+    
+    if not content_type or not isinstance(content_type, str):
+        raise ValidationError("Content type is required")
+    
+    if not isinstance(file_size, int) or file_size <= 0:
+        raise ValidationError("File size must be a positive integer")
+    
+    # Валидация размера файла
+    if file_size > FILE_LIMITS["max_image_size"]:
+        size_mb = file_size / (1024 * 1024)
+        max_size_mb = FILE_LIMITS["max_image_size"] / (1024 * 1024)
+        raise ValidationError(
+            f"File too large: {size_mb:.2f}MB. "
+            f"Maximum allowed: {max_size_mb:.2f}MB"
+        )
+    
+    # Валидация имени файла
+    if len(filename) > FILE_LIMITS["max_filename_length"]:
+        raise ValidationError(
+            f"Filename too long: {len(filename)} characters. "
+            f"Maximum allowed: {FILE_LIMITS['max_filename_length']}"
+        )
+    
+    # Проверяем расширение файла
+    allowed_extensions = [".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"]
+    if not any(filename.lower().endswith(ext) for ext in allowed_extensions):
+        raise ValidationError(
+            f"Unsupported file extension. Allowed: {', '.join(allowed_extensions)}"
+        )
+    
+    # Валидация MIME типа
+    if not content_type.startswith("image/"):
+        raise ValidationError("Only image files are allowed")
+    
+    return True
+
+
+def validate_api_key(api_key: str) -> bool:
+    """
+    Валидация API ключа.
+    
+    Args:
+        api_key: API ключ для проверки
+        
+    Returns:
+        bool: True если ключ валиден
+        
+    Raises:
+        ValidationError: Если ключ невалиден
+    """
+    if not api_key or not isinstance(api_key, str):
+        raise ValidationError("API key is required")
+    
+    # Проверяем формат с помощью regex
+    if not re.match(r"^[A-Za-z0-9_-]{32,128}$", api_key):
+        raise ValidationError(
+            "Invalid API key format. Must be 32-128 alphanumeric characters with underscores/hyphens"
+        )
+    
+    return True
+
+
+def validate_rate_limit_config(config: Dict[str, Any]) -> bool:
+    """
+    Валидация конфигурации rate limiting.
+    
+    Args:
+        config: Конфигурация rate limiting
+        
+    Returns:
+        bool: True если конфигурация валидна
+        
+    Raises:
+        ValidationError: Если конфигурация невалидна
+    """
+    if not isinstance(config, dict):
+        raise ValidationError("Rate limit config must be a dictionary")
+    
+    # Проверяем обязательные поля
+    required_fields = ["requests_per_minute", "burst_size"]
+    for field in required_fields:
+        if field not in config:
+            raise ValidationError(f"Missing required field: {field}")
+    
+    # Валидируем типы и значения
+    if not isinstance(config["requests_per_minute"], int) or config["requests_per_minute"] <= 0:
+        raise ValidationError("requests_per_minute must be a positive integer")
+    
+    if not isinstance(config["burst_size"], int) or config["burst_size"] <= 0:
+        raise ValidationError("burst_size must be a positive integer")
+    
+    if config["burst_size"] > config["requests_per_minute"]:
+        raise ValidationError("burst_size cannot exceed requests_per_minute")
+    
+    # Опциональные поля
+    if "block_duration" in config:
+        if not isinstance(config["block_duration"], int) or config["block_duration"] <= 0:
+            raise ValidationError("block_duration must be a positive integer")
+    
+    return True
+
+
 # Вспомогательные функции
 
 
-def _detect_image_format(image_data: str) -> str:
+def _detect_image_format(image_data: Union[str, bytes]) -> str:
     """
-    Определение формата изображения по данным.
+    Определение формата изображения по данным с поддержкой magic numbers.
+    
+    Улучшенная версия с поддержкой бинарных данных и определением формата
+    по file signatures (magic numbers).
 
     Args:
-        image_data: Данные изображения
+        image_data: Данные изображения (строка или bytes)
 
     Returns:
         str: Формат изображения
     """
-    if image_data.startswith("data:image/"):
-        # Data URL формат
-        mime_type = image_data.split(";")[0].split("/")[1].upper()
-        if mime_type == "JPEG":
-            return "JPEG"
-        elif mime_type == "PNG":
-            return "PNG"
-        elif mime_type == "WEBP":
-            return "WEBP"
-
-    # По расширению файла
-    if "." in image_data:
-        extension = image_data.split(".")[-1].upper()
-        if extension in ["JPG", "JPEG"]:
-            return "JPEG"
-        elif extension == "PNG":
-            return "PNG"
-        elif extension == "WEBP":
-            return "WEBP"
-
+    try:
+        # Если данные в виде bytes, проверяем magic numbers
+        if isinstance(image_data, bytes):
+            return _detect_format_by_magic_number(image_data)
+        
+        # Если это строка
+        if isinstance(image_data, str):
+            # Сначала проверяем по расширению файла (самый быстрый способ)
+            if "." in image_data:
+                extension = image_data.split(".")[-1].upper()
+                extension_mapping = {
+                    "JPG": "JPEG",
+                    "JPEG": "JPEG",
+                    "PNG": "PNG", 
+                    "WEBP": "WEBP",
+                    "GIF": "GIF",
+                    "BMP": "BMP",
+                    "HEIC": "HEIC",
+                    "HEIF": "HEIC"
+                }
+                detected_format = extension_mapping.get(extension)
+                if detected_format:
+                    return detected_format
+            
+            # Data URL формат
+            if image_data.startswith("data:image/"):
+                mime_type = image_data.split(";")[0].split("/")[1].upper()
+                format_mapping = {
+                    "JPEG": "JPEG",
+                    "JPG": "JPEG", 
+                    "PNG": "PNG",
+                    "WEBP": "WEBP",
+                    "GIF": "GIF",
+                    "BMP": "BMP",
+                    "HEIC": "HEIC"
+                }
+                return format_mapping.get(mime_type, "UNKNOWN")
+            
+            # Если это base64 строка, декодируем и проверяем magic numbers
+            try:
+                if image_data.startswith("data:image/"):
+                    # Data URL формат
+                    _, base64_data = image_data.split(",", 1)
+                    binary_data = base64.b64decode(base64_data)
+                else:
+                    # Предполагаем чистый base64
+                    binary_data = base64.b64decode(image_data)
+                
+                return _detect_format_by_magic_number(binary_data)
+                
+            except Exception:
+                # Если не удалось декодировать, возвращаем результат по расширению если был
+                pass
+    
+    except Exception as e:
+        # Логируем ошибку но продолжаем
+        import logging
+        logging.getLogger(__name__).debug(f"Error detecting image format: {e}")
+    
     # По умолчанию
+    return "UNKNOWN"
+
+
+def _detect_format_by_magic_number(data: bytes) -> str:
+    """
+    Определение формата файла по magic numbers (file signatures).
+    
+    Args:
+        data: Бинарные данные файла
+        
+    Returns:
+        str: Формат файла
+    """
+    if not data or len(data) < 4:
+        return "UNKNOWN"
+    
+    # Проверяем magic numbers из констант
+    for format_name, magic_signatures in MAGIC_NUMBERS.items():
+        for signature in magic_signatures:
+            if data.startswith(signature):
+                return format_name
+    
+    # Дополнительные проверки для сложных форматов
+    # WEBP: RIFFxxxxWEBP
+    if len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "WEBP"
+    
+    # TIFF: II* или MM*
+    if len(data) >= 4 and data[:2] in [b"II", b"MM"] and data[2:4] in [b"*\x00", b"\x00*"]:
+        return "TIFF"
+    
     return "UNKNOWN"
 
 

@@ -497,23 +497,6 @@ class WebhookService:
         except Exception as e:
             return {"valid": False, "error": str(e), "url": webhook_url}
 
-    async def get_webhook_stats(self) -> Dict[str, Any]:
-        """
-        Получение статистики webhook-ов.
-
-        Returns:
-            Dict[str, Any]: Статистика webhook-ов
-        """
-        # TODO: Реализовать сбор статистики webhook-ов
-        # Можно хранить в Redis или базе данных
-        return {
-            "total_sent": 0,
-            "successful": 0,
-            "failed": 0,
-            "average_response_time": 0.0,
-            "last_webhook_sent": None,
-        }
-
     async def close(self):
         """
         Закрытие HTTP клиента.

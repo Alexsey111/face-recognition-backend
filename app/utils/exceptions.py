@@ -1,6 +1,6 @@
 """
 Кастомные исключения.
-Определение специальных исключений для различных типов ошибок.
+Простые классы исключений для различных типов ошибок.
 """
 
 from typing import Optional, Dict, Any, List
@@ -37,6 +37,47 @@ class BaseAppException(Exception):
             "details": self.details,
             "exception_type": self.__class__.__name__,
         }
+
+
+class EncryptionError(Exception):
+    """Encryption/Decryption errors"""
+    pass
+
+
+class UnauthorizedError(Exception):
+    """401 Unauthorized"""
+    pass
+
+
+class ForbiddenError(Exception):
+    """403 Forbidden"""
+    pass
+
+
+class ValidationError(Exception):
+    """Validation errors"""
+    pass
+
+
+class AuthenticationError(Exception):
+    """General authentication errors"""
+    pass
+
+
+# Дополнительные исключения для полноты
+class NotFoundError(BaseAppException):
+    """Resource not found (404)"""
+    pass
+
+
+class ConflictError(BaseAppException):
+    """Resource conflict (409)"""
+    pass
+
+
+class DatabaseError(BaseAppException):
+    """Database operation errors"""
+    pass
 
 
 class ValidationError(BaseAppException):
@@ -460,6 +501,24 @@ class DataIntegrityError(BaseAppException):
         self.constraint = constraint
         self.conflicting_data = conflicting_data
         self.status_code = 409
+
+
+class AuthenticationError(BaseAppException):
+    """
+    Исключение для ошибок аутентификации.
+    """
+
+    def __init__(
+        self,
+        message: str = "Authentication failed",
+        auth_method: str = None,
+        token_info: Dict[str, Any] = None,
+        **kwargs,
+    ):
+        super().__init__(message, "AUTHENTICATION_ERROR", kwargs.get("details"))
+        self.auth_method = auth_method
+        self.token_info = token_info
+        self.status_code = 401
 
 
 # Функции для работы с исключениями

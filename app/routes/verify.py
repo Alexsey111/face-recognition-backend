@@ -4,8 +4,6 @@ from fastapi import APIRouter
 
 router = APIRouter(prefix="/api/v1", tags=["Verify"])
 
-# TODO Phase 4: Реализовать verify endpoints
-
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from datetime import datetime, timezone
