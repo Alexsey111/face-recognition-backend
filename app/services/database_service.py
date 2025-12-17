@@ -17,8 +17,8 @@ class BiometricService:
     designed for ASYNCHRONOUS operation (SQLAlchemy 2.0).
     """
     
-    def __init__(self, db: AsyncSession):
-        # Должна быть AsyncSession
+    def __init__(self, db: Optional[AsyncSession] = None):
+        # Опциональный параметр для тестирования и инициализации
         self.db = db 
     
     # ============================================================================
@@ -33,6 +33,9 @@ class BiometricService:
         user_agent: Optional[str] = None
     ) -> User:
         """Create user and log the action"""
+        if not self.db:
+            raise RuntimeError("Database session is required for this operation")
+            
         try:
             # 1. Используем await для асинхронного CRUD
             new_user = await UserCRUD.create_user(self.db, user)
@@ -65,6 +68,9 @@ class BiometricService:
         user_agent: Optional[str] = None
     ) -> Optional[User]:
         """Update user and log the change"""
+        if not self.db:
+            raise RuntimeError("Database session is required for this operation")
+            
         try:
             # 1. Получаем старые значения асинхронно
             old_user = await UserCRUD.get_user(self.db, user_id)
@@ -388,6 +394,17 @@ class BiometricService:
     async def get_all_references(db: AsyncSession, user_id: str) -> List[Reference]:
         result = await db.execute(select(Reference).where(Reference.user_id == user_id))
         return list(result.scalars().all())
+
+    async def update_user(self, user_id: str, update_data: Dict[str, Any]) -> Optional[User]:
+        """
+        Simple user update for backward compatibility
+        """
+        if not self.db:
+            raise RuntimeError("Database session is required for this operation")
+
+        from app.models.user import UserUpdate
+        user_update = UserUpdate(**update_data)
+        return await self.update_user_with_audit(user_id, user_update)
 
 
 # DatabaseService alias for backward compatibility

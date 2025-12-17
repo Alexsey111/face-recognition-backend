@@ -19,6 +19,15 @@ SIMILARITY_LIMITS = {
     "default_threshold": 0.75
 }
 
+# ML and Face Recognition constants
+EPSILON = 1e-7  # Small value for numerical stability in ML calculations
+CONFIDENCE_LEVELS = {
+    "LOW": 0.6,
+    "MEDIUM": 0.75,
+    "HIGH": 0.85,
+    "VERY_HIGH": 0.95
+}
+
 # Rate limits
 RATE_LIMITS = {
     "default_requests_per_minute": 60,

@@ -756,6 +756,114 @@ def validate_rate_limit_config(config: Dict[str, Any]) -> bool:
 # Вспомогательные функции
 
 
+class Validators:
+    """
+    Класс-обертка для всех валидаторов для удобства импорта.
+    
+    Предоставляет доступ ко всем функциям валидации через единый интерфейс.
+    """
+    
+    @staticmethod
+    def email(email: str) -> bool:
+        """Валидация email адреса"""
+        return validate_email(email)
+    
+    @staticmethod
+    def username(username: str) -> bool:
+        """Валидация имени пользователя"""
+        return validate_username(username)
+    
+    @staticmethod
+    def password(password: str) -> bool:
+        """Валидация пароля"""
+        return validate_password(password)
+    
+    @staticmethod
+    def image_format(image_data: str) -> bool:
+        """Валидация формата изображения"""
+        return validate_image_format(image_data)
+    
+    @staticmethod
+    def image_size(image_data: Union[str, bytes], max_size: int = FILE_LIMITS["max_image_size"]) -> bool:
+        """Валидация размера изображения"""
+        return validate_image_size(image_data, max_size)
+    
+    @staticmethod
+    def uuid(uuid_string: str) -> bool:
+        """Валидация UUID"""
+        return validate_uuid(uuid_string)
+    
+    @staticmethod
+    def date(date_string: str, format: str = "%Y-%m-%d") -> bool:
+        """Валидация даты"""
+        return validate_date(date_string, format)
+    
+    @staticmethod
+    def url(url: str) -> bool:
+        """Валидация URL"""
+        return validate_url(url)
+    
+    @staticmethod
+    def file_hash(data: Union[str, bytes], expected_hash: str, algorithm: str = "sha256") -> bool:
+        """Валидация хеша файла"""
+        return validate_file_hash(data, expected_hash, algorithm)
+    
+    @staticmethod
+    def json_schema(data: Dict[str, Any], schema: Dict[str, Any]) -> bool:
+        """Валидация JSON схемы"""
+        return validate_json_schema(data, schema)
+    
+    @staticmethod
+    def list_items(data: List[Any], item_validator: callable = None) -> bool:
+        """Валидация элементов списка"""
+        return validate_list_items(data, item_validator)
+    
+    @staticmethod
+    def phone_number(phone: str) -> bool:
+        """Валидация номера телефона"""
+        return validate_phone_number(phone)
+    
+    @staticmethod
+    def coordinates(lat: float, lng: float) -> bool:
+        """Валидация географических координат"""
+        return validate_coordinates(lat, lng)
+    
+    @staticmethod
+    def embedding(embedding: List[float]) -> bool:
+        """Валидация вектора эмбеддинга"""
+        return validate_embedding(embedding)
+    
+    @staticmethod
+    def similarity_threshold(threshold: float) -> bool:
+        """Валидация порога схожести"""
+        return validate_similarity_threshold(threshold)
+    
+    @staticmethod
+    def file_upload(filename: str, content_type: str, file_size: int) -> bool:
+        """Комплексная валидация загружаемого файла"""
+        return validate_file_upload(filename, content_type, file_size)
+    
+    @staticmethod
+    def api_key(api_key: str) -> bool:
+        """Валидация API ключа"""
+        return validate_api_key(api_key)
+    
+    @staticmethod
+    def rate_limit_config(config: Dict[str, Any]) -> bool:
+        """Валидация конфигурации rate limiting"""
+        return validate_rate_limit_config(config)
+    
+    @staticmethod
+    def sql_safe(text: str) -> bool:
+        """Защита от SQL injection"""
+        return validate_sql_safe(text)
+    
+    @staticmethod
+    def sanitize_html(text: str) -> str:
+        """Защита от XSS"""
+        return sanitize_html(text)
+
+
 def _detect_image_format(image_data: Union[str, bytes]) -> str:
     """
     Определение формата изображения по данным с поддержкой magic numbers.
