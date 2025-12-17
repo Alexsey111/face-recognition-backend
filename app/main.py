@@ -12,8 +12,8 @@ from .routes import health
 
 from .routes import health, upload, verify, liveness, reference, admin
 from .middleware.auth import AuthMiddleware
+from .middleware.rate_limit import RateLimitMiddleware
 # Phase 5: Add these when fully implemented
-# from .middleware.rate_limit import RateLimitMiddleware
 # from .middleware.logging import LoggingMiddleware
 from .utils.logger import setup_logger
 
@@ -30,11 +30,28 @@ async def lifespan(app: FastAPI):
     # await init_database()
     # await init_redis()
 
+    # Phase 5: Запуск cleanup scheduler для автоматической очистки
+    try:
+        from .tasks.scheduler import start_cleanup_scheduler
+        start_cleanup_scheduler()
+        logger.info("✅ Cleanup scheduler started")
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to start cleanup scheduler: {e}")
+
     logger.info("✅ Service started successfully")
     yield
 
     # Shutdown
     logger.info("🛑 Service shutting down...")
+    
+    # Phase 5: Остановка cleanup scheduler
+    try:
+        from .tasks.scheduler import stop_cleanup_scheduler
+        stop_cleanup_scheduler()
+        logger.info("✅ Cleanup scheduler stopped")
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to stop cleanup scheduler: {e}")
+    
     # Закрытие подключений (если нужно)
     # await close_database()
     # await close_redis()
@@ -66,8 +83,7 @@ def create_app() -> FastAPI:
     # Custom middleware (порядок важен: снизу вверх)
     # ✅ Только существующие middleware
     app.add_middleware(AuthMiddleware)
-    # Phase 5: Uncomment when ready
-    # app.add_middleware(RateLimitMiddleware)
+    app.add_middleware(RateLimitMiddleware)
 
     # Root endpoint
     @app.get("/")

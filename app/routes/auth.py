@@ -20,6 +20,62 @@ logger = get_logger(__name__)
 # Схема безопасности для Bearer токенов
 security = HTTPBearer(auto_error=False)
 
+
+# =============================================================================
+# Зависимости FastAPI
+# =============================================================================
+
+async def get_current_user(request: Request) -> str:
+    """
+    Зависимость FastAPI для получения текущего пользователя из JWT токена.
+    
+    Используется как Depends(get_current_user) в endpoints.
+    
+    Returns:
+        str: ID пользователя
+        
+    Raises:
+        HTTPException: Если токен недействителен или отсутствует
+    """
+    try:
+        # Получаем токен из заголовка Authorization
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authorization header missing or invalid"
+            )
+        
+        token = auth_header.split(" ", 1)[1]
+        
+        # Верифицируем токен и получаем информацию о пользователе
+        user_info = await auth_service.get_user_info_from_token(token)
+        
+        if not user_info or "user_id" not in user_info:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token"
+            )
+        
+        # Проверяем, что пользователь существует и активен
+        user = await db_service.get_user(user_info["user_id"])
+        if not user or not user.get("is_active", True):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found or inactive"
+            )
+        
+        return user_info["user_id"]
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting current user: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication failed"
+        )
+
 # Инициализация сервисов
 auth_service = AuthService()
 db_service = DatabaseService()

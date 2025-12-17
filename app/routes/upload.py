@@ -1,445 +1,433 @@
-"""API роуты для загрузки изображений."""
+"""
+API роуты для загрузки изображений (Phase 5).
+Реализует систему сессий загрузки с управлением состояниями.
+"""
 
-from fastapi import APIRouter
+from fastapi import (
+    APIRouter, Depends, HTTPException, UploadFile, File, status
+)
+from sqlalchemy.orm import Session
+from datetime import datetime
+from typing import Dict, Any
 
-router = APIRouter(prefix="/api/v1", tags=["Upload"])
-
-from fastapi import HTTPException, Depends, Request
-from fastapi.responses import JSONResponse
-from datetime import datetime, timezone
-import uuid
-import time
-from ..config import settings
-
-from ..models.request import UploadRequest
-from ..models.response import UploadResponse, BaseResponse
+from ..db.database import get_db
 from ..services.storage_service import StorageService
-from ..services.ml_service import MLService
+from ..services.session_service import SessionService
 from ..services.database_service import DatabaseService
-from ..services.cache_service import CacheService
-from ..services.validation_service import ValidationService
+from ..utils.file_utils import FileUtils, ImageValidator
+from ..utils.validators import Validators, ValidationError
 from ..utils.logger import get_logger
-from ..utils.exceptions import ValidationError, ProcessingError
+from ..routes.auth import get_current_user
 
 logger = get_logger(__name__)
 
+router = APIRouter(
+    prefix="/api/v1/upload",
+    tags=["upload"]
+)
 
-@router.post("/upload", response_model=UploadResponse)
-async def upload_image(request: UploadRequest, http_request: Request):
+
+# =============================================================================
+# Upload Session Endpoints
+# =============================================================================
+
+@router.post("/", response_model=Dict[str, Any])
+async def create_upload_session(
+    current_user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
-    Загрузка и обработка изображения.
-
-    Args:
-        request: Данные запроса с изображением
-        http_request: HTTP запрос для получения метаданных
-
+    Создание сессии загрузки
+    
     Returns:
-        UploadResponse: Результат загрузки и обработки
-    """
-    start_time = time.time()
-    request_id = str(uuid.uuid4())
-
-    try:
-        logger.info(f"Starting image upload request {request_id}")
-
-        # Инициализация сервисов
-        storage_service = StorageService()
-        ml_service = MLService()
-        validation_service = ValidationService()
-
-        # Валидация изображения
-        logger.info(f"Validating image for request {request_id}")
-        validation_result = await validation_service.validate_image(
-            request.image_data,
-            max_size=settings.MAX_UPLOAD_SIZE,
-            allowed_formats=settings.ALLOWED_IMAGE_FORMATS,
-        )
-
-        if not validation_result.is_valid:
-            raise ValidationError(
-                f"Image validation failed: {validation_result.error_message}"
-            )
-
-        upload_result = {
-            "image_id": request_id,
-            "file_url": None,
-            "file_size": len(validation_result.image_data),
-            "image_format": validation_result.image_format,
+        Dict[str, Any]: {
+            "session_id": str,
+            "expires_at": datetime,
+            "max_file_size_mb": float
         }
-
-        if settings.STORE_ORIGINAL_IMAGES:
-            # Загрузка в хранилище (если разрешено)
-            logger.info(f"Uploading image to storage for request {request_id}")
-            upload_result = await storage_service.upload_image(
-                image_data=validation_result.image_data,
-                metadata={
-                    "request_id": request_id,
-                    "user_id": request.user_id,
-                    "original_metadata": request.metadata,
-                    "upload_timestamp": datetime.now(timezone.utc).isoformat(),
-                    "client_ip": (
-                        http_request.client.host if http_request.client else None
-                    ),
-                    "user_agent": http_request.headers.get("user-agent"),
-                },
-            )
-
-        # Обработка ML сервисом (генерация эмбеддинга, анализ качества)
-        logger.info(f"Processing image with ML service for request {request_id}")
-        ml_result = await ml_service.process_image(
-            image_data=validation_result.image_data,
-            image_url=upload_result.get("file_url"),
-        )
-
-        # Сохранение информации в БД (опционально)
-        if request.user_id:
-            logger.info(f"Saving image metadata to database for request {request_id}")
-
-        processing_time = time.time() - start_time
-
-        # Формирование ответа
-        response = UploadResponse(
-            success=True,
-            image_id=upload_result.get("image_id", request_id),
-            file_url=upload_result.get("file_url"),
-            file_size=upload_result.get("file_size"),
-            image_format=validation_result.image_format,
-            image_dimensions=validation_result.dimensions,
-            processing_time=processing_time,
-            quality_score=ml_result.get("quality_score") if ml_result else None,
-            request_id=request_id,
-        )
-
-        # Удаляем исходный файл, если он был сохранен и включено авто-удаление
-        if settings.STORE_ORIGINAL_IMAGES and settings.DELETE_SOURCE_AFTER_PROCESSING:
-            try:
-                await storage_service.delete_image(upload_result.get("image_id"))
-            except Exception as cleanup_error:
-                logger.warning(
-                    f"Failed to delete source image {upload_result.get('image_id')}: {cleanup_error}"
-                )
-
-        logger.info(f"Image upload completed successfully for request {request_id}")
-        return response
-
-    except ValidationError as e:
-        logger.warning(f"Validation error for request {request_id}: {str(e)}")
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "success": False,
-                "error_code": "VALIDATION_ERROR",
-                "error_details": {"validation_error": str(e)},
-                "request_id": request_id,
-                "timestamp": datetime.now(timezone.utc),
-            },
-        )
-
-    except ProcessingError as e:
-        logger.error(f"Processing error for request {request_id}: {str(e)}")
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "success": False,
-                "error_code": "PROCESSING_ERROR",
-                "error_details": {"processing_error": str(e)},
-                "request_id": request_id,
-                "timestamp": datetime.now(timezone.utc),
-            },
-        )
-
-    except Exception as e:
-        logger.error(f"Unexpected error for request {request_id}: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "success": False,
-                "error_code": "INTERNAL_ERROR",
-                "error_details": {"error": str(e)},
-                "request_id": request_id,
-                "timestamp": datetime.now(timezone.utc),
-            },
-        )
-
-
-@router.post("/upload/batch", response_model=dict)
-async def upload_images_batch(request: dict, http_request: Request):
     """
-    Пакетная загрузка изображений.
-
-    Args:
-        request: Словарь с массивом изображений и метаданными
-        http_request: HTTP запрос
-
-    Returns:
-        dict: Результаты пакетной загрузки
-    """
-    start_time = time.time()
-    request_id = str(uuid.uuid4())
-
     try:
-        # Парсинг запроса
-        images_data = request.get("images", [])
-        metadata = request.get("metadata", {})
-
-        if not images_data:
-            raise ValidationError("No images provided in batch request")
-
-        if len(images_data) > 50:  # Лимит пакетной загрузки
-            raise ValidationError("Too many images in batch (max 50)")
-
-        logger.info(
-            f"Starting batch image upload with {len(images_data)} images, request {request_id}"
+        session = SessionService.create_session(current_user_id)
+        
+        # Логирование действия
+        db_service = DatabaseService(db)
+        db_service.audit_crud.log_action(
+            db,
+            action="upload_session_created",
+            resource_type="upload_session",
+            resource_id=session.session_id,
+            user_id=current_user_id,
+            description=f"Создана сессия загрузки: {session.session_id}"
         )
-
-        # Инициализация сервисов
-        storage_service = StorageService()
-        ml_service = MLService()
-        validation_service = ValidationService()
-
-        results = []
-        errors = []
-
-        for i, image_data in enumerate(images_data):
-            try:
-                # Валидация изображения
-                validation_result = await validation_service.validate_image(
-                    image_data,
-                    max_size=settings.MAX_UPLOAD_SIZE,
-                    allowed_formats=settings.ALLOWED_IMAGE_FORMATS,
-                )
-
-                if not validation_result.is_valid:
-                    errors.append(
-                        {
-                            "index": i,
-                            "error": validation_result.error_message,
-                            "image_id": None,
-                        }
-                    )
-                    continue
-
-                upload_result = {
-                    "image_id": f"{request_id}-{i}",
-                    "file_url": None,
-                    "file_size": len(validation_result.image_data),
-                    "image_format": validation_result.image_format,
-                }
-
-                if settings.STORE_ORIGINAL_IMAGES:
-                    upload_result = await storage_service.upload_image(
-                        image_data=validation_result.image_data,
-                        metadata={
-                            "batch_request_id": request_id,
-                            "batch_index": i,
-                            "batch_metadata": metadata,
-                            "upload_timestamp": datetime.now(timezone.utc).isoformat(),
-                        },
-                    )
-
-                # Обработка ML сервисом
-                ml_result = await ml_service.process_image(
-                    image_data=validation_result.image_data,
-                    image_url=upload_result.get("file_url"),
-                )
-
-                results.append(
-                    {
-                        "index": i,
-                        "image_id": upload_result.get("image_id"),
-                        "file_url": upload_result.get("file_url"),
-                        "file_size": upload_result.get("file_size"),
-                        "image_format": validation_result.image_format,
-                        "image_dimensions": validation_result.dimensions,
-                        "quality_score": (
-                            ml_result.get("quality_score") if ml_result else None
-                        ),
-                        "success": True,
-                    }
-                )
-
-                if (
-                    settings.STORE_ORIGINAL_IMAGES
-                    and settings.DELETE_SOURCE_AFTER_PROCESSING
-                ):
-                    try:
-                        await storage_service.delete_image(
-                            upload_result.get("image_id")
-                        )
-                    except Exception as cleanup_error:
-                        logger.warning(
-                            f"Failed to delete source image {upload_result.get('image_id')}: {cleanup_error}"
-                        )
-
-            except Exception as e:
-                logger.error(
-                    f"Error processing image {i} in batch {request_id}: {str(e)}"
-                )
-                errors.append({"index": i, "error": str(e), "image_id": None})
-
-        processing_time = time.time() - start_time
-
-        response = {
-            "success": True,
-            "request_id": request_id,
-            "batch_id": str(uuid.uuid4()),
-            "total_images": len(images_data),
-            "successful_uploads": len(results),
-            "failed_uploads": len(errors),
-            "processing_time": processing_time,
-            "results": results,
-            "errors": errors,
-            "timestamp": datetime.now(timezone.utc),
+        
+        logger.info(f"Сессия загрузки создана: {session.session_id}")
+        
+        return {
+            "session_id": session.session_id,
+            "expires_at": session.expiration_at,
+            "max_file_size_mb": FileUtils.MAX_FILE_SIZE_MB
         }
-
-        logger.info(
-            f"Batch upload completed: {len(results)} successful, {len(errors)} failed, request {request_id}"
-        )
-        return response
-
-    except ValidationError as e:
-        logger.warning(f"Validation error in batch request {request_id}: {str(e)}")
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "success": False,
-                "error_code": "VALIDATION_ERROR",
-                "error_details": {"validation_error": str(e)},
-                "request_id": request_id,
-                "timestamp": datetime.now(timezone.utc),
-            },
-        )
-
+        
     except Exception as e:
-        logger.error(f"Unexpected error in batch request {request_id}: {str(e)}")
+        logger.error(f"Ошибка создания сессии загрузки: {e}")
         raise HTTPException(
-            status_code=500,
-            detail={
-                "success": False,
-                "error_code": "INTERNAL_ERROR",
-                "error_details": {"error": str(e)},
-                "request_id": request_id,
-                "timestamp": datetime.now(timezone.utc),
-            },
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Не удалось создать сессию загрузки"
         )
 
 
-@router.delete("/upload/{image_id}", response_model=BaseResponse)
-async def delete_uploaded_image(image_id: str, http_request: Request):
+@router.post("/{session_id}/file", response_model=Dict[str, Any])
+async def upload_file_to_session(
+    session_id: str,
+    file: UploadFile = File(...),
+    current_user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
-    Удаление загруженного изображения.
-
+    Загрузка файла в сессию
+    
     Args:
-        image_id: ID изображения для удаления
-        http_request: HTTP запрос
-
+        session_id: ID сессии загрузки
+        file: Файл для загрузки
+        
     Returns:
-        BaseResponse: Результат удаления
+        Dict[str, Any]: {
+            "file_key": str,
+            "file_url": str,
+            "file_size_mb": float,
+            "file_hash": str,
+            "session_id": str
+        }
     """
-    request_id = str(uuid.uuid4())
-
     try:
-        logger.info(
-            f"Starting image deletion for image_id {image_id}, request {request_id}"
-        )
-
-        # Инициализация сервисов
-        storage_service = StorageService()
-
-        # Удаление из хранилища
-        await storage_service.delete_image(image_id)
-
-        # Удаление из БД (если есть)
-
-        response = BaseResponse(
-            success=True,
-            message=f"Image {image_id} deleted successfully",
-            request_id=request_id,
-        )
-
-        logger.info(f"Image {image_id} deleted successfully, request {request_id}")
-        return response
-
-    except Exception as e:
-        logger.error(f"Error deleting image {image_id}, request {request_id}: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "success": False,
-                "error_code": "DELETE_ERROR",
-                "error_details": {"error": str(e)},
-                "request_id": request_id,
-                "timestamp": datetime.now(timezone.utc),
-            },
-        )
-
-
-@router.get("/upload/{image_id}", response_model=dict)
-async def get_uploaded_image_info(image_id: str, http_request: Request):
-    """
-    Получение информации о загруженном изображении.
-
-    Args:
-        image_id: ID изображения
-        http_request: HTTP запрос
-
-    Returns:
-        dict: Информация об изображении
-    """
-    request_id = str(uuid.uuid4())
-
-    try:
-        logger.info(f"Getting image info for {image_id}, request {request_id}")
-
-        # Инициализация сервисов
-        storage_service = StorageService()
-
-        # Получение информации из хранилища
-        image_info = await storage_service.get_image_info(image_id)
-
-        if not image_info:
+        # Валидация сессии
+        if not SessionService.validate_session(session_id, current_user_id):
             raise HTTPException(
-                status_code=404,
-                detail={
-                    "success": False,
-                    "error_code": "IMAGE_NOT_FOUND",
-                    "error_details": {"image_id": image_id},
-                    "request_id": request_id,
-                    "timestamp": datetime.now(timezone.utc),
-                },
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Недействительная или истекшая сессия загрузки"
             )
-
-        response = {
-            "success": True,
-            "image_id": image_id,
-            "file_url": image_info.get("file_url"),
-            "file_size": image_info.get("file_size"),
-            "image_format": image_info.get("image_format"),
-            "image_dimensions": image_info.get("image_dimensions"),
-            "created_at": image_info.get("created_at"),
-            "metadata": image_info.get("metadata"),
-            "request_id": request_id,
-            "timestamp": datetime.now(timezone.utc),
-        }
-
-        logger.info(
-            f"Image info retrieved successfully for {image_id}, request {request_id}"
+        
+        # Чтение содержимого файла
+        file_content = await file.read()
+        
+        # Валидация файла
+        is_valid, error_msg = ImageValidator.validate_image(
+            file_content,
+            file.filename
         )
-        return response
+        
+        if not is_valid:
+            logger.warning(f"Валидация файла не пройдена: {error_msg}")
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=error_msg
+            )
+        
+        # Конвертация в JPG если необходимо
+        if FileUtils.get_file_extension(file.filename) != 'jpg':
+            file_content, file.filename = FileUtils.convert_image_to_jpg(
+                file_content,
+                file.filename
+            )
+        
+        # Изменение размера если необходимо
+        max_width, max_height = 1024, 1024
+        dimensions = FileUtils.get_image_dimensions(file_content)
+        if dimensions[0] > max_width or dimensions[1] > max_height:
+            file_content = FileUtils.resize_image(file_content, max_width, max_height)
+        
+        # Генерация ключа файла
+        file_key = FileUtils.generate_file_key(current_user_id, file.filename)
+        file_size_mb = FileUtils.get_file_size_mb(file_content)
+        file_hash = FileUtils.calculate_file_hash(file_content)
+        
+        # Загрузка в MinIO
+        storage = StorageService()
+        result = await storage.upload_image(
+            image_data=file_content,
+            key=file_key,  # Передаем сгенерированный ключ
+            metadata={
+                'user_id': current_user_id,
+                'session_id': session_id,
+                'original_name': file.filename,
+                'file_hash': file_hash,
+                'upload_timestamp': datetime.utcnow().isoformat()
+            }
+        )
+        
+        # Ключ уже сгенерирован в роуте, используем его
+        # file_key = result["key"]  # больше не нужно
+        file_url = result["file_url"]
+        
+        # Обновление сессии
+        SessionService.update_session(
+            session_id,
+            file_key=file_key,
+            file_size=file_size_mb,
+            file_hash=file_hash
+        )
+        
+        # Логирование действия
+        db_service = DatabaseService(db)
+        db_service.audit_crud.log_action(
+            db,
+            action="file_uploaded",
+            resource_type="upload_session",
+            resource_id=session_id,
+            user_id=current_user_id,
+            description=f"Файл загружен: {file.filename}",
+            new_values={
+                "file_key": file_key,
+                "file_size_mb": file_size_mb,
+                "file_hash": file_hash
+            }
+        )
+        
+        logger.info(f"Файл загружен: {file_key} ({file_size_mb:.1f}МБ)")
+        
+        return {
+            "file_key": file_key,
+            "file_url": file_url,
+            "file_size_mb": file_size_mb,
+            "file_hash": file_hash,
+            "session_id": session_id
+        }
+        
+    except HTTPException:
+        raise
+    except ValidationError as e:
+        logger.warning(f"Ошибка валидации: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Ошибка загрузки файла: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Не удалось загрузить файл"
+        )
 
+
+@router.get("/{session_id}", response_model=Dict[str, Any])
+async def get_upload_status(
+    session_id: str,
+    current_user_id: str = Depends(get_current_user)
+):
+    """
+    Получение статуса сессии загрузки
+    
+    Args:
+        session_id: ID сессии
+        
+    Returns:
+        Dict[str, Any]: Информация о сессии
+    """
+    try:
+        session = SessionService.get_session(session_id)
+        
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Сессия загрузки не найдена"
+            )
+        
+        if session.user_id != current_user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Неавторизованный доступ"
+            )
+        
+        return {
+            "session_id": session.session_id,
+            "user_id": session.user_id,
+            "file_key": session.file_key,
+            "file_size_mb": session.file_size,
+            "created_at": session.created_at,
+            "expires_at": session.expiration_at,
+            "is_expired": session.is_expired()
+        }
+        
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(
-            f"Error getting image info for {image_id}, request {request_id}: {str(e)}"
-        )
+        logger.error(f"Ошибка получения статуса загрузки: {e}")
         raise HTTPException(
-            status_code=500,
-            detail={
-                "success": False,
-                "error_code": "INTERNAL_ERROR",
-                "error_details": {"error": str(e)},
-                "request_id": request_id,
-                "timestamp": datetime.now(timezone.utc),
-            },
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Не удалось получить статус загрузки"
+        )
+
+
+@router.delete("/{session_id}")
+async def delete_upload_session(
+    session_id: str,
+    current_user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Удаление сессии загрузки и файла
+    
+    Args:
+        session_id: ID сессии
+        
+    Returns:
+        Dict[str, str]: {"message": "Сессия загрузки удалена"}
+    """
+    try:
+        session = SessionService.get_session(session_id)
+        
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Сессия загрузки не найдена"
+            )
+        
+        if session.user_id != current_user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Неавторизованный доступ"
+            )
+        
+        # Удаление файла из MinIO
+        if session.file_key:
+            storage = StorageService()
+            await storage.delete_image(session.file_key)
+        
+        # Удаление сессии
+        SessionService.delete_session(session_id)
+        
+        # Логирование действия
+        db_service = DatabaseService(db)
+        db_service.audit_crud.log_action(
+            db,
+            action="upload_session_deleted",
+            resource_type="upload_session",
+            resource_id=session_id,
+            user_id=current_user_id,
+            description=f"Сессия загрузки удалена: {session_id}"
+        )
+        
+        logger.info(f"Сессия загрузки удалена: {session_id}")
+        
+        return {"message": "Сессия загрузки удалена"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Ошибка удаления сессии загрузки: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Не удалось удалить сессию загрузки"
+        )
+
+
+# =============================================================================
+# Utility Endpoints
+# =============================================================================
+
+@router.get("/sessions/active", response_model=Dict[str, Any])
+async def get_active_sessions(
+    current_user_id: str = Depends(get_current_user)
+):
+    """
+    Получение активных сессий пользователя
+    
+    Returns:
+        Dict[str, Any]: Список активных сессий
+    """
+    try:
+        user_sessions = SessionService.get_user_sessions(current_user_id)
+        
+        sessions_data = []
+        for session in user_sessions:
+            sessions_data.append({
+                "session_id": session.session_id,
+                "created_at": session.created_at,
+                "expires_at": session.expiration_at,
+                "has_file": session.file_key is not None,
+                "file_size_mb": session.file_size
+            })
+        
+        return {
+            "user_id": current_user_id,
+            "active_sessions_count": len(sessions_data),
+            "sessions": sessions_data
+        }
+        
+    except Exception as e:
+        logger.error(f"Ошибка получения активных сессий: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Не удалось получить активные сессии"
+        )
+
+
+@router.post("/cleanup")
+async def cleanup_expired_sessions(
+    current_user_id: str = Depends(get_current_user)
+):
+    """
+    Принудительная очистка истекших сессий (только для админов)
+    
+    Returns:
+        Dict[str, Any]: Результат очистки
+    """
+    try:
+        # TODO: Добавить проверку на админа
+        # if not await check_admin_permission(current_user_id):
+        #     raise HTTPException(status_code=403, detail="Недостаточно прав")
+        
+        deleted_count = SessionService.cleanup_expired_sessions()
+        
+        logger.info(f"Принудительная очистка: удалено {deleted_count} истекших сессий")
+        
+        return {
+            "message": f"Очищено {deleted_count} истекших сессий",
+            "deleted_sessions": deleted_count
+        }
+        
+    except Exception as e:
+        logger.error(f"Ошибка принудительной очистки: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Не удалось выполнить очистку"
+        )
+
+
+# =============================================================================
+# Legacy Endpoints (для обратной совместимости)
+# =============================================================================
+
+@router.post("/legacy/upload", response_model=Dict[str, Any])
+async def legacy_upload_image(
+    file: UploadFile = File(...),
+    current_user_id: str = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Устаревший endpoint для прямой загрузки (без сессий)
+    Сохранен для обратной совместимости
+    """
+    try:
+        # Создаем временную сессию
+        session = SessionService.create_session(current_user_id)
+        
+        # Загружаем файл
+        result = await upload_file_to_session(
+            session_id=session.session_id,
+            file=file,
+            current_user_id=current_user_id,
+            db=db
+        )
+        
+        # Удаляем сессию после загрузки
+        SessionService.delete_session(session.session_id)
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Ошибка устаревшей загрузки: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Не удалось загрузить файл"
         )

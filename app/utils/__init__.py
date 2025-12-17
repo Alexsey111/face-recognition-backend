@@ -41,12 +41,18 @@ from .logger import (
     configure_logging_for_environment,
 )
 
+# File utilities (Phase 5)
+from .file_utils import FileUtils, ImageValidator
+
+# Validators and security (Phase 5)
+from .validators import Validators
+from .security import SecurityUtils
+
 # Aliases for backward compatibility
 AppException = BaseAppException
 
 # Constants and validators are available but not imported by default
 # to avoid circular imports and keep imports explicit
-# from .validators import *
 # from .constants import *
 # from .decorators import *
 
@@ -84,4 +90,10 @@ __all__ = [
     "structured_logger",
     "log_function_call",
     "configure_logging_for_environment",
+    # File utilities (Phase 5)
+    "FileUtils",
+    "ImageValidator",
+    # Validators and security (Phase 5)
+    "Validators",
+    "SecurityUtils",
 ]

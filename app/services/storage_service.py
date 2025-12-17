@@ -5,12 +5,14 @@
 
 import io
 import mimetypes
+import asyncio
+import functools
+import json
 from typing import Optional, Dict, Any, Tuple
-import aiohttp
-import aiofiles
 from botocore.exceptions import ClientError, NoCredentialsError
 import boto3
 from botocore.config import Config
+from PIL import Image
 
 from ..config import settings
 from ..utils.logger import get_logger
@@ -67,15 +69,21 @@ class StorageService:
 
     async def health_check(self) -> bool:
         """
-        Проверка состояния хранилища.
+        Проверка состояния хранилища (асинхронно).
 
         Returns:
             bool: True если хранилище доступно
         """
         try:
-            # Пробуем получить информацию о бакете
-            self.s3_client.head_bucket(Bucket=self.bucket_name)
+            loop = asyncio.get_running_loop()
+            
+            # Пробуем получить информацию о бакете асинхронно
+            await loop.run_in_executor(
+                None,
+                functools.partial(self.s3_client.head_bucket, Bucket=self.bucket_name)
+            )
             return True
+
         except ClientError as e:
             error_code = e.response["Error"]["Code"]
             if error_code == "404":
@@ -91,19 +99,27 @@ class StorageService:
 
     async def _create_bucket_if_not_exists(self):
         """
-        Создание бакета если он не существует.
+        Создание бакета если он не существует (асинхронно).
         """
         try:
+            loop = asyncio.get_running_loop()
+            
             if self.region == "us-east-1":
-                self.s3_client.create_bucket(Bucket=self.bucket_name)
+                await loop.run_in_executor(
+                    None,
+                    functools.partial(self.s3_client.create_bucket, Bucket=self.bucket_name)
+                )
             else:
-                self.s3_client.create_bucket(
-                    Bucket=self.bucket_name,
-                    CreateBucketConfiguration={"LocationConstraint": self.region},
+                await loop.run_in_executor(
+                    None,
+                    functools.partial(self.s3_client.create_bucket,
+                                    Bucket=self.bucket_name,
+                                    CreateBucketConfiguration={"LocationConstraint": self.region})
                 )
 
             # Настройка политики доступа (публичное чтение для файлов)
-            await self._setup_bucket_policy()
+            if self.public_read:
+                await self._setup_bucket_policy()
 
             logger.info(f"Bucket {self.bucket_name} created successfully")
 
@@ -113,9 +129,11 @@ class StorageService:
 
     async def _setup_bucket_policy(self):
         """
-        Настройка политики доступа к бакету.
+        Настройка политики доступа к бакету (асинхронно).
         """
         try:
+            loop = asyncio.get_running_loop()
+            
             policy = {
                 "Version": "2012-10-17",
                 "Statement": [
@@ -129,49 +147,65 @@ class StorageService:
                 ],
             }
 
-            self.s3_client.put_bucket_policy(
-                Bucket=self.bucket_name, Policy=str(policy).replace("'", '"')
+            await loop.run_in_executor(
+                None,
+                functools.partial(self.s3_client.put_bucket_policy,
+                                Bucket=self.bucket_name,
+                                Policy=json.dumps(policy))
             )
 
         except Exception as e:
             logger.warning(f"Failed to setup bucket policy: {str(e)}")
 
     async def upload_image(
-        self, image_data: bytes, metadata: Optional[Dict[str, Any]] = None
+        self, 
+        image_data: bytes, 
+        key: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Загрузка изображения в хранилище.
+        Загрузка изображения в хранилище (асинхронно).
 
         Args:
             image_data: Двоичные данные изображения
+            key: Ключ файла (если не указан, генерируется автоматически)
             metadata: Дополнительные метаданные
 
         Returns:
             Dict[str, Any]: Информация о загруженном файле
         """
         try:
-            # Определяем MIME тип
-            mime_type, _ = mimetypes.guess_type("image.jpg")
-            if not mime_type:
-                mime_type = "application/octet-stream"
+            # Определяем MIME тип используя PIL
+            try:
+                img = Image.open(io.BytesIO(image_data))
+                mime_type = Image.MIME.get(img.format, "application/octet-stream")
+            except Exception:
+                # Если PIL не может определить формат, используем mimetypes как fallback
+                mime_type, _ = mimetypes.guess_type("image.jpg")
+                if not mime_type:
+                    mime_type = "application/octet-stream"
 
-            # Генерируем уникальное имя файла
-            import uuid
-            import time
-            from datetime import datetime
+            # Генерируем ключ файла
+            if key is None:
+                # Генерируем уникальное имя файла
+                import uuid
+                import time
+                from datetime import datetime
 
-            file_extension = self._get_extension_from_mime_type(mime_type)
-            filename = f"{int(time.time())}_{uuid.uuid4().hex[:8]}{file_extension}"
+                file_extension = self._get_extension_from_mime_type(mime_type)
+                filename = f"{int(time.time())}_{uuid.uuid4().hex[:8]}{file_extension}"
 
-            # Создаем путь с организацией по датам
-            now = datetime.now()
-            key = f"images/{now.year}/{now.month:02d}/{now.day:02d}/{filename}"
+                # Создаем путь с организацией по датам
+                now = datetime.now()
+                key = f"images/{now.year}/{now.month:02d}/{now.day:02d}/{filename}"
+            # Если ключ передан, используем его как есть
 
             # Подготавливаем метаданные
             s3_metadata = self._prepare_s3_metadata(metadata)
 
-            # Загружаем файл
+            # Загружаем файл асинхронно
             try:
+                loop = asyncio.get_running_loop()
                 put_kwargs = dict(
                     Bucket=self.bucket_name,
                     Key=key,
@@ -182,7 +216,12 @@ class StorageService:
                 if self._is_public_bucket():
                     put_kwargs["ACL"] = "public-read"
 
-                self.s3_client.put_object(**put_kwargs)
+                # Оборачиваем синхронный вызов в async executor
+                await loop.run_in_executor(
+                    None,  # Использует дефолтный executor
+                    functools.partial(self.s3_client.put_object, **put_kwargs)
+                )
+                
             except Exception as e:
                 logger.error(f"S3 upload failed for key {key}: {str(e)}")
                 raise StorageError(f"Failed to upload image: {str(e)}")
@@ -208,7 +247,7 @@ class StorageService:
 
     async def download_image(self, file_key: str) -> bytes:
         """
-        Скачивание изображения из хранилища.
+        Скачивание изображения из хранилища (асинхронно).
 
         Args:
             file_key: Ключ файла в хранилище
@@ -217,9 +256,21 @@ class StorageService:
             bytes: Двоичные данные изображения
         """
         try:
-            response = self.s3_client.get_object(Bucket=self.bucket_name, Key=file_key)
+            loop = asyncio.get_running_loop()
+            
+            # Получаем объект асинхронно
+            response = await loop.run_in_executor(
+                None,
+                functools.partial(self.s3_client.get_object, 
+                                Bucket=self.bucket_name, 
+                                Key=file_key)
+            )
 
-            image_data = response["Body"].read()
+            # Читаем данные асинхронно
+            image_data = await loop.run_in_executor(
+                None,
+                lambda: response["Body"].read()
+            )
 
             logger.info(
                 f"Image downloaded successfully: {file_key} ({len(image_data)} bytes)"
@@ -239,7 +290,7 @@ class StorageService:
 
     async def delete_image(self, file_key: str) -> bool:
         """
-        Удаление изображения из хранилища.
+        Удаление изображения из хранилища (асинхронно).
 
         Args:
             file_key: Ключ файла для удаления
@@ -248,7 +299,14 @@ class StorageService:
             bool: True если файл удален
         """
         try:
-            self.s3_client.delete_object(Bucket=self.bucket_name, Key=file_key)
+            loop = asyncio.get_running_loop()
+            
+            await loop.run_in_executor(
+                None,
+                functools.partial(self.s3_client.delete_object,
+                                Bucket=self.bucket_name,
+                                Key=file_key)
+            )
 
             logger.info(f"Image deleted successfully: {file_key}")
             return True
@@ -290,7 +348,7 @@ class StorageService:
 
     async def get_image_info(self, file_key: str) -> Optional[Dict[str, Any]]:
         """
-        Получение информации о изображении.
+        Получение информации о изображении (асинхронно).
 
         Args:
             file_key: Ключ файла
@@ -299,7 +357,14 @@ class StorageService:
             Optional[Dict[str, Any]]: Информация о файле
         """
         try:
-            response = self.s3_client.head_object(Bucket=self.bucket_name, Key=file_key)
+            loop = asyncio.get_running_loop()
+            
+            response = await loop.run_in_executor(
+                None,
+                functools.partial(self.s3_client.head_object,
+                                Bucket=self.bucket_name,
+                                Key=file_key)
+            )
 
             metadata = response.get("Metadata", {})
             content_type = response.get("ContentType", "application/octet-stream")
@@ -328,7 +393,7 @@ class StorageService:
         self, prefix: Optional[str] = None, max_keys: int = 1000
     ) -> list:
         """
-        Список изображений в хранилище.
+        Список изображений в хранилище (асинхронно).
 
         Args:
             prefix: Префикс для фильтрации
@@ -338,8 +403,14 @@ class StorageService:
             list: Список ключей файлов
         """
         try:
-            response = self.s3_client.list_objects_v2(
-                Bucket=self.bucket_name, Prefix=prefix, MaxKeys=max_keys
+            loop = asyncio.get_running_loop()
+            
+            response = await loop.run_in_executor(
+                None,
+                functools.partial(self.s3_client.list_objects_v2,
+                                Bucket=self.bucket_name,
+                                Prefix=prefix,
+                                MaxKeys=max_keys)
             )
 
             keys = []
@@ -357,7 +428,7 @@ class StorageService:
         self, file_key: str, expires_in: int = 3600, operation: str = "get_object"
     ) -> str:
         """
-        Генерация подписанного URL для доступа к файлу.
+        Генерация подписанного URL для доступа к файлу (асинхронно).
 
         Args:
             file_key: Ключ файла
@@ -368,21 +439,25 @@ class StorageService:
             str: Подписанный URL
         """
         try:
-            if operation == "get_object":
-                url = self.s3_client.generate_presigned_url(
-                    "get_object",
-                    Params={"Bucket": self.bucket_name, "Key": file_key},
-                    ExpiresIn=expires_in,
-                )
-            elif operation == "put_object":
-                url = self.s3_client.generate_presigned_url(
-                    "put_object",
-                    Params={"Bucket": self.bucket_name, "Key": file_key},
-                    ExpiresIn=expires_in,
-                )
-            else:
-                raise ValueError(f"Unsupported operation: {operation}")
+            loop = asyncio.get_running_loop()
+            
+            def _generate_url():
+                if operation == "get_object":
+                    return self.s3_client.generate_presigned_url(
+                        "get_object",
+                        Params={"Bucket": self.bucket_name, "Key": file_key},
+                        ExpiresIn=expires_in,
+                    )
+                elif operation == "put_object":
+                    return self.s3_client.generate_presigned_url(
+                        "put_object",
+                        Params={"Bucket": self.bucket_name, "Key": file_key},
+                        ExpiresIn=expires_in,
+                    )
+                else:
+                    raise ValueError(f"Unsupported operation: {operation}")
 
+            url = await loop.run_in_executor(None, _generate_url)
             return url
 
         except Exception as e:
@@ -487,7 +562,7 @@ class StorageService:
 
     def _extract_key_from_url(self, file_url: str) -> Optional[str]:
         """
-        Извлечение ключа файла из URL.
+        Извлечение ключа файла из URL (улучшенная версия).
 
         Args:
             file_url: URL файла
@@ -496,14 +571,29 @@ class StorageService:
             Optional[str]: Ключ файла или None
         """
         try:
-            # Простая логика извлечения ключа из URL
+            from urllib.parse import urlparse, unquote
+            
+            parsed_url = urlparse(file_url)
+            path = unquote(parsed_url.path)
+            
+            # Если это S3 URL с именем бакета
             if self.bucket_name in file_url:
-                parts = file_url.split(f"{self.bucket_name}/")
+                parts = path.split(f"/{self.bucket_name}/", 1)
                 if len(parts) > 1:
                     return parts[1]
-            return None
+                # Или если путь начинается с имени бакета
+                if path.startswith(f"/{self.bucket_name}/"):
+                    return path[len(f"/{self.bucket_name}/"):]
+            
+            # Если это прямая ссылка на объект (без имени бакета в URL)
+            # Предполагаем, что путь - это ключ объекта
+            if path.startswith("/"):
+                return path[1:]  # Убираем начальный слеш
+            
+            return path if path else None
 
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to extract key from URL {file_url}: {e}")
             return None
 
     def _is_public_bucket(self) -> bool:
@@ -518,18 +608,26 @@ class StorageService:
 
     async def get_storage_stats(self) -> Dict[str, Any]:
         """
-        Получение статистики хранилища.
+        Получение статистики хранилища (асинхронно).
 
         Returns:
             Dict[str, Any]: Статистика хранилища
         """
         try:
-            # Получаем информацию о бакete
-            response = self.s3_client.head_bucket(Bucket=self.bucket_name)
+            loop = asyncio.get_running_loop()
+            
+            # Получаем информацию о бакete асинхронно
+            await loop.run_in_executor(
+                None,
+                functools.partial(self.s3_client.head_bucket, Bucket=self.bucket_name)
+            )
 
-            # Получаем список объектов для подсчета
-            objects_response = self.s3_client.list_objects_v2(
-                Bucket=self.bucket_name, MaxKeys=1
+            # Получаем список объектов для подсчета асинхронно
+            objects_response = await loop.run_in_executor(
+                None,
+                functools.partial(self.s3_client.list_objects_v2,
+                                Bucket=self.bucket_name,
+                                MaxKeys=1)
             )
 
             return {

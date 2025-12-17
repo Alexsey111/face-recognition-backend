@@ -388,3 +388,7 @@ class BiometricService:
     async def get_all_references(db: AsyncSession, user_id: str) -> List[Reference]:
         result = await db.execute(select(Reference).where(Reference.user_id == user_id))
         return list(result.scalars().all())
+
+
+# DatabaseService alias for backward compatibility
+DatabaseService = BiometricService

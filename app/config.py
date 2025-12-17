@@ -48,6 +48,19 @@ class Settings(BaseSettings):
     S3_USE_SSL: bool = False
     S3_PUBLIC_READ: bool = False  # по умолчанию приватное хранилище
 
+    # MinIO/S3 дополнительные настройки (Phase 5)
+    MINIO_ENDPOINT: str = "http://localhost:9000"
+    MINIO_ACCESS_KEY: str = "minioadmin"
+    MINIO_SECRET_KEY: str = "minioadmin"
+    MINIO_REGION: str = "us-east-1"
+    MINIO_BUCKET: str = "face-recognition"
+    MINIO_SSL: bool = False
+    
+    # Настройки файлов (Phase 5)
+    MAX_FILE_SIZE_MB: int = 10
+    UPLOAD_EXPIRATION_DAYS: int = 30
+    CLEANUP_INTERVAL_HOURS: int = 24
+
     # Хранение исходных данных
     STORE_ORIGINAL_IMAGES: bool = False  # не сохранять исходники по умолчанию
     DELETE_SOURCE_AFTER_PROCESSING: bool = True
