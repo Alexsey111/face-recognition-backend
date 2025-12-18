@@ -4,8 +4,8 @@ Pydantic модели для работы с сессиями верификац
 """
 
 from typing import Optional, List, Dict, Any, Union
-from pydantic import BaseModel, Field, validator
-from datetime import datetime, timedelta
+from pydantic import BaseModel, Field, field_validator
+from datetime import datetime, timedelta, timezone
 import uuid
 
 
@@ -24,7 +24,7 @@ class VerificationSessionModel(BaseModel):
     request_data: Optional[Dict[str, Any]] = Field(None, description="Данные запроса")
     response_data: Optional[Dict[str, Any]] = Field(None, description="Данные ответа")
     created_at: datetime = Field(
-        default_factory=datetime.utcnow, description="Дата создания"
+        default_factory=lambda: datetime.now(timezone.utc), description="Дата создания"
     )
     started_at: Optional[datetime] = Field(None, description="Дата начала обработки")
     completed_at: Optional[datetime] = Field(None, description="Дата завершения")
@@ -42,9 +42,10 @@ class VerificationSessionModel(BaseModel):
     error_message: Optional[str] = Field(None, description="Сообщение об ошибке")
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
-    @validator("session_type")
+    @field_validator("session_type")
+    @classmethod
     def validate_session_type(cls, v):
         """Валидация типа сессии."""
         allowed_types = ["verification", "liveness", "enrollment", "identification"]
@@ -52,7 +53,8 @@ class VerificationSessionModel(BaseModel):
             raise ValueError(f"Session type must be one of: {allowed_types}")
         return v
 
-    @validator("status")
+    @field_validator("status")
+    @classmethod
     def validate_status(cls, v):
         """Валидация статуса сессии."""
         allowed_statuses = [
@@ -83,7 +85,8 @@ class VerificationSessionCreate(BaseModel):
         default=30, ge=1, le=1440, description="Время жизни сессии в минутах"
     )
 
-    @validator("session_type")
+    @field_validator("session_type")
+    @classmethod
     def validate_session_type(cls, v):
         """Валидация типа сессии."""
         return VerificationSessionModel.validate_session_type(v)
@@ -101,7 +104,8 @@ class VerificationSessionUpdate(BaseModel):
         None, description="Обновленные метаданные"
     )
 
-    @validator("status")
+    @field_validator("status")
+    @classmethod
     def validate_status(cls, v):
         """Валидация статуса сессии."""
         if v is not None:
@@ -127,7 +131,8 @@ class VerificationRequest(BaseModel):
         description="Автоматически добавить в базу эталонов при успешной верификации",
     )
 
-    @validator("image_data")
+    @field_validator("image_data")
+    @classmethod
     def validate_image_data(cls, v):
         """Валидация формата изображения."""
         if not v or len(v.strip()) == 0:
@@ -151,7 +156,8 @@ class LivenessRequest(BaseModel):
         None, description="Данные для активной проверки"
     )
 
-    @validator("challenge_type")
+    @field_validator("challenge_type")
+    @classmethod
     def validate_challenge_type(cls, v):
         """Валидация типа проверки живости."""
         if v is not None:
@@ -160,7 +166,8 @@ class LivenessRequest(BaseModel):
                 raise ValueError(f"Challenge type must be one of: {allowed_types}")
         return v
 
-    @validator("image_data")
+    @field_validator("image_data")
+    @classmethod
     def validate_image_data(cls, v):
         """Валидация формата изображения."""
         if not v or len(v.strip()) == 0:
@@ -287,14 +294,16 @@ class SessionSearch(BaseModel):
     ip_address: Optional[str] = Field(None, description="IP адрес")
     has_error: Optional[bool] = Field(None, description="Есть ли ошибка")
 
-    @validator("session_type")
+    @field_validator("session_type")
+    @classmethod
     def validate_session_type(cls, v):
         """Валидация типа сессии."""
         if v is not None:
             return VerificationSessionModel.validate_session_type(v)
         return v
 
-    @validator("status")
+    @field_validator("status")
+    @classmethod
     def validate_status(cls, v):
         """Валидация статуса сессии."""
         if v is not None:

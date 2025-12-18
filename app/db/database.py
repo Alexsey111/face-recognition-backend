@@ -154,9 +154,28 @@ class AsyncDatabaseManager:
 # Global Instances
 # ============================================================================
 
+# Временно отключено для тестирования
 # Создаем глобальные экземпляры менеджеров
-db_manager = DatabaseManager()
-async_db_manager = AsyncDatabaseManager()
+# db_manager = DatabaseManager()
+# async_db_manager = AsyncDatabaseManager()
+
+# Lazy initialization для тестирования
+_db_manager = None
+_async_db_manager = None
+
+def get_db_manager():
+    """Lazy initialization для db_manager"""
+    global _db_manager
+    if _db_manager is None:
+        _db_manager = DatabaseManager()
+    return _db_manager
+
+def get_async_db_manager():
+    """Lazy initialization для async_db_manager"""
+    global _async_db_manager
+    if _async_db_manager is None:
+        _async_db_manager = AsyncDatabaseManager()
+    return _async_db_manager
 
 # Алиас для обратной совместимости
 Base_metadata = Base.metadata
@@ -167,25 +186,28 @@ Base_metadata = Base.metadata
 
 def get_db() -> Generator[Session, None, None]:
     """Dependency injection для FastAPI - синхронная сессия."""
-    with db_manager.get_session() as session:
+    db_mgr = get_db_manager()
+    with db_mgr.get_session() as session:
         yield session
 
 async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
     """Dependency injection для FastAPI - асинхронная сессия."""
-    async with async_db_manager.get_session() as session:
+    async_db_mgr = get_async_db_manager()
+    async with async_db_mgr.get_session() as session:
         yield session
 
 # ============================================================================
 # SQLite Configuration
 # ============================================================================
 
-@event.listens_for(db_manager.engine, "connect")
-def set_sqlite_pragma(dbapi_connection, connection_record):
-    """Настройка SQLite для production."""
-    if "sqlite" in str(db_manager.database_url):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+# Отключено для тестирования - можно включить при необходимости
+# @event.listens_for(db_manager.engine, "connect")
+# def set_sqlite_pragma(dbapi_connection, connection_record):
+#     """Настройка SQLite для production."""
+#     if "sqlite" in str(db_manager.database_url):
+#         cursor = dbapi_connection.cursor()
+#         cursor.execute("PRAGMA foreign_keys=ON")
+#         cursor.close()
 
 # ============================================================================
 # Auto-Init Logic (Refined)

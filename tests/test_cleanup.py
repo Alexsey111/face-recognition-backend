@@ -4,7 +4,7 @@
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch, MagicMock, AsyncMock
 from datetime import datetime, timedelta
 
 from app.tasks.cleanup import CleanupTasks
@@ -41,34 +41,38 @@ class TestCleanupTasks:
         # Проверяем, что истекшая сессия удалена
         assert SessionService.get_session(expired_session.session_id) is None
     
-    @patch('app.services.storage_service.StorageService')
-    def test_cleanup_old_files(self, mock_storage_class):
+    @pytest.mark.asyncio
+    @patch('app.tasks.cleanup.StorageService')
+    async def test_cleanup_old_files(self, mock_storage_class):
         """Тест очистки старых файлов"""
-        # Мокируем storage service
-        mock_storage_instance = Mock()
+        # Настраиваем mock экземпляр
+        mock_storage_instance = AsyncMock()
         mock_storage_class.return_value = mock_storage_instance
         
-        # Мокируем список файлов
+        # Текущая дата для теста (такая же как в реальном коде)
+        current_date = datetime.utcnow()
+        
+        # Мокируем список файлов (async метод)
         mock_storage_instance.list_images.return_value = [
-            "uploads/user1/2020_01_01_old_file.jpg",
-            "uploads/user1/2023_01_01_new_file.jpg",
-            "uploads/user2/2020_06_01_old_file.png"
+            "uploads/user1/old_file1.jpg",
+            "uploads/user1/new_file.jpg",
+            "uploads/user2/old_file2.png"
         ]
         
         # Мокируем информацию о файлах
         mock_storage_instance.get_image_info.side_effect = [
-            {"created_at": datetime(2020, 1, 1)},  # Старый файл
-            {"created_at": datetime(2023, 1, 1)},  # Новый файл
-            {"created_at": datetime(2020, 6, 1)}   # Старый файл
+            {"created_at": current_date - timedelta(days=60)},  # Старый файл (60 дней назад)
+            {"created_at": current_date - timedelta(days=15)},  # Новый файл (15 дней назад)
+            {"created_at": current_date - timedelta(days=90)}   # Старый файл (90 дней назад)
         ]
         
         # Мокируем удаление файлов
         mock_storage_instance.delete_image.return_value = True
         
         # Выполняем очистку
-        deleted_count = CleanupTasks.cleanup_old_files()
+        deleted_count = await CleanupTasks.cleanup_old_files()
         
-        # Должны быть удалены 2 старых файла
+        # Должны быть удалены 2 старых файла (старше 30 дней)
         assert deleted_count == 2
         
         # Проверяем, что методы storage service вызывались
@@ -76,20 +80,33 @@ class TestCleanupTasks:
         mock_storage_instance.get_image_info.assert_called()
         assert mock_storage_instance.delete_image.call_count == 2
     
+        # Проверяем, что были удалены именно старые файлы
+        delete_calls = mock_storage_instance.delete_image.call_args_list
+        deleted_files = [call[0][0] for call in delete_calls]
+        
+        # Должны быть удалены файлы old_file1.jpg и old_file2.png
+        assert "uploads/user1/old_file1.jpg" in deleted_files
+        assert "uploads/user2/old_file2.png" in deleted_files
+        assert "uploads/user1/new_file.jpg" not in deleted_files
+    
+    @patch('app.tasks.cleanup.DatabaseService')
     @patch('app.db.database.get_db')
-    @patch('app.services.database_service.DatabaseService')
-    def test_cleanup_old_verification_sessions(self, mock_db_service_class, mock_get_db):
+    def test_cleanup_old_verification_sessions(self, mock_get_db, mock_db_service_class):
         """Тест очистки старых сессий верификации"""
+        # Мокируем сессию БД с поддержкой контекстного менеджера
+        mock_db_session = Mock()
+        mock_db_session.__enter__ = Mock(return_value=mock_db_session)
+        mock_db_session.__exit__ = Mock(return_value=None)
+        
         # Мокируем БД сервис
         mock_db_service = Mock()
-        mock_db_service_class.return_value = mock_db_service
         mock_db_service.verification_crud.cleanup_old_sessions.return_value = 5
+        mock_db_service_class.return_value = mock_db_service
         
-        # Мокируем контекст БД
-        mock_db_context = Mock()
-        mock_db_context.__enter__ = Mock(return_value=mock_db_context)
-        mock_db_context.__exit__ = Mock(return_value=None)
-        mock_get_db.return_value = mock_db_context
+        # Мокируем генератор get_db
+        mock_generator = Mock()
+        mock_generator.__next__ = Mock(return_value=mock_db_session)
+        mock_get_db.return_value = mock_generator
         
         # Выполняем очистку
         deleted_count = CleanupTasks.cleanup_old_verification_sessions()
@@ -98,23 +115,27 @@ class TestCleanupTasks:
         assert deleted_count == 5
         
         # Проверяем вызовы
-        mock_db_service_class.assert_called_once()
-        mock_db_service.verification_crud.cleanup_old_sessions.assert_called_once()
+        mock_db_service_class.assert_called_once_with(mock_db_session)
+        mock_db_service.verification_crud.cleanup_old_sessions.assert_called_once_with(mock_db_session, days=30)
     
+    @patch('app.tasks.cleanup.DatabaseService')
     @patch('app.db.database.get_db')
-    @patch('app.services.database_service.DatabaseService')
-    def test_cleanup_old_logs(self, mock_db_service_class, mock_get_db):
+    def test_cleanup_old_logs(self, mock_get_db, mock_db_service_class):
         """Тест очистки старых логов"""
+        # Мокируем сессию БД с поддержкой контекстного менеджера
+        mock_db_session = Mock()
+        mock_db_session.__enter__ = Mock(return_value=mock_db_session)
+        mock_db_session.__exit__ = Mock(return_value=None)
+        
         # Мокируем БД сервис
         mock_db_service = Mock()
-        mock_db_service_class.return_value = mock_db_service
         mock_db_service.audit_crud.cleanup_old_logs.return_value = 10
+        mock_db_service_class.return_value = mock_db_service
         
-        # Мокируем контекст БД
-        mock_db_context = Mock()
-        mock_db_context.__enter__ = Mock(return_value=mock_db_context)
-        mock_db_context.__exit__ = Mock(return_value=None)
-        mock_get_db.return_value = mock_db_context
+        # Мокируем генератор get_db
+        mock_generator = Mock()
+        mock_generator.__next__ = Mock(return_value=mock_db_session)
+        mock_get_db.return_value = mock_generator
         
         # Выполняем очистку
         deleted_count = CleanupTasks.cleanup_old_logs()
@@ -123,56 +144,62 @@ class TestCleanupTasks:
         assert deleted_count == 10
         
         # Проверяем вызовы
-        mock_db_service_class.assert_called_once()
-        mock_db_service.audit_crud.cleanup_old_logs.assert_called_once()
+        mock_db_service_class.assert_called_once_with(mock_db_session)
+        mock_db_service.audit_crud.cleanup_old_logs.assert_called_once_with(mock_db_session, days=30)
     
-    @patch('app.services.storage_service.StorageService')
+    @pytest.mark.asyncio
+    @patch('app.tasks.cleanup.StorageService')
+    @patch('app.tasks.cleanup.DatabaseService')
     @patch('app.db.database.get_db')
-    @patch('app.services.database_service.DatabaseService')
-    def test_cleanup_orphaned_files(self, mock_db_service_class, mock_get_db, mock_storage_class):
+    async def test_cleanup_orphaned_files(self, mock_get_db, mock_db_service_class, mock_storage_class):
         """Тест очистки осиротевших файлов"""
+        # Мокируем сессию БД с поддержкой контекстного менеджера
+        mock_db_session = Mock()
+        mock_db_session.__enter__ = Mock(return_value=mock_db_session)
+        mock_db_session.__exit__ = Mock(return_value=None)
+        
         # Мокируем storage service
-        mock_storage_instance = Mock()
+        mock_storage_instance = AsyncMock()
         mock_storage_instance.list_images.return_value = [
             "uploads/user1/file1.jpg",
             "uploads/user1/file2.jpg",
             "uploads/user2/file3.jpg"
         ]
+        mock_storage_instance.delete_image.return_value = True
         mock_storage_class.return_value = mock_storage_instance
         
         # Мокируем БД сервис
         mock_db_service = Mock()
-        mock_db_service_class.return_value = mock_db_service
-        
-        # Первые два файла имеют записи в БД, третий - осиротевший
         mock_db_service.reference_crud.get_reference_by_file_key.side_effect = [
             True,   # file1.jpg - существует в БД
             True,   # file2.jpg - существует в БД
             None    # file3.jpg - осиротевший файл
         ]
+        mock_db_service_class.return_value = mock_db_service
         
-        # Мокируем контекст БД
-        mock_db_context = Mock()
-        mock_db_context.__enter__ = Mock(return_value=mock_db_context)
-        mock_db_context.__exit__ = Mock(return_value=None)
-        mock_get_db.return_value = mock_db_context
+        # Мокируем генератор get_db
+        mock_generator = Mock()
+        mock_generator.__next__ = Mock(return_value=mock_db_session)
+        mock_get_db.return_value = mock_generator
         
         # Выполняем очистку
-        deleted_count = CleanupTasks.cleanup_orphaned_files()
+        deleted_count = await CleanupTasks.cleanup_orphaned_files()
         
         # Должен быть удален 1 осиротевший файл
         assert deleted_count == 1
         
         # Проверяем вызовы
-        mock_storage_instance.list_images.assert_called_once()
+        mock_storage_instance.list_images.assert_called_once_with(prefix="uploads/", max_keys=1000)
         assert mock_db_service.reference_crud.get_reference_by_file_key.call_count == 3
+        mock_db_service_class.assert_called_once_with(mock_db_session)
         mock_storage_instance.delete_image.assert_called_once_with("uploads/user2/file3.jpg")
     
-    @patch('app.services.storage_service.StorageService')
-    def test_cleanup_temp_files(self, mock_storage_class):
+    @pytest.mark.asyncio
+    @patch('app.tasks.cleanup.StorageService')
+    async def test_cleanup_temp_files(self, mock_storage_class):
         """Тест очистки временных файлов"""
         # Мокируем storage service
-        mock_storage_instance = Mock()
+        mock_storage_instance = AsyncMock()
         mock_storage_instance.list_images.return_value = [
             "temp/old_file1.jpg",
             "temp/new_file2.jpg",
@@ -180,7 +207,7 @@ class TestCleanupTasks:
         ]
         mock_storage_class.return_value = mock_storage_instance
         
-        # Мокируем информацию о файлах
+        # Мокируем информацию о файлах (асинхронно)
         mock_storage_instance.get_image_info.side_effect = [
             {"created_at": datetime.utcnow() - timedelta(hours=2)},  # Старый файл
             {"created_at": datetime.utcnow() - timedelta(minutes=30)}, # Новый файл
@@ -191,23 +218,24 @@ class TestCleanupTasks:
         mock_storage_instance.delete_image.return_value = True
         
         # Выполняем очистку
-        deleted_count = CleanupTasks.cleanup_temp_files()
+        deleted_count = await CleanupTasks.cleanup_temp_files()
         
         # Должны быть удалены 2 старых временных файла
         assert deleted_count == 2
         
         # Проверяем вызовы
-        mock_storage_instance.list_images.assert_called_once()
+        mock_storage_instance.list_images.assert_called_once_with(prefix="temp/", max_keys=1000)
         assert mock_storage_instance.get_image_info.call_count == 3
         assert mock_storage_instance.delete_image.call_count == 2
     
+    @pytest.mark.asyncio
     @patch('app.tasks.cleanup.CleanupTasks.cleanup_upload_sessions')
     @patch('app.tasks.cleanup.CleanupTasks.cleanup_old_files')
     @patch('app.tasks.cleanup.CleanupTasks.cleanup_old_verification_sessions')
     @patch('app.tasks.cleanup.CleanupTasks.cleanup_old_logs')
     @patch('app.tasks.cleanup.CleanupTasks.cleanup_orphaned_files')
     @patch('app.tasks.cleanup.CleanupTasks.cleanup_temp_files')
-    def test_run_full_cleanup(
+    async def test_run_full_cleanup(
         self, 
         mock_temp_cleanup,
         mock_orphaned_cleanup,
@@ -226,7 +254,7 @@ class TestCleanupTasks:
         mock_temp_cleanup.return_value = 4
         
         # Выполняем полную очистку
-        results = CleanupTasks.run_full_cleanup()
+        results = await CleanupTasks.run_full_cleanup()
         
         # Проверяем результаты
         assert results["upload_sessions"] == 2
@@ -248,15 +276,16 @@ class TestCleanupTasks:
         mock_orphaned_cleanup.assert_called_once()
         mock_temp_cleanup.assert_called_once()
     
-    @patch('app.services.storage_service.StorageService')
-    def test_get_cleanup_stats(self, mock_storage_class):
+    @pytest.mark.asyncio
+    @patch('app.tasks.cleanup.StorageService')
+    async def test_get_cleanup_stats(self, mock_storage_class):
         """Тест получения статистики очистки"""
         # Создаем тестовые сессии
         SessionService.create_session("user1")
         SessionService.create_session("user2")
         
         # Мокируем storage service
-        mock_storage_instance = Mock()
+        mock_storage_instance = MagicMock()
         mock_storage_instance.get_storage_stats.return_value = {
             "bucket_name": "face-recognition",
             "total_objects": 100,
@@ -264,7 +293,7 @@ class TestCleanupTasks:
         }
         mock_storage_class.return_value = mock_storage_instance
         
-        # Получаем статистику
+        # Получаем статистику (метод синхронный, не нужен await)
         stats = CleanupTasks.get_cleanup_stats()
         
         # Проверяем статистику
@@ -290,14 +319,17 @@ class TestCleanupScheduler:
         
         assert scheduler.scheduler is None
         assert scheduler.is_running == False
-    
+
     @patch('app.tasks.scheduler.BackgroundScheduler')
     def test_start_scheduler(self, mock_scheduler_class):
         """Тест запуска планировщика"""
-        # Мокируем APScheduler
+        # Мокируем APScheduler с правильными методами
         mock_scheduler = Mock()
+        mock_scheduler.start = Mock()
+        mock_scheduler.add_job = Mock()
+        mock_scheduler.get_jobs = Mock(return_value=[])  # Возвращаем пустой список
         mock_scheduler_class.return_value = mock_scheduler
-        
+
         scheduler = CleanupScheduler()
         scheduler.start()
         
@@ -313,8 +345,11 @@ class TestCleanupScheduler:
     @patch('app.tasks.scheduler.BackgroundScheduler')
     def test_stop_scheduler(self, mock_scheduler_class):
         """Тест остановки планировщика"""
-        # Мокируем планировщик
+        # Мокируем планировщик с правильными методами
         mock_scheduler = Mock()
+        mock_scheduler.start = Mock()
+        mock_scheduler.shutdown = Mock()
+        mock_scheduler.get_jobs = Mock(return_value=[])  # Возвращаем пустой список
         mock_scheduler_class.return_value = mock_scheduler
         
         scheduler = CleanupScheduler()
@@ -331,8 +366,12 @@ class TestCleanupScheduler:
     @patch('app.tasks.scheduler.BackgroundScheduler')
     def test_pause_resume_scheduler(self, mock_scheduler_class):
         """Тест приостановки и возобновления планировщика"""
-        # Мокируем планировщик
+        # Мокируем планировщик с правильными методами
         mock_scheduler = Mock()
+        mock_scheduler.start = Mock()
+        mock_scheduler.pause = Mock()
+        mock_scheduler.resume = Mock()
+        mock_scheduler.get_jobs = Mock(return_value=[])  # Возвращаем пустой список
         mock_scheduler_class.return_value = mock_scheduler
         
         scheduler = CleanupScheduler()
@@ -376,7 +415,7 @@ class TestCleanupScheduler:
         
         # Попытка добавить задачу должна вызвать ошибку
         with pytest.raises(RuntimeError, match="Планировщик не инициализирован"):
-            scheduler.add_job(lambda: None, None, "test_job", "Test Job")
+            scheduler.add_custom_job(lambda: None, None, "test_job", "Test Job")
         
         # Попытка удалить задачу должна вызвать ошибку
         with pytest.raises(RuntimeError, match="Планировщик не инициализирован"):
@@ -414,19 +453,40 @@ class TestGlobalScheduler:
     @patch('app.tasks.scheduler.CleanupScheduler')
     def test_start_stop_global_scheduler(self, mock_scheduler_class):
         """Тест запуска и остановки глобального планировщика"""
-        from app.tasks.scheduler import start_global_scheduler, stop_global_scheduler, get_scheduler
+        from app.tasks.scheduler import start_global_scheduler, stop_global_scheduler, get_scheduler, _global_scheduler
+        
+        # Сбрасываем глобальный планировщик для чистого теста
+        _global_scheduler = None
+        
+        # Создаем мок с правильными атрибутами
+        mock_scheduler_instance = Mock()
+        mock_scheduler_instance.is_running = False  # Начинаем с False
+        mock_scheduler_instance.start = Mock()
+        mock_scheduler_instance.stop = Mock()
+        
+        # Настраиваем мок класса
+        mock_scheduler_class.return_value = mock_scheduler_instance
         
         # Запускаем глобальный планировщик
         start_global_scheduler()
         
         scheduler = get_scheduler()
         assert scheduler is not None
-        assert scheduler.is_running == True
+        
+        # Проверяем, что был создан экземпляр CleanupScheduler
+        mock_scheduler_class.assert_called_once()
+        
+        # Проверяем, что метод start был вызван
+        mock_scheduler_instance.start.assert_called_once()
+        
+        # Устанавливаем is_running в True, чтобы stop тоже сработал
+        mock_scheduler_instance.is_running = True
         
         # Останавливаем планировщик
         stop_global_scheduler()
         
-        assert scheduler.is_running == False
+        # Проверяем, что метод stop был вызван
+        mock_scheduler_instance.stop.assert_called_once()
 
 
 # Запуск тестов

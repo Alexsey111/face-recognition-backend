@@ -253,6 +253,10 @@ def measure_time(threshold: Optional[float] = None, logger_name: Optional[str] =
     return decorator
 
 
+# Backward compatibility alias
+log_execution_time = measure_time
+
+
 def retry_on_failure(
     max_retries: int = 3,
     delay: float = 1.0,

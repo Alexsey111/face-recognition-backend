@@ -107,7 +107,7 @@ class TestDecorators:
     
     def test_retry_on_failure_success(self):
         """Тест декоратора повторных попыток при успехе"""
-        @retry_on_failure(max_attempts=3, delay=1)
+        @retry_on_failure(max_retries=3, delay=1)
         def successful_function():
             return "success"
         
@@ -116,7 +116,7 @@ class TestDecorators:
     
     def test_retry_on_failure_failure(self):
         """Тест декоратора повторных попыток при неудаче"""
-        @retry_on_failure(max_attempts=2, delay=0.1)
+        @retry_on_failure(max_retries=2, delay=0.1)
         def failing_function():
             raise ValueError("Test error")
         
@@ -129,7 +129,7 @@ class TestDecorators:
         def test_function(data: dict, count: int):
             return f"Processed {count} items: {data}"
         
-        result = test_function({"key": "value"}, 5)
+        result = test_function(data={"key": "value"}, count=5)
         assert result == "Processed 5 items: {'key': 'value'}"
     
     def test_validate_input_invalid(self):
@@ -148,7 +148,6 @@ class TestDecorators:
     
     def test_log_execution_time(self):
         """Тест декоратора логирования времени выполнения"""
-        @log_execution_time
         def slow_function():
             import time
             time.sleep(0.1)  # Имитация медленной операции

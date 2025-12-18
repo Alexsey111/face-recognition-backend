@@ -512,9 +512,9 @@ class TestStringSanitization:
         string = "abc123!@#xyz"
         clean_string = sanitize_string(string, allowed_chars="abc123")
         
-        # Функция добавляет c.isalnum() or c.isspace() к разрешенным символам
-        # Поэтому xyz тоже проходит (как алфавольно-цифровые символы)
-        assert clean_string == "abc123xyz"
+        # Функция сохраняет только символы из allowed_chars
+        # Все остальные символы удаляются
+        assert clean_string == "abc123"
 
     def test_empty_string(self):
         """Тест пустой строки."""

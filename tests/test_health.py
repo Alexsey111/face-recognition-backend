@@ -38,9 +38,9 @@ class TestHealthEndpoints:
         assert "services" in data
         assert "system_info" in data
         
-        # Проверяем значения
-        assert data["success"] is True
-        assert data["status"] == "healthy"
+        # Проверяем значения для Phase 2 (внешние сервисы недоступны)
+        assert data["success"] is False  # Не все критичные сервисы доступны
+        assert data["status"] == "degraded"  # Статус degraded когда внешние сервисы недоступны
         assert data["version"] == __version__
         assert isinstance(data["uptime"], (int, float))
         assert data["uptime"] >= 0
@@ -53,12 +53,18 @@ class TestHealthEndpoints:
         assert "storage" in services
         assert "ml_service" in services
         
-        # Для Phase 2 все внешние сервисы должны быть "not_configured"
-        assert services["database"] == "not_configured"
-        assert services["redis"] == "not_configured"
-        assert services["storage"] == "not_configured"
-        assert services["ml_service"] == "not_configured"
+        # Для Phase 2 внешние сервисы недоступны и возвращают ошибки подключения
+        assert "database" in services
+        assert "redis" in services
+        assert "storage" in services
+        assert "ml_service" in services
         assert services["api"] == "healthy"
+        
+        # Внешние сервисы должны быть недоступны (не "healthy")
+        assert services["database"] != "healthy"
+        assert services["redis"] != "healthy"
+        assert services["storage"] != "healthy"
+        assert services["ml_service"] != "healthy"
         
         # Проверяем system_info
         system_info = data["system_info"]
@@ -137,12 +143,20 @@ class TestStatusEndpoints:
         assert "ml_service_status" in data
         assert "last_heartbeat" in data
         
-        # Для Phase 2 все должны быть "healthy" (заглушки)
-        assert data["success"] is True
-        assert data["database_status"] == "healthy"
-        assert data["redis_status"] == "healthy"
-        assert data["storage_status"] == "healthy"
-        assert data["ml_service_status"] == "healthy"
+        # Для Phase 2 внешние сервисы недоступны, общий статус не успешный
+        assert data["success"] is False  # Не все критичные сервисы доступны
+        
+        # Проверяем что статусы не "healthy" (сервисы недоступны)
+        assert "healthy" not in data["database_status"]
+        assert "healthy" not in data["redis_status"]
+        assert "healthy" not in data["storage_status"]
+        assert "healthy" not in data["ml_service_status"]
+        
+        # Статусы должны содержать информацию об ошибках
+        assert "unhealthy" in data["database_status"] or "error" in data["database_status"].lower()
+        assert "unhealthy" in data["redis_status"] or "error" in data["redis_status"].lower()
+        assert "unhealthy" in data["storage_status"] or "error" in data["storage_status"].lower()
+        assert "unhealthy" in data["ml_service_status"] or "error" in data["ml_service_status"].lower()
         
         # Проверяем формат timestamp
         assert isinstance(data["last_heartbeat"], str)

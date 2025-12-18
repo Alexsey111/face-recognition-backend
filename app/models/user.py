@@ -4,8 +4,8 @@ Pydantic модели для работы с пользователями.
 """
 
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, EmailStr, validator
-from datetime import datetime
+from pydantic import BaseModel, Field, EmailStr, field_validator
+from datetime import datetime, timezone
 import uuid
 
 
@@ -26,7 +26,7 @@ class UserModel(BaseModel):
         default=False, description="Верифицирован ли пользователь"
     )
     created_at: datetime = Field(
-        default_factory=datetime.utcnow, description="Дата создания"
+        default_factory=lambda: datetime.now(timezone.utc), description="Дата создания"
     )
     updated_at: Optional[datetime] = Field(
         None, description="Дата последнего обновления"
@@ -46,7 +46,7 @@ class UserModel(BaseModel):
     )
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class UserCreate(BaseModel):
@@ -95,14 +95,17 @@ class UserPasswordChange(BaseModel):
     new_password: str = Field(..., min_length=8, description="Новый пароль")
     confirm_password: str = Field(..., description="Подтверждение нового пароля")
 
-    @validator("confirm_password")
-    def passwords_match(cls, v, values):
+    @field_validator("confirm_password")
+    @classmethod
+    def passwords_match(cls, v, info):
         """Проверка совпадения паролей."""
-        if "new_password" in values and v != values["new_password"]:
+        new_password = info.data.get("new_password")
+        if new_password is not None and v != new_password:
             raise ValueError("Passwords do not match")
         return v
 
-    @validator("new_password")
+    @field_validator("new_password")
+    @classmethod
     def validate_new_password(cls, v):
         """Валидация нового пароля."""
         if len(v) < 8:
@@ -138,14 +141,17 @@ class UserPasswordResetConfirm(BaseModel):
     new_password: str = Field(..., min_length=8, description="Новый пароль")
     confirm_password: str = Field(..., description="Подтверждение нового пароля")
 
-    @validator("confirm_password")
-    def passwords_match(cls, v, values):
+    @field_validator("confirm_password")
+    @classmethod
+    def passwords_match(cls, v, info):
         """Проверка совпадения паролей."""
-        if "new_password" in values and v != values["new_password"]:
+        new_password = info.data.get("new_password")
+        if new_password is not None and v != new_password:
             raise ValueError("Passwords do not match")
         return v
 
-    @validator("new_password")
+    @field_validator("new_password")
+    @classmethod
     def validate_new_password(cls, v):
         """Валидация нового пароля."""
         if len(v) < 8:

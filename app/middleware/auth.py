@@ -14,10 +14,6 @@ import hashlib
 
 from ..config import settings
 from ..utils.logger import get_logger
-# ❌ УДАЛИ эту строку
-# from ..services.cache_service import CacheService
-# ✅ Phase 5: когда создашь cache_service, раскомментируй
-# TODO Phase 5: Implement CacheService
 
 logger = get_logger(__name__)
 
@@ -25,10 +21,10 @@ logger = get_logger(__name__)
 security = HTTPBearer(auto_error=False)
 
 
-# ✅ Временное решение для Phase 2:
 class AuthMiddleware(BaseHTTPMiddleware):
     """
-    Middleware для обработки аутентификации.
+    Middleware для обработки аутентификации и авторизации.
+    Обрабатывает JWT токены и добавляет информацию о пользователе в request state.
     """
 
     def __init__(self, app):
@@ -36,7 +32,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
         self.jwt_secret_key = settings.JWT_SECRET_KEY
         self.jwt_algorithm = settings.JWT_ALGORITHM
         self.jwt_access_token_expire_minutes = settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES
-        # self.cache_service = CacheService()  # TODO Phase 3
 
     async def dispatch(self, request: Request, call_next):
         """Обработка запроса с проверкой аутентификации."""
@@ -90,11 +85,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
             "/api/v1/ready",
             "/api/v1/live",
             "/api/v1/metrics",
-            # ✅ Auth endpoints (критично!)
+            # ✅ Auth endpoints (критично!) - поддерживаем оба формата
             "/api/v1/auth/login",
             "/api/v1/auth/register",
             "/api/v1/auth/refresh",
             "/api/v1/auth/verify",
+            "/auth/login",
+            "/auth/register", 
+            "/auth/refresh",
+            "/auth/verify",
         ]
 
         path = request.url.path
@@ -246,7 +245,4 @@ class RequireAuth:
         return wrapper
 
 
-# ❌ ЭТИ ФУНКЦИИ НУЖНО УДАЛИТЬ:
-# async def create_access_token(...)  # Есть в auth_service
-# async def create_refresh_token(...)  # Есть в auth_service  
-# async def revoke_token(...)  # Есть в auth_service
+

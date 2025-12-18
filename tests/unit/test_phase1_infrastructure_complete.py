@@ -40,7 +40,7 @@ class TestPhase1Infrastructure:
         dockerfile_path = project_root / "Dockerfile"
         assert dockerfile_path.exists(), "Dockerfile должен существовать"
         
-        content = dockerfile_path.read_text()
+        content = dockerfile_path.read_text(encoding='utf-8')
         assert "FROM python:" in content, "Должен использовать базовый образ Python"
         assert "MULTI-STAGE" in content.upper() or "as builder" in content, "Должен использовать multi-stage build"
         assert "useradd" in content or "USER" in content, "Должен создавать non-root пользователя"
@@ -49,7 +49,7 @@ class TestPhase1Infrastructure:
     def test_dockerfile_production_optimization(self, project_root):
         """Тест: Dockerfile production оптимизирован."""
         dockerfile_path = project_root / "Dockerfile"
-        content = dockerfile_path.read_text()
+        content = dockerfile_path.read_text(encoding='utf-8')
         
         # Проверяем оптимизации слоев
         assert "apt-get clean" in content or "rm -rf /var/lib/apt/lists/*" in content, \
@@ -68,14 +68,14 @@ class TestPhase1Infrastructure:
         dockerfile_dev_path = project_root / "Dockerfile.dev"
         assert dockerfile_dev_path.exists(), "Dockerfile.dev должен существовать"
         
-        content = dockerfile_dev_path.read_text()
+        content = dockerfile_path.read_text(encoding='utf-8')
         assert "FROM python:" in content, "Должен использовать базовый образ Python"
         assert "requirements-dev.txt" in content, "Должен устанавливать dev зависимости"
 
     def test_dockerfile_dev_hot_reload(self, project_root):
         """Тест: Dockerfile.dev настроен для hot-reload."""
         dockerfile_dev_path = project_root / "Dockerfile.dev"
-        content = dockerfile_dev_path.read_text()
+        content = dockerfile_dev_path.read_text(encoding='utf-8')
         
         assert "EXPOSE 8000" in content, "Должен экспортировать порт 8000"
         # Проверяем настройки для разработки
@@ -191,7 +191,7 @@ class TestPhase1Infrastructure:
         dockerignore_path = project_root / ".dockerignore"
         assert dockerignore_path.exists(), ".dockerignore должен существовать"
         
-        content = dockerignore_path.read_text()
+        content = dockerignore_path.read_text(encoding='utf-8')
         
         # Проверяем основные исключения
         assert "__pycache__" in content, "Должен исключать __pycache__"
@@ -202,7 +202,7 @@ class TestPhase1Infrastructure:
     def test_dockerignore_comprehensive(self, project_root):
         """Тест: .dockerignore содержит comprehensive exclusions."""
         dockerignore_path = project_root / ".dockerignore"
-        content = dockerignore_path.read_text()
+        content = dockerignore_path.read_text(encoding='utf-8')
         
         # Проверяем дополнительные исключения
         assert "node_modules" in content, "Должен исключать node_modules"
@@ -225,7 +225,7 @@ class TestPhase1Infrastructure:
         env_py_path = project_root / "alembic" / "env.py"
         assert env_py_path.exists(), "alembic/env.py должен существовать"
         
-        content = env_py_path.read_text()
+        content = env_py_path.read_text(encoding='utf-8')
         assert "from sqlalchemy" in content, "Должен импортировать SQLAlchemy"
         assert "target_metadata" in content, "Должен содержать target_metadata"
         assert "Base.metadata" in content, "Должен использовать Base.metadata"
@@ -240,7 +240,7 @@ class TestPhase1Infrastructure:
         migration_path = project_root / "alembic" / "versions" / "001_initial_migration.py"
         assert migration_path.exists(), "Первая миграция должна существовать"
         
-        content = migration_path.read_text()
+        content = migration_path.read_text(encoding='utf-8')
         assert "def upgrade" in content, "Должна содержать функцию upgrade"
         assert "def downgrade" in content, "Должна содержать функцию downgrade"
         assert "op.create_table" in content, "Должна создавать таблицы"
@@ -252,7 +252,7 @@ class TestPhase1Infrastructure:
     def test_users_table_creation(self, project_root):
         """Тест: Таблица users создана."""
         migration_path = project_root / "alembic" / "versions" / "001_initial_migration.py"
-        content = migration_path.read_text()
+        content = migration_path.read_text(encoding='utf-8')
         
         assert "create_table('users'" in content, "Должна создаваться таблица users"
         assert "sa.Column('id'" in content, "Таблица users должна иметь колонку id"
@@ -262,7 +262,7 @@ class TestPhase1Infrastructure:
     def test_references_table_creation(self, project_root):
         """Тест: Таблица references создана."""
         migration_path = project_root / "alembic" / "versions" / "001_initial_migration.py"
-        content = migration_path.read_text()
+        content = migration_path.read_text(encoding='utf-8')
         
         assert "create_table('references'" in content, "Должна создаваться таблица references"
         assert "sa.Column('user_id'" in content, "Таблица references должна иметь user_id"
@@ -272,7 +272,7 @@ class TestPhase1Infrastructure:
     def test_verification_sessions_table_creation(self, project_root):
         """Тест: Таблица verification_sessions создана."""
         migration_path = project_root / "alembic" / "versions" / "001_initial_migration.py"
-        content = migration_path.read_text()
+        content = migration_path.read_text(encoding='utf-8')
         
         assert "create_table('verification_sessions'" in content, \
             "Должна создаваться таблица verification_sessions"
@@ -348,7 +348,7 @@ class TestPhase1Infrastructure:
         cache_service_path = project_root / "app" / "services" / "cache_service.py"
         assert cache_service_path.exists(), "CacheService должен существовать"
         
-        content = cache_service_path.read_text()
+        content = cache_service_path.read_text(encoding='utf-8')
         assert "class CacheService" in content, "Должен быть класс CacheService"
         assert "redis" in content, "CacheService должен использовать redis"
         assert "health_check" in content, "CacheService должен иметь health_check метод"
@@ -369,7 +369,7 @@ class TestPhase1Infrastructure:
         storage_service_path = project_root / "app" / "services" / "storage_service.py"
         assert storage_service_path.exists(), "StorageService должен существовать"
         
-        content = storage_service_path.read_text()
+        content = storage_service_path.read_text(encoding='utf-8')
         assert "class StorageService" in content, "Должен быть класс StorageService"
         assert "boto3" in content, "StorageService должен использовать boto3"
         assert "S3" in content or "s3" in content, "StorageService должен работать с S3"
@@ -379,7 +379,7 @@ class TestPhase1Infrastructure:
         setup_script_path = project_root / "setup_minio.py"
         assert setup_script_path.exists(), "setup_minio.py должен существовать"
         
-        content = setup_script_path.read_text()
+        content = setup_script_path.read_text(encoding='utf-8')
         assert "Minio" in content or "minio" in content, "Скрипт должен использовать Minio"
         assert "bucket" in content.lower(), "Скрипт должен создавать bucket'ы"
 
@@ -403,7 +403,7 @@ class TestPhase1Infrastructure:
         config_path = project_root / "app" / "config.py"
         assert config_path.exists(), "config.py должен существовать"
         
-        content = config_path.read_text()
+        content = config_path.read_text(encoding='utf-8')
         assert "class Settings" in content, "Должен быть класс Settings"
         assert "BaseSettings" in content, "Settings должен наследоваться от BaseSettings"
 
@@ -439,7 +439,7 @@ class TestPhase1Infrastructure:
     def test_config_validation(self, project_root):
         """Тест: Config validation настроена."""
         config_path = project_root / "app" / "config.py"
-        content = config_path.read_text()
+        content = config_path.read_text(encoding='utf-8')
         
         assert "@field_validator" in content, "Должны быть field validators"
         assert "ValidationInfo" in content, "Должны быть ValidationInfo"
@@ -453,7 +453,7 @@ class TestPhase1Infrastructure:
         env_example_path = project_root / ".env.example"
         assert env_example_path.exists(), ".env.example должен существовать"
         
-        content = env_example_path.read_text()
+        content = env_example_path.read_text(encoding='utf-8')
         
         # Проверяем основные переменные
         assert "DATABASE_URL=" in content, "Должна быть DATABASE_URL переменная"
@@ -464,7 +464,7 @@ class TestPhase1Infrastructure:
     def test_env_example_documentation(self, project_root):
         """Тест: .env.example содержит документацию."""
         env_example_path = project_root / ".env.example"
-        content = env_example_path.read_text()
+        content = env_example_path.read_text(encoding='utf-8')
         
         assert "#" in content, "Должны быть комментарии"
         assert "Face Recognition Service" in content, "Должны быть описания"
@@ -474,7 +474,7 @@ class TestPhase1Infrastructure:
         requirements_path = project_root / "requirements.txt"
         assert requirements_path.exists(), "requirements.txt должен существовать"
         
-        content = requirements_path.read_text()
+        content = requirements_path.read_text(encoding='utf-8')
         
         # Проверяем основные зависимости
         assert "fastapi" in content, "Должна быть зависимость fastapi"
@@ -486,7 +486,7 @@ class TestPhase1Infrastructure:
     def test_requirements_version_pinning(self, project_root):
         """Тест: requirements.txt содержит version pinning."""
         requirements_path = project_root / "requirements.txt"
-        content = requirements_path.read_text()
+        content = requirements_path.read_text(encoding='utf-8')
         
         # Проверяем, что есть версии (==)
         lines_with_versions = [line for line in content.split('\n') if '==' in line]
@@ -501,14 +501,14 @@ class TestPhase1Infrastructure:
         requirements_dev_path = project_root / "requirements-dev.txt"
         assert requirements_dev_path.exists(), "requirements-dev.txt должен существовать"
         
-        content = requirements_dev_path.read_text()
+        content = requirements_dev_path.read_text(encoding='utf-8')
         assert "-r requirements.txt" in content or "requirements.txt" in content, \
             "Должен включать production dependencies"
 
     def test_dev_dependencies(self, project_root):
         """Тест: requirements-dev.txt содержит dev зависимости."""
         requirements_dev_path = project_root / "requirements-dev.txt"
-        content = requirements_dev_path.read_text()
+        content = requirements_dev_path.read_text(encoding='utf-8')
         
         # Проверяем dev инструменты
         assert "pytest" in content, "Должна быть зависимость pytest"
@@ -521,7 +521,7 @@ class TestPhase1Infrastructure:
         pytest_ini_path = project_root / "pytest.ini"
         assert pytest_ini_path.exists(), "pytest.ini должен существовать"
         
-        content = pytest_ini_path.read_text()
+        content = pytest_ini_path.read_text(encoding='utf-8')
         assert "[tool:pytest]" in content or "[pytest]" in content, \
             "Должен быть правильно настроен pytest.ini"
         assert "testpaths" in content, "Должны быть настроены testpaths"
@@ -532,7 +532,7 @@ class TestPhase1Infrastructure:
         pyproject_path = project_root / "pyproject.toml"
         assert pyproject_path.exists(), "pyproject.toml должен существовать"
         
-        with open(pyproject_path, 'r') as f:
+        with open(pyproject_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
         
         assert "project" in config, "Должна быть секция project"

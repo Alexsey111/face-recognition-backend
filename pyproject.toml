@@ -253,27 +253,6 @@ filterwarnings = [
     "ignore::RuntimeWarning"
 ]
 asyncio_mode = "auto"
-env = [
-    "ENVIRONMENT = test",
-    "DEBUG = true",
-    "DATABASE_URL = postgresql://test:test@localhost:5432/test_db",
-    "REDIS_URL = redis://localhost:6379/0",
-    "S3_ENDPOINT_URL = http://localhost:9000",
-    "S3_ACCESS_KEY = test",
-    "S3_SECRET_KEY = test",
-    "JWT_SECRET_KEY = test-jwt-secret-key-for-testing",
-    "ENCRYPTION_KEY = test-encryption-key-256-bits-long"
-]
-omit = [
-    "*/tests/*",
-    "*/venv/*",
-    "*/virtualenv/*",
-    "*/__pycache__/*",
-    "*/migrations/*",
-    "*/alembic/*",
-    "*/node_modules/*",
-    "*/.*"
-]
 
 [tool.coverage.run]
 source = ["app"]

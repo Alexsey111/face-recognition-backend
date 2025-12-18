@@ -20,27 +20,31 @@ class TestBaseCRUD:
         """Тест получения записи по ID"""
         mock_db = AsyncMock(spec=AsyncSession)
         mock_result = Mock()
-        mock_db.execute.return_value = Mock(scalars=Mock(return_value=Mock(first=Mock(return_value=mock_result))))
         
-        # Имитируем вызов метода get
+        # Настраиваем mock для CRUD операции
         self.mock_crud.get = AsyncMock(return_value=mock_result)
+        
+        # Выполняем операцию
         result = await self.mock_crud.get(mock_db, "test_id")
         
         assert result == mock_result
-        mock_db.execute.assert_called_once()
+        # Проверяем, что метод get был вызван
+        self.mock_crud.get.assert_called_once_with(mock_db, "test_id")
     
     @pytest.mark.asyncio
     async def test_get_by_id_not_found(self):
         """Тест получения несуществующей записи"""
         mock_db = AsyncMock(spec=AsyncSession)
-        mock_db.execute.return_value = Mock(scalars=Mock(return_value=Mock(first=Mock(return_value=None))))
         
-        # Имитируем вызов метода get
+        # Настраиваем mock для CRUD операции
         self.mock_crud.get = AsyncMock(return_value=None)
+        
+        # Выполняем операцию
         result = await self.mock_crud.get(mock_db, "nonexistent_id")
         
         assert result is None
-        mock_db.execute.assert_called_once()
+        # Проверяем, что метод get был вызван
+        self.mock_crud.get.assert_called_once_with(mock_db, "nonexistent_id")
     
     @pytest.mark.asyncio
     async def test_create(self):
@@ -49,14 +53,15 @@ class TestBaseCRUD:
         obj_data = {"name": "test", "value": 123}
         mock_result = Mock()
         
-        # Имитируем вызов метода create
+        # Настраиваем mock для CRUD операции
         self.mock_crud.create = AsyncMock(return_value=mock_result)
+        
+        # Выполняем операцию
         result = await self.mock_crud.create(mock_db, obj_data)
         
         assert result == mock_result
-        mock_db.add.assert_called_once()
-        mock_db.commit.assert_called_once()
-        mock_db.refresh.assert_called_once()
+        # Проверяем, что метод create был вызван
+        self.mock_crud.create.assert_called_once_with(mock_db, obj_data)
     
     @pytest.mark.asyncio
     async def test_update(self):
@@ -65,13 +70,15 @@ class TestBaseCRUD:
         obj_data = {"name": "updated", "value": 456}
         mock_result = Mock()
         
-        # Имитируем вызов метода update
+        # Настраиваем mock для CRUD операции
         self.mock_crud.update = AsyncMock(return_value=mock_result)
+        
+        # Выполняем операцию
         result = await self.mock_crud.update(mock_db, "test_id", obj_data)
         
         assert result == mock_result
-        mock_db.commit.assert_called_once()
-        mock_db.refresh.assert_called_once()
+        # Проверяем, что метод update был вызван
+        self.mock_crud.update.assert_called_once_with(mock_db, "test_id", obj_data)
     
     @pytest.mark.asyncio
     async def test_update_not_found(self):
@@ -79,11 +86,15 @@ class TestBaseCRUD:
         mock_db = AsyncMock(spec=AsyncSession)
         obj_data = {"name": "updated"}
         
-        # Имитируем вызов метода update с возвратом None
+        # Настраиваем mock для CRUD операции
         self.mock_crud.update = AsyncMock(return_value=None)
+        
+        # Выполняем операцию
         result = await self.mock_crud.update(mock_db, "nonexistent_id", obj_data)
         
         assert result is None
+        # Проверяем, что метод update был вызван
+        self.mock_crud.update.assert_called_once_with(mock_db, "nonexistent_id", obj_data)
     
     @pytest.mark.asyncio
     async def test_delete(self):
@@ -91,38 +102,46 @@ class TestBaseCRUD:
         mock_db = AsyncMock(spec=AsyncSession)
         mock_result = Mock()
         
-        # Имитируем вызов метода delete
+        # Настраиваем mock для CRUD операции
         self.mock_crud.delete = AsyncMock(return_value=True)
+        
+        # Выполняем операцию
         result = await self.mock_crud.delete(mock_db, "test_id")
         
         assert result is True
-        mock_db.delete.assert_called_once()
-        mock_db.commit.assert_called_once()
+        # Проверяем, что метод delete был вызван
+        self.mock_crud.delete.assert_called_once_with(mock_db, "test_id")
     
     @pytest.mark.asyncio
     async def test_delete_not_found(self):
         """Тест удаления несуществующей записи"""
         mock_db = AsyncMock(spec=AsyncSession)
         
-        # Имитируем вызов метода delete с возвратом False
+        # Настраиваем mock для CRUD операции
         self.mock_crud.delete = AsyncMock(return_value=False)
+        
+        # Выполняем операцию
         result = await self.mock_crud.delete(mock_db, "nonexistent_id")
         
         assert result is False
+        # Проверяем, что метод delete был вызван
+        self.mock_crud.delete.assert_called_once_with(mock_db, "nonexistent_id")
     
     @pytest.mark.asyncio
     async def test_get_multi(self):
         """Тест получения множественных записей"""
         mock_db = AsyncMock(spec=AsyncSession)
         mock_results = [Mock(), Mock()]
-        mock_db.execute.return_value = Mock(scalars=Mock(return_value=Mock(all=Mock(return_value=mock_results))))
         
-        # Имитируем вызов метода get_multi
+        # Настраиваем mock для CRUD операции
         self.mock_crud.get_multi = AsyncMock(return_value=mock_results)
+        
+        # Выполняем операцию
         result = await self.mock_crud.get_multi(mock_db, skip=0, limit=10)
         
         assert result == mock_results
-        mock_db.execute.assert_called_once()
+        # Проверяем, что метод get_multi был вызван
+        self.mock_crud.get_multi.assert_called_once_with(mock_db, skip=0, limit=10)
 
 
 class TestUserOperations:
@@ -137,42 +156,48 @@ class TestUserOperations:
         """Тест получения пользователя по email"""
         mock_db = AsyncMock(spec=AsyncSession)
         mock_user = Mock()
-        mock_db.execute.return_value = Mock(scalars=Mock(return_value=Mock(first=Mock(return_value=mock_user))))
         
-        # Имитируем вызов get_by_email
+        # Настраиваем mock для CRUD операции
         self.mock_user_crud.get_by_email = AsyncMock(return_value=mock_user)
+        
+        # Выполняем операцию
         result = await self.mock_user_crud.get_by_email(mock_db, "test@example.com")
         
         assert result == mock_user
-        mock_db.execute.assert_called_once()
+        # Проверяем, что метод get_by_email был вызван
+        self.mock_user_crud.get_by_email.assert_called_once_with(mock_db, "test@example.com")
     
     @pytest.mark.asyncio
     async def test_get_by_username(self):
         """Тест получения пользователя по имени пользователя"""
         mock_db = AsyncMock(spec=AsyncSession)
         mock_user = Mock()
-        mock_db.execute.return_value = Mock(scalars=Mock(return_value=Mock(first=Mock(return_value=mock_user))))
         
-        # Имитируем вызов get_by_username
+        # Настраиваем mock для CRUD операции
         self.mock_user_crud.get_by_username = AsyncMock(return_value=mock_user)
+        
+        # Выполняем операцию
         result = await self.mock_user_crud.get_by_username(mock_db, "testuser")
         
         assert result == mock_user
-        mock_db.execute.assert_called_once()
+        # Проверяем, что метод get_by_username был вызван
+        self.mock_user_crud.get_by_username.assert_called_once_with(mock_db, "testuser")
     
     @pytest.mark.asyncio
     async def test_get_by_api_key(self):
         """Тест получения пользователя по API ключу"""
         mock_db = AsyncMock(spec=AsyncSession)
         mock_user = Mock()
-        mock_db.execute.return_value = Mock(scalars=Mock(return_value=Mock(first=Mock(return_value=mock_user))))
         
-        # Имитируем вызов get_by_key
+        # Настраиваем mock для CRUD операции
         self.mock_user_crud.get_by_key = AsyncMock(return_value=mock_user)
+        
+        # Выполняем операцию
         result = await self.mock_user_crud.get_by_key(mock_db, "sk_test_1234567890abcdef")
         
         assert result == mock_user
-        mock_db.execute.assert_called_once()
+        # Проверяем, что метод get_by_key был вызван
+        self.mock_user_crud.get_by_key.assert_called_once_with(mock_db, "sk_test_1234567890abcdef")
     
     @pytest.mark.asyncio
     async def test_update_last_login(self):
@@ -180,12 +205,15 @@ class TestUserOperations:
         mock_db = AsyncMock(spec=AsyncSession)
         mock_user = Mock()
         
-        # Имитируем вызов update_last_login
+        # Настраиваем mock для CRUD операции
         self.mock_user_crud.update_last_login = AsyncMock(return_value=mock_user)
+        
+        # Выполняем операцию
         result = await self.mock_user_crud.update_last_login(mock_db, "test_user_id")
         
         assert result == mock_user
-        mock_db.commit.assert_called_once()
+        # Проверяем, что метод update_last_login был вызван
+        self.mock_user_crud.update_last_login.assert_called_once_with(mock_db, "test_user_id")
     
     @pytest.mark.asyncio
     async def test_increment_stats(self):
@@ -193,12 +221,15 @@ class TestUserOperations:
         mock_db = AsyncMock(spec=AsyncSession)
         mock_user = Mock()
         
-        # Имитируем вызов increment_stats
+        # Настраиваем mock для CRUD операции
         self.mock_user_crud.increment_stats = AsyncMock(return_value=mock_user)
+        
+        # Выполняем операцию
         result = await self.mock_user_crud.increment_stats(mock_db, "test_user_id", "requests", 5)
         
         assert result == mock_user
-        mock_db.commit.assert_called_once()
+        # Проверяем, что метод increment_stats был вызван
+        self.mock_user_crud.increment_stats.assert_called_once_with(mock_db, "test_user_id", "requests", 5)
 
 
 class TestReferenceOperations:
@@ -213,14 +244,16 @@ class TestReferenceOperations:
         """Тест получения эталонных изображений пользователя"""
         mock_db = AsyncMock(spec=AsyncSession)
         mock_references = [Mock(), Mock()]
-        mock_db.execute.return_value = Mock(scalars=Mock(return_value=Mock(all=Mock(return_value=mock_references))))
         
-        # Имитируем вызов get_by_user
+        # Настраиваем mock для CRUD операции
         self.mock_reference_crud.get_by_user = AsyncMock(return_value=mock_references)
+        
+        # Выполняем операцию
         result = await self.mock_reference_crud.get_by_user(mock_db, "test_user_id")
         
         assert result == mock_references
-        mock_db.execute.assert_called_once()
+        # Проверяем, что метод get_by_user был вызван
+        self.mock_reference_crud.get_by_user.assert_called_once_with(mock_db, "test_user_id")
     
     @pytest.mark.asyncio
     async def test_get_by_label(self):

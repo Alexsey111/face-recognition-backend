@@ -40,6 +40,11 @@ def validate_email(email: str) -> bool:
     if len(email) > 255:
         raise ValidationError("Email is too long (max 255 characters)")
 
+    # Проверка на двойные точки в локальной части
+    local_part = email.split('@')[0] if '@' in email else email
+    if '..' in local_part:
+        raise ValidationError("Invalid email format")
+
     if not EMAIL_REGEX.match(email):
         raise ValidationError("Invalid email format")
 
@@ -436,7 +441,7 @@ def sanitize_string(
     if allowed_chars:
         # Оставляем только разрешенные символы
         sanitized = "".join(
-            c for c in text if c in allowed_chars or c.isalnum() or c.isspace()
+            c for c in text if c in allowed_chars
         )
     else:
         # Удаляем только опасные символы

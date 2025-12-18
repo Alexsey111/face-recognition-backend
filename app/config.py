@@ -5,7 +5,7 @@
 
 from pathlib import Path
 from typing import List, Optional
-from pydantic import field_validator, ValidationInfo
+from pydantic import field_validator, model_validator, ValidationInfo
 from pydantic_settings import BaseSettings
 import os
 import secrets
@@ -39,7 +39,8 @@ class Settings(BaseSettings):
     REDIS_SOCKET_TIMEOUT: int = 5
     REDIS_CONNECTION_POOL_SIZE: int = 10
 
-    # S3/MinIO
+    # S3/MinIO Storage Configuration
+    # Unified S3-compatible storage settings (works with both AWS S3 and MinIO)
     S3_ENDPOINT_URL: str = "http://localhost:9000"
     S3_ACCESS_KEY: str = "minioadmin"
     S3_SECRET_KEY: str = "minioadmin"
@@ -48,14 +49,14 @@ class Settings(BaseSettings):
     S3_USE_SSL: bool = False
     S3_PUBLIC_READ: bool = False  # по умолчанию приватное хранилище
 
-    # MinIO/S3 дополнительные настройки (Phase 5)
-    MINIO_ENDPOINT: str = "http://localhost:9000"
-    MINIO_ACCESS_KEY: str = "minioadmin"
-    MINIO_SECRET_KEY: str = "minioadmin"
-    MINIO_REGION: str = "us-east-1"
-    MINIO_BUCKET: str = "face-recognition"
-    MINIO_SSL: bool = False
-    
+    # MinIO aliases for backward compatibility
+    MINIO_ENDPOINT: Optional[str] = None
+    MINIO_ACCESS_KEY: Optional[str] = None
+    MINIO_SECRET_KEY: Optional[str] = None
+    MINIO_REGION: Optional[str] = None
+    MINIO_BUCKET: Optional[str] = None
+    MINIO_SSL: Optional[bool] = None
+
     # Настройки файлов (Phase 5)
     MAX_FILE_SIZE_MB: int = 10
     UPLOAD_EXPIRATION_DAYS: int = 30
@@ -66,9 +67,19 @@ class Settings(BaseSettings):
     DELETE_SOURCE_AFTER_PROCESSING: bool = True
 
     # ML сервис
-    ML_SERVICE_URL: str = "http://localhost:8001"
+    USE_LOCAL_ML_SERVICE: bool = True  # Использовать локальный ML сервис вместо внешнего
+    ML_SERVICE_URL: str = "http://localhost:8001"  # Внешний ML сервис (если не локальный)
     ML_SERVICE_TIMEOUT: int = 30
     ML_SERVICE_API_KEY: Optional[str] = None
+
+    # Локальный ML сервис настройки
+    LOCAL_ML_DEVICE: str = "auto"  # auto, cpu, cuda
+    LOCAL_ML_ENABLE_CUDA: bool = True
+    LOCAL_ML_MODEL_CACHE_SIZE: int = 100  # Количество кэшируемых эмбеддингов
+    LOCAL_ML_BATCH_SIZE: int = 1  # Размер батча для обработки
+    LOCAL_ML_FACE_DETECTION_THRESHOLD: float = 0.9  # Порог детекции лица
+    LOCAL_ML_QUALITY_THRESHOLD: float = 0.5  # Минимальное качество изображения
+    LOCAL_ML_ENABLE_PERFORMANCE_MONITORING: bool = True
 
     # JWT токены
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", secrets.token_urlsafe(32))
@@ -172,19 +183,12 @@ class Settings(BaseSettings):
                     return f"{protocol}://:{self.REDIS_PASSWORD}@{rest}"
         return self.REDIS_URL
 
-    # New validators for Pydantic v2
-    @field_validator("DEBUG", mode="before")
-    @classmethod
-    def validate_debug(cls, v: bool, info: ValidationInfo) -> bool:
-        """Валидация debug режима."""
-        # В Pydantic v2 нужно получать данные по-другому
-        # Попробуем получить environment из контекста
-        context = info.context
-        if context and "ENVIRONMENT" in context:
-            environment = context["ENVIRONMENT"]
-            if v and environment == "production":
-                raise ValueError("DEBUG mode cannot be enabled in production environment")
-        return v
+    @model_validator(mode="after")
+    def validate_debug_environment(self) -> "Settings":
+        """Валидация debug режима в production."""
+        if self.DEBUG and self.ENVIRONMENT == "production":
+            raise ValueError("DEBUG mode cannot be enabled in production environment")
+        return self
 
     @field_validator("LOG_FILE_PATH")
     @classmethod
@@ -195,6 +199,24 @@ class Settings(BaseSettings):
             # Создаем директорию если не существует
             log_path.parent.mkdir(parents=True, exist_ok=True)
         return v
+
+    @model_validator(mode="after")
+    def setup_minio_aliases(self) -> "Settings":
+        """Настройка алиасов для MINIO переменных."""
+        # Если MINIO_* переменные не заданы, используем S3_* значения
+        if self.MINIO_ENDPOINT is None:
+            self.MINIO_ENDPOINT = self.S3_ENDPOINT_URL
+        if self.MINIO_ACCESS_KEY is None:
+            self.MINIO_ACCESS_KEY = self.S3_ACCESS_KEY
+        if self.MINIO_SECRET_KEY is None:
+            self.MINIO_SECRET_KEY = self.S3_SECRET_KEY
+        if self.MINIO_REGION is None:
+            self.MINIO_REGION = self.S3_REGION
+        if self.MINIO_BUCKET is None:
+            self.MINIO_BUCKET = self.S3_BUCKET_NAME
+        if self.MINIO_SSL is None:
+            self.MINIO_SSL = self.S3_USE_SSL
+        return self
 
     class Config:
         env_file = ".env"

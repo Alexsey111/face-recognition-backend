@@ -2,7 +2,7 @@
 import re
 
 # Image formats
-IMAGE_FORMATS = ["JPEG", "JPG", "PNG", "WEBP", "GIF", "BMP", "HEIC", "HEIF"]
+IMAGE_FORMATS = ["JPEG", "JPG", "PNG", "WEBP", "BMP", "HEIC", "HEIF"]
 
 # File limits
 FILE_LIMITS = {
@@ -94,4 +94,66 @@ TIME_FORMATS = {
     "iso": "%Y-%m-%dT%H:%M:%S",
     "log": "%Y-%m-%d %H:%M:%S",
     "file": "%Y%m%d_%H%M%S"
+}
+
+# Pagination settings
+PAGINATION = {
+    "default_page_size": 20,
+    "max_page_size": 100,
+    "min_page_size": 1,
+    "default_page": 1
+}
+
+# API limits
+API_LIMITS = {
+    "default_requests_per_minute": 60,
+    "verify_requests_per_minute": 30,
+    "upload_requests_per_minute": 20,
+    "admin_requests_per_minute": 100
+}
+
+# Thresholds
+THRESHOLDS = {
+    "verification": {
+        "default": 0.8,
+        "min": 0.5,
+        "max": 0.95
+    },
+    "liveness": {
+        "default": 0.8,
+        "min": 0.6,
+        "max": 0.95
+    },
+    "quality": {
+        "min": 0.5,
+        "good": 0.7,
+        "excellent": 0.9
+    }
+}
+
+# User roles
+USER_ROLES = {
+    "USER": "user",
+    "ADMIN": "admin",
+    "SYSTEM": "system"
+}
+
+# Time periods in seconds
+TIME_PERIODS = {
+    "second": 1,
+    "minute": 60,
+    "hour": 3600,
+    "day": 86400,
+    "week": 604800
+}
+
+# Security config alias for backward compatibility
+SECURITY = {
+    "password_min_length": SECURITY_CONFIG["password_min_length"],
+    "password_max_length": SECURITY_CONFIG["password_max_length"],
+    "max_login_attempts": SECURITY_CONFIG["max_login_attempts"],
+    "lockout_duration_minutes": SECURITY_CONFIG["lockout_duration_minutes"],
+    "session_timeout_minutes": SECURITY_CONFIG["session_timeout_minutes"],
+    "token_expire_minutes": SECURITY_CONFIG["token_expire_minutes"],
+    "refresh_token_expire_days": SECURITY_CONFIG["refresh_token_expire_days"]
 }

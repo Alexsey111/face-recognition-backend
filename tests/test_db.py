@@ -38,6 +38,7 @@ class TestUserCRUD:
         assert user.phone == test_user_data.phone  # Используем данные из фикстуры
         assert user.is_active == True
         
+    @pytest.mark.asyncio
     async def test_get_user(self, db_session: AsyncSession, test_user_data: UserCreate):
         """Test get user by ID (Async)"""
         created = await UserCRUD.create_user(db_session, test_user_data)
@@ -46,6 +47,7 @@ class TestUserCRUD:
         assert user.id == created.id
         assert user.email == test_user_data.email  # Используем данные из фикстуры
         
+    @pytest.mark.asyncio
     async def test_get_user_by_email(self, db_session: AsyncSession, test_user_data: UserCreate):
         """Test get user by email (Async)"""
         created = await UserCRUD.create_user(db_session, test_user_data)
@@ -53,6 +55,7 @@ class TestUserCRUD:
         
         assert user.id == created.id
         
+    @pytest.mark.asyncio
     async def test_get_user_by_phone(self, db_session: AsyncSession, test_user_data: UserCreate):
         """Test get user by phone (Async)"""
         created = await UserCRUD.create_user(db_session, test_user_data)
@@ -60,13 +63,18 @@ class TestUserCRUD:
         
         assert user.id == created.id
         
-    async def test_update_user(self, db_session: AsyncSession, test_user_data: UserCreate, test_user_update_data: UserUpdate):
+    @pytest.mark.asyncio
+    async def test_update_user(self, db_session: AsyncSession, test_user_data: UserCreate):
         """Test user update (Async)"""
+        from app.models.user import UserUpdate
         created = await UserCRUD.create_user(db_session, test_user_data)
-        updated = await UserCRUD.update_user(db_session, created.id, test_user_update_data)
+        
+        update_data = UserUpdate(full_name="Updated User")
+        updated = await UserCRUD.update_user(db_session, created.id, update_data)
         
         assert updated.full_name == "Updated User"
         
+    @pytest.mark.asyncio
     async def test_delete_user(self, db_session: AsyncSession, test_user_data: UserCreate):
         """Test user deletion (Async)"""
         created = await UserCRUD.create_user(db_session, test_user_data)
@@ -74,7 +82,8 @@ class TestUserCRUD:
         
         assert success == True
         assert await UserCRUD.get_user(db_session, created.id) is None
-        
+
+    @pytest.mark.asyncio
     async def test_deactivate_user(self, db_session: AsyncSession, test_user_data: UserCreate):
         """Test user deactivation (Async)"""
         created = await UserCRUD.create_user(db_session, test_user_data)
@@ -82,6 +91,7 @@ class TestUserCRUD:
         
         assert deactivated.is_active == False
         
+    @pytest.mark.asyncio
     async def test_get_all_users(self, db_session: AsyncSession, test_user_data: UserCreate):
         """Test get all users (Async)"""
         await UserCRUD.create_user(db_session, test_user_data)
@@ -89,6 +99,7 @@ class TestUserCRUD:
         
         assert len(users) >= 1
         
+    @pytest.mark.asyncio
     async def test_count_users(self, db_session: AsyncSession, test_user_data: UserCreate):
         """Test count users (Async)"""
         await UserCRUD.create_user(db_session, test_user_data)
@@ -101,36 +112,45 @@ class TestUserCRUD:
     # Edge Case Tests for UserCRUD
     # ============================================================================
     
+    @pytest.mark.asyncio
     async def test_get_user_not_found(self, db_session: AsyncSession):
         """Test getting non-existent user returns None"""
         user = await UserCRUD.get_user(db_session, "non-existent-id")
         assert user is None
         
+    @pytest.mark.asyncio
     async def test_get_user_by_email_not_found(self, db_session: AsyncSession):
         """Test getting user by non-existent email returns None"""
         user = await UserCRUD.get_user_by_email(db_session, "non-existent@example.com")
         assert user is None
         
+    @pytest.mark.asyncio
     async def test_get_user_by_phone_not_found(self, db_session: AsyncSession):
         """Test getting user by non-existent phone returns None"""
         user = await UserCRUD.get_user_by_phone(db_session, "+9999999999")
         assert user is None
         
-    async def test_update_user_not_found(self, db_session: AsyncSession, test_user_update_data: UserUpdate):
+    @pytest.mark.asyncio
+    async def test_update_user_not_found(self, db_session: AsyncSession):
         """Test updating non-existent user returns None"""
-        user = await UserCRUD.update_user(db_session, "non-existent-id", test_user_update_data)
+        from app.models.user import UserUpdate
+        update_data = UserUpdate(full_name="Updated User")
+        user = await UserCRUD.update_user(db_session, "non-existent-id", update_data)
         assert user is None
         
+    @pytest.mark.asyncio
     async def test_delete_user_not_found(self, db_session: AsyncSession):
         """Test deleting non-existent user returns False"""
         success = await UserCRUD.delete_user(db_session, "non-existent-id")
         assert success == False
-        
+
+    @pytest.mark.asyncio
     async def test_deactivate_user_not_found(self, db_session: AsyncSession):
         """Test deactivating non-existent user returns None"""
         user = await UserCRUD.deactivate_user(db_session, "non-existent-id")
         assert user is None
         
+    @pytest.mark.asyncio
     async def test_create_duplicate_email(self, db_session: AsyncSession, test_user_data: UserCreate):
         """Test creating user with duplicate email raises IntegrityError"""
         await UserCRUD.create_user(db_session, test_user_data)
@@ -142,12 +162,13 @@ class TestUserCRUD:
 # ============================================================================
 
 class TestReferenceCRUD:
+    @pytest.mark.asyncio
     async def test_create_reference(self, db_session: AsyncSession, test_user: User):
         """Test reference creation (Async)"""
         ref = await ReferenceCRUD.create_reference(
             db_session,
             user_id=test_user.id,
-            embedding="mock_embedding_string",  # Добавляем недостающий аргумент
+            embedding="mock_embedding_string",
             embedding_encrypted=b"encrypted_data",
             embedding_hash="hash123",
             quality_score=0.95,
@@ -160,11 +181,12 @@ class TestReferenceCRUD:
         assert ref.version == 1
         assert ref.quality_score == 0.95
         
+    @pytest.mark.asyncio
     async def test_reference_versioning(self, db_session: AsyncSession, test_user: User):
         """Test reference versioning (Async)"""
         ref1 = await ReferenceCRUD.create_reference(
             db_session, user_id=test_user.id, 
-            embedding="mock_embedding_1",  # Добавляем недостающий аргумент
+            embedding="mock_embedding_1",
             embedding_encrypted=b"data1",
             embedding_hash="hash1", quality_score=0.9,
             image_filename="photo1.jpg", image_size_mb=2.5,
@@ -173,7 +195,7 @@ class TestReferenceCRUD:
         
         ref2 = await ReferenceCRUD.create_reference(
             db_session, user_id=test_user.id, 
-            embedding="mock_embedding_2",  # Добавляем недостающий аргумент
+            embedding="mock_embedding_2",
             embedding_encrypted=b"data2",
             embedding_hash="hash2", quality_score=0.95,
             image_filename="photo2.jpg", image_size_mb=2.5,
@@ -184,11 +206,12 @@ class TestReferenceCRUD:
         assert ref2.version == 2
         assert ref2.previous_reference_id == ref1.id
         
+    @pytest.mark.asyncio
     async def test_get_latest_reference(self, db_session: AsyncSession, test_user: User):
         """Test getting latest reference (Async)"""
         await ReferenceCRUD.create_reference(
             db_session, user_id=test_user.id, 
-            embedding="mock_embedding_1",  # Добавляем недостающий аргумент
+            embedding="mock_embedding_1",
             embedding_encrypted=b"data1",
             embedding_hash="hash1", quality_score=0.9,
             image_filename="photo1.jpg", image_size_mb=2.5,
@@ -197,7 +220,7 @@ class TestReferenceCRUD:
         
         ref2 = await ReferenceCRUD.create_reference(
             db_session, user_id=test_user.id, 
-            embedding="mock_embedding_2",  # Добавляем недостающий аргумент
+            embedding="mock_embedding_2",
             embedding_encrypted=b"data2",
             embedding_hash="hash2", quality_score=0.95,
             image_filename="photo2.jpg", image_size_mb=2.5,
@@ -208,11 +231,12 @@ class TestReferenceCRUD:
         assert latest.id == ref2.id
         assert latest.version == 2
         
+    @pytest.mark.asyncio
     async def test_delete_reference(self, db_session: AsyncSession, test_user: User):
         """Test reference deletion (Async)"""
         ref = await ReferenceCRUD.create_reference(
             db_session, user_id=test_user.id, 
-            embedding="mock_embedding",  # Добавляем недостающий аргумент
+            embedding="mock_embedding",
             embedding_encrypted=b"data",
             embedding_hash="hash", quality_score=0.9,
             image_filename="photo.jpg", image_size_mb=2.5,
@@ -226,27 +250,32 @@ class TestReferenceCRUD:
     # Edge Case Tests for ReferenceCRUD
     # ============================================================================
     
-    async def test_get_latest_reference_not_found(self, db_session: AsyncSession, test_user: User):
+    @pytest.mark.asyncio
+    async def test_get_latest_reference_not_found(self, db_session: AsyncSession):
         """Test getting latest reference for non-existent user returns None"""
         ref = await ReferenceCRUD.get_latest_reference(db_session, "non-existent-user-id")
         assert ref is None
         
-    async def test_get_reference_by_version_not_found(self, db_session: AsyncSession, test_user: User):
+    @pytest.mark.asyncio
+    async def test_get_reference_by_version_not_found(self, db_session: AsyncSession):
         """Test getting reference by non-existent version returns None"""
         ref = await ReferenceCRUD.get_reference_by_version(db_session, "non-existent-user-id", 999)
         assert ref is None
         
-    async def test_get_all_references_empty(self, db_session: AsyncSession, test_user: User):
+    @pytest.mark.asyncio
+    async def test_get_all_references_empty(self, db_session: AsyncSession):
         """Test getting all references for user with no references returns empty list"""
         refs = await ReferenceCRUD.get_all_references(db_session, "non-existent-user-id")
         assert refs == []
         
-    async def test_update_reference_not_found(self, db_session: AsyncSession, test_user: User):
+    @pytest.mark.asyncio
+    async def test_update_reference_not_found(self, db_session: AsyncSession):
         """Test updating non-existent reference returns None"""
         ref = await ReferenceCRUD.update_reference(db_session, "non-existent-ref-id", quality_score=0.8)
         assert ref is None
         
-    async def test_delete_reference_not_found(self, db_session: AsyncSession, test_user: User):
+    @pytest.mark.asyncio
+    async def test_delete_reference_not_found(self, db_session: AsyncSession):
         """Test deleting non-existent reference returns False"""
         success = await ReferenceCRUD.delete_reference(db_session, "non-existent-ref-id")
         assert success == False
@@ -256,6 +285,7 @@ class TestReferenceCRUD:
 # ============================================================================
 
 class TestVerificationSessionCRUD:
+    @pytest.mark.asyncio
     async def test_create_session(self, db_session: AsyncSession, test_user: User):
         """Test session creation (Async)"""
         session = await VerificationSessionCRUD.create_session(
@@ -269,6 +299,7 @@ class TestVerificationSessionCRUD:
         assert session.id is not None
         assert session.status == "pending"
         
+    @pytest.mark.asyncio
     async def test_get_session(self, db_session: AsyncSession, test_user: User):
         """Test get session (Async)"""
         session_id = str(uuid.uuid4())
@@ -283,6 +314,7 @@ class TestVerificationSessionCRUD:
         session = await VerificationSessionCRUD.get_session(db_session, session_id)
         assert session.id == created.id
         
+    @pytest.mark.asyncio
     async def test_complete_session(self, db_session: AsyncSession, test_user: User):
         """Test completing session (Async)"""
         session_id = str(uuid.uuid4())
@@ -305,6 +337,7 @@ class TestVerificationSessionCRUD:
         assert completed.status == "success"
         assert completed.is_match == True
         
+    @pytest.mark.asyncio
     async def test_fail_session(self, db_session: AsyncSession, test_user: User):
         """Test failing session (Async)"""
         session_id = str(uuid.uuid4())
@@ -330,17 +363,20 @@ class TestVerificationSessionCRUD:
     # Edge Case Tests for VerificationSessionCRUD
     # ============================================================================
     
-    async def test_get_session_not_found(self, db_session: AsyncSession, test_user: User):
+    @pytest.mark.asyncio
+    async def test_get_session_not_found(self, db_session: AsyncSession):
         """Test getting non-existent session returns None"""
         session = await VerificationSessionCRUD.get_session(db_session, "non-existent-session-id")
         assert session is None
         
-    async def test_update_session_not_found(self, db_session: AsyncSession, test_user: User):
+    @pytest.mark.asyncio
+    async def test_update_session_not_found(self, db_session: AsyncSession):
         """Test updating non-existent session returns None"""
         session = await VerificationSessionCRUD.update_session(db_session, "non-existent-session-id", status="processing")
         assert session is None
         
-    async def test_complete_session_not_found(self, db_session: AsyncSession, test_user: User):
+    @pytest.mark.asyncio
+    async def test_complete_session_not_found(self, db_session: AsyncSession):
         """Test completing non-existent session returns None"""
         session = await VerificationSessionCRUD.complete_session(
             db_session, "non-existent-session-id", 
@@ -348,7 +384,8 @@ class TestVerificationSessionCRUD:
         )
         assert session is None
         
-    async def test_fail_session_not_found(self, db_session: AsyncSession, test_user: User):
+    @pytest.mark.asyncio
+    async def test_fail_session_not_found(self, db_session: AsyncSession):
         """Test failing non-existent session returns None"""
         session = await VerificationSessionCRUD.fail_session(
             db_session, "non-existent-session-id", 
@@ -356,7 +393,8 @@ class TestVerificationSessionCRUD:
         )
         assert session is None
         
-    async def test_get_user_sessions_empty(self, db_session: AsyncSession, test_user: User):
+    @pytest.mark.asyncio
+    async def test_get_user_sessions_empty(self, db_session: AsyncSession):
         """Test getting sessions for user with no sessions returns empty list"""
         sessions = await VerificationSessionCRUD.get_user_sessions(db_session, "non-existent-user-id")
         assert sessions == []
@@ -366,6 +404,7 @@ class TestVerificationSessionCRUD:
 # ============================================================================
 
 class TestAuditLogCRUD:
+    @pytest.mark.asyncio
     async def test_log_action(self, db_session: AsyncSession, test_user: User):
         """Test logging action (Async)"""
         log = await AuditLogCRUD.log_action(
@@ -383,6 +422,7 @@ class TestAuditLogCRUD:
         assert log is not None
         assert log.action == "user_created"
         
+    @pytest.mark.asyncio
     async def test_get_logs(self, db_session: AsyncSession, test_user: User):
         """Test getting logs (Async)"""
         await AuditLogCRUD.log_action(
@@ -396,6 +436,7 @@ class TestAuditLogCRUD:
         logs = await AuditLogCRUD.get_logs(db_session, user_id=test_user.id)
         assert len(logs) >= 1
 
+    @pytest.mark.asyncio
     async def test_get_resource_logs(self, db_session: AsyncSession, test_user: User):
         """Test getting resource logs (Async)"""
         await AuditLogCRUD.log_action(
@@ -413,22 +454,26 @@ class TestAuditLogCRUD:
     # Edge Case Tests for AuditLogCRUD
     # ============================================================================
     
-    async def test_get_logs_empty(self, db_session: AsyncSession, test_user: User):
+    @pytest.mark.asyncio
+    async def test_get_logs_empty(self, db_session: AsyncSession):
         """Test getting logs for non-existent user returns empty list"""
         logs = await AuditLogCRUD.get_logs(db_session, user_id="non-existent-user-id")
         assert logs == []
         
-    async def test_get_logs_by_action_empty(self, db_session: AsyncSession, test_user: User):
+    @pytest.mark.asyncio
+    async def test_get_logs_by_action_empty(self, db_session: AsyncSession):
         """Test getting logs by non-existent action returns empty list"""
         logs = await AuditLogCRUD.get_logs(db_session, action="non-existent-action")
         assert logs == []
         
-    async def test_get_resource_logs_empty(self, db_session: AsyncSession, test_user: User):
+    @pytest.mark.asyncio
+    async def test_get_resource_logs_empty(self, db_session: AsyncSession):
         """Test getting logs for non-existent resource returns empty list"""
         logs = await AuditLogCRUD.get_resource_logs(db_session, "non-existent-resource", "non-existent-id")
         assert logs == []
         
-    async def test_log_action_fire_and_forget(self, db_session: AsyncSession, test_user: User):
+    @pytest.mark.asyncio
+    async def test_log_action_fire_and_forget(self, db_session: AsyncSession):
         """Test that audit logging doesn't break on errors (fire-and-forget)"""
         # Even with invalid data, logging should not crash the application
         log = await AuditLogCRUD.log_action(

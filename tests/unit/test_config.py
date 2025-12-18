@@ -48,14 +48,17 @@ class TestSettings:
         assert isinstance(origins, list)
         
     def test_validate_debug(self):
-        """Тест валидации debug режима"""
-        # Тест валидного значения
-        result = Settings.validate_debug(True, {})
-        assert result is True
+        """Тест валидации debug режима через model_validator"""
+        # Тест валидного значения (development + debug)
+        with patch.dict(os.environ, {'ENVIRONMENT': 'development', 'DEBUG': 'true'}):
+            settings = Settings()
+            assert settings.DEBUG is True
+            assert settings.ENVIRONMENT == "development"
         
-        # Тест невалидного значения (production + debug)
-        with pytest.raises(ValueError):
-            Settings.validate_debug(True, {"ENVIRONMENT": "production"})
+        # Тест невалидного значения (production + debug должно вызвать ошибку)
+        with patch.dict(os.environ, {'ENVIRONMENT': 'production', 'DEBUG': 'true'}):
+            with pytest.raises(ValueError, match="DEBUG mode cannot be enabled in production environment"):
+                Settings()
     
     @patch.dict(os.environ, {
         'ENVIRONMENT': 'development',
@@ -83,16 +86,10 @@ class TestSettings:
         monkeypatch.setenv('DEBUG', 'true')
         monkeypatch.setenv('ENVIRONMENT', 'production')
         
-        # Валидатор DEBUG написан для Pydantic v1, но проект использует v2
-        # Поэтому валидатор не работает, и настройки создаются успешно
-        settings = Settings()
-        
-        # Проверяем, что настройки созданы, несмотря на DEBUG=True в production
-        assert settings.DEBUG is True
-        assert settings.ENVIRONMENT == "production"
-        
-        # Примечание: Валидатор DEBUG не работает в Pydantic v2
-        # Это известная проблема, требующая обновления до синтаксиса v2
+        # Валидатор DEBUG использует правильный синтаксис Pydantic v2
+        # Он должен вызвать ошибку при DEBUG=True в production
+        with pytest.raises(ValueError, match="DEBUG mode cannot be enabled in production environment"):
+            Settings()
     
     def test_default_values(self, monkeypatch):
         """Тест значений по умолчанию"""
@@ -113,8 +110,13 @@ class TestSettings:
         assert settings_obj.THRESHOLD_DEFAULT == 0.80
         assert settings_obj.RATE_LIMIT_REQUESTS_PER_MINUTE == 60
     
-    def test_database_configuration(self):
+    def test_database_configuration(self, monkeypatch):
         """Тест конфигурации базы данных"""
+        # Используем monkeypatch для установки тестовых значений
+        monkeypatch.setenv('DATABASE_URL', 'sqlite:///./test.db')
+        monkeypatch.setenv('DATABASE_POOL_SIZE', '10')
+        monkeypatch.setenv('DATABASE_MAX_OVERFLOW', '20')
+        
         settings_obj = Settings()
         
         assert hasattr(settings_obj, 'DATABASE_URL')

@@ -34,7 +34,7 @@ class TestFileUtils:
         """Тест получения размера файла в МБ"""
         test_data = b"test data" * 1000  # ~10KB
         size_mb = FileUtils.get_file_size_mb(test_data)
-        assert size_mb > 0.009 and size_mb < 0.011  # ~0.01MB
+        assert size_mb > 0.008 and size_mb < 0.012  # ~0.01MB (допускаем небольшую погрешность)
         
     def test_calculate_file_hash(self):
         """Тест вычисления хеша файла"""

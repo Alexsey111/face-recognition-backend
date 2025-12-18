@@ -5,6 +5,9 @@ from app.models.user import (
     UserPasswordChange, UserPasswordReset, UserPasswordResetConfirm,
     UserStats, UserProfile, UserListResponse
 )
+from app.models.reference import ReferenceCreate
+from app.models.verification import VerificationRequest
+from app.models.response import ReferenceResponse, VerifyResponse, BaseResponse
 
 
 class TestUserModels:
@@ -13,26 +16,23 @@ class TestUserModels:
     def test_user_model_creation(self):
         """Тест создания базовой модели пользователя"""
         user_data = {
-            "username": "testuser",
             "email": "test@example.com",
-            "first_name": "Test",
-            "last_name": "User"
+            "full_name": "Test User"
         }
         
         user = UserModel(**user_data)
-        assert user.username == "testuser"
         assert user.email == "test@example.com"
-        assert user.first_name == "Test"
-        assert user.last_name == "User"
-        assert user.role == "user"  # Значение по умолчанию
+        assert user.full_name == "Test User"
         assert user.is_active is True  # Значение по умолчанию
         assert user.is_verified is False  # Значение по умолчанию
+        assert user.total_uploads == 0  # Значение по умолчанию
+        assert user.total_verifications == 0  # Значение по умолчанию
+        assert user.successful_verifications == 0  # Значение по умолчанию
     
     def test_user_model_default_values(self):
         """Тест значений по умолчанию в модели пользователя"""
-        user = UserModel(username="testuser", email="test@example.com")
+        user = UserModel(email="test@example.com")
         
-        assert user.role == "user"
         assert user.is_active is True
         assert user.is_verified is False
         assert user.total_uploads == 0
@@ -40,116 +40,101 @@ class TestUserModels:
         assert user.successful_verifications == 0
         assert user.id is not None
         assert user.created_at is not None
+        assert user.settings is None  # Опциональное поле
     
     def test_user_create_valid(self):
         """Тест создания пользователя с валидными данными"""
         user_data = {
-            "username": "testuser",
             "email": "test@example.com",
-            "password": "SecurePass123!",
-            "first_name": "Test",
-            "last_name": "User"
+            "full_name": "Test User"
         }
         
         user = UserCreate(**user_data)
-        assert user.username == "testuser"
         assert user.email == "test@example.com"
-        assert user.password == "SecurePass123!"
-        assert user.first_name == "Test"
-        assert user.last_name == "User"
-        assert user.role == "user"  # Значение по умолчанию
+        assert user.full_name == "Test User"
         
     def test_user_create_invalid_email(self):
         """Тест создания пользователя с невалидным email"""
         user_data = {
-            "username": "testuser",
-            "email": "invalid_email",
-            "password": "SecurePass123!"
+            "email": "invalid_email"
         }
         
         with pytest.raises(ValidationError):
             UserCreate(**user_data)
     
-    def test_user_create_password_validation(self):
-        """Тест валидации пароля при создании пользователя"""
-        # Слишком короткий пароль
+    def test_user_create_email_validation(self):
+        """Тест валидации email при создании пользователя"""
+        # Невалидный email
         user_data = {
-            "username": "testuser",
-            "email": "test@example.com",
-            "password": "short"
+            "email": "invalid_email"
         }
         
         with pytest.raises(ValidationError):
             UserCreate(**user_data)
         
-        # Пароль без заглавных букв
+        # Пустой email
         user_data = {
-            "username": "testuser",
-            "email": "test@example.com",
-            "password": "lowercase123!"
+            "email": ""
         }
         
         with pytest.raises(ValidationError):
             UserCreate(**user_data)
         
-        # Пароль без цифр
+        # Слишком длинное имя
         user_data = {
-            "username": "testuser",
             "email": "test@example.com",
-            "password": "UppercaseOnly!"
+            "full_name": "a" * 256  # Слишком длинное имя
         }
         
         with pytest.raises(ValidationError):
             UserCreate(**user_data)
     
-    def test_user_create_username_validation(self):
-        """Тест валидации имени пользователя"""
-        # Слишком короткое имя пользователя
+    def test_user_create_phone_validation(self):
+        """Тест валидации телефона при создании пользователя"""
+        # Валидный телефон (опциональное поле)
         user_data = {
-            "username": "ab",
             "email": "test@example.com",
-            "password": "SecurePass123!"
+            "phone": "+1234567890"
         }
         
-        with pytest.raises(ValidationError):
-            UserCreate(**user_data)
+        user = UserCreate(**user_data)
+        assert user.phone == "+1234567890"
         
-        # Невалидные символы в имени пользователя
-        user_data = {
-            "username": "user@name",
-            "email": "test@example.com",
-            "password": "SecurePass123!"
+        # Пользователь может быть создан без телефона
+        user_data_no_phone = {
+            "email": "test2@example.com"
         }
         
-        with pytest.raises(ValidationError):
-            UserCreate(**user_data)
+        user_no_phone = UserCreate(**user_data_no_phone)
+        assert user_no_phone.phone is None
     
     def test_user_update_partial(self):
         """Тест частичного обновления пользователя"""
         user_data = {
             "email": "newemail@example.com",
-            "first_name": "NewFirstName",
+            "full_name": "New Full Name",
             "is_active": False
         }
         
         user_update = UserUpdate(**user_data)
         
         assert user_update.email == "newemail@example.com"
-        assert user_update.first_name == "NewFirstName"
+        assert user_update.full_name == "New Full Name"
         assert user_update.is_active is False
-        assert user_update.last_name is None  # Не обновлялось
+        assert user_update.phone is None  # Не обновлялось
+        assert user_update.is_verified is None  # Не обновлялось
     
     def test_user_login(self):
         """Тест модели входа пользователя"""
         login_data = {
-            "username": "testuser",
+            "email": "test@example.com",
             "password": "password123",
             "remember_me": True
         }
         
         login = UserLogin(**login_data)
         
-        assert login.username == "testuser"
+        assert login.email == "test@example.com"
         assert login.password == "password123"
         assert login.remember_me is True
     
@@ -227,10 +212,9 @@ class TestUserModels:
         """Тест модели профиля пользователя"""
         profile_data = {
             "id": "550e8400-e29b-41d4-a716-446655440000",
-            "username": "testuser",
-            "first_name": "Test",
-            "last_name": "User",
-            "bio": "Test user bio",
+            "email": "test@example.com",
+            "full_name": "Test User",
+            "phone": "+1234567890",
             "created_at": "2024-01-01T00:00:00",
             "is_verified": True
         }
@@ -238,24 +222,26 @@ class TestUserModels:
         user_profile = UserProfile(**profile_data)
         
         assert user_profile.id == "550e8400-e29b-41d4-a716-446655440000"
-        assert user_profile.username == "testuser"
-        assert user_profile.first_name == "Test"
-        assert user_profile.last_name == "User"
-        assert user_profile.bio == "Test user bio"
+        assert user_profile.email == "test@example.com"
+        assert user_profile.full_name == "Test User"
+        assert user_profile.phone == "+1234567890"
         assert user_profile.is_verified is True
+        assert user_profile.stats is None  # Опциональное поле
     
     def test_user_list_response(self):
         """Тест модели списка пользователей"""
         users = [
             UserProfile(
                 id="550e8400-e29b-41d4-a716-446655440000",
-                username="user1",
+                email="user1@example.com",
+                full_name="User One",
                 created_at="2024-01-01T00:00:00",
                 is_verified=True
             ),
             UserProfile(
                 id="550e8400-e29b-41d4-a716-446655440001",
-                username="user2",
+                email="user2@example.com",
+                full_name="User Two",
                 created_at="2024-01-02T00:00:00",
                 is_verified=False
             )
@@ -301,6 +287,7 @@ class TestReferenceModels:
         """Тест создания эталонного изображения с минимальными данными"""
         ref_data = {
             "user_id": "550e8400-e29b-41d4-a716-446655440000",
+            "image_data": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD",
             "label": "John Doe"
         }
         
@@ -308,7 +295,7 @@ class TestReferenceModels:
         
         assert reference.user_id == "550e8400-e29b-41d4-a716-446655440000"
         assert reference.label == "John Doe"
-        assert reference.image_data is None  # Опциональное поле
+        assert reference.image_data == "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD"
         assert reference.metadata is None  # Опциональное поле
     
     def test_reference_response(self):
@@ -318,7 +305,9 @@ class TestReferenceModels:
             "user_id": "550e8400-e29b-41d4-a716-446655440000",
             "label": "John Doe",
             "created_at": "2024-01-01T00:00:00Z",
-            "is_active": True
+            "is_active": True,
+            "success": True,
+            "reference_id": "550e8400-e29b-41d4-a716-446655440000"
         }
         
         reference_response = ReferenceResponse(**ref_response_data)
@@ -336,7 +325,8 @@ class TestVerificationModels:
         verification_data = {
             "image_data": "base64_encoded_test_image",
             "reference_id": "550e8400-e29b-41d4-a716-446655440000",
-            "threshold": 0.8
+            "threshold": 0.8,
+            "session_id": "550e8400-e29b-41d4-a716-446655440000"
         }
         
         verification_request = VerificationRequest(**verification_data)
@@ -344,6 +334,7 @@ class TestVerificationModels:
         assert verification_request.image_data == "base64_encoded_test_image"
         assert verification_request.reference_id == "550e8400-e29b-41d4-a716-446655440000"
         assert verification_request.threshold == 0.8
+        assert verification_request.session_id == "550e8400-e29b-41d4-a716-446655440000"
     
     def test_verification_request_default_threshold(self):
         """Тест запроса верификации с порогом по умолчанию"""
@@ -360,15 +351,18 @@ class TestVerificationModels:
         """Тест ответа верификации при совпадении"""
         response_data = {
             "session_id": "550e8400-e29b-41d4-a716-446655440000",
-            "is_match": True,
+            "verified": True,
             "confidence": 0.95,
+            "similarity_score": 0.95,
             "threshold_used": 0.8,
-            "processing_time": 0.123
+            "processing_time": 0.123,
+            "face_detected": True,
+            "success": True
         }
         
-        verification_response = VerificationResponse(**response_data)
+        verification_response = VerifyResponse(**response_data)
         
-        assert verification_response.is_match is True
+        assert verification_response.verified is True
         assert verification_response.confidence == 0.95
         assert verification_response.threshold_used == 0.8
     
@@ -376,43 +370,50 @@ class TestVerificationModels:
         """Тест ответа верификации при отсутствии совпадения"""
         response_data = {
             "session_id": "550e8400-e29b-41d4-a716-446655440000",
-            "is_match": False,
+            "verified": False,
             "confidence": 0.45,
+            "similarity_score": 0.45,
             "threshold_used": 0.8,
-            "processing_time": 0.098
+            "processing_time": 0.098,
+            "face_detected": True,
+            "success": False
         }
         
-        verification_response = VerificationResponse(**response_data)
+        verification_response = VerifyResponse(**response_data)
         
-        assert verification_response.is_match is False
+        assert verification_response.verified is False
         assert verification_response.confidence == 0.45
 
 
 class TestBaseModels:
     """Тесты для базовых моделей"""
     
-    def test_base_request(self):
-        """Тест базового запроса"""
+    def test_upload_request(self):
+        """Тест запроса загрузки изображения"""
+        from app.models.request import UploadRequest
+        
         request_data = {
-            "request_id": "550e8400-e29b-41d4-a716-446655440000",
-            "timestamp": "2024-01-01T00:00:00Z"
+            "image_data": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=",
+            "user_id": "550e8400-e29b-41d4-a716-446655440000",
+            "metadata": {"source": "mobile_app"}
         }
         
-        base_request = BaseRequest(**request_data)
+        upload_request = UploadRequest(**request_data)
         
-        assert base_request.request_id == "550e8400-e29b-41d4-a716-446655440000"
-        assert base_request.timestamp == "2024-01-01T00:00:00Z"
+        assert upload_request.image_data == "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD"
+        assert upload_request.user_id == "550e8400-e29b-41d4-a716-446655440000"
+        assert upload_request.metadata["source"] == "mobile_app"
     
     def test_base_response(self):
         """Тест базового ответа"""
         response_data = {
-            "status": "success",
-            "message": "Operation completed successfully",
-            "timestamp": "2024-01-01T00:00:00Z"
+            "success": True,
+            "message": "Operation completed successfully"
         }
         
         base_response = BaseResponse(**response_data)
         
-        assert base_response.status == "success"
+        assert base_response.success is True
         assert base_response.message == "Operation completed successfully"
-        assert base_response.timestamp == "2024-01-01T00:00:00Z"
+        assert base_response.request_id is not None  # Auto-generated
+        assert base_response.timestamp is not None  # Auto-generated

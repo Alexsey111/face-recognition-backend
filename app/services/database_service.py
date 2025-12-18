@@ -406,6 +406,93 @@ class BiometricService:
         user_update = UserUpdate(**update_data)
         return await self.update_user_with_audit(user_id, user_update)
 
+    # ============================================================================
+    # Low-level CRUD methods for backward compatibility with auth.py
+    # ============================================================================
+
+    async def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        """Get user by email - low level method for auth.py"""
+        if not self.db:
+            return None
+        
+        from app.db.crud import UserCRUD
+        user = await UserCRUD.get_user_by_email(self.db, email)
+        if not user:
+            return None
+        
+        return {
+            "id": user.id,
+            "email": user.email,
+            "username": user.username,
+            "password_hash": getattr(user, 'password_hash', None),
+            "role": getattr(user, 'role', 'user'),
+            "permissions": getattr(user, 'permissions', ['read_own_data']),
+            "is_active": user.is_active,
+            "created_at": user.created_at.isoformat() if user.created_at else None
+        }
+    
+    async def get_user_by_username(self, username: str) -> Optional[Dict[str, Any]]:
+        """Get user by username - low level method for auth.py"""
+        if not self.db:
+            return None
+        
+        from app.db.crud import UserCRUD
+        user = await UserCRUD.get_user_by_username(self.db, username)
+        if not user:
+            return None
+        
+        return {
+            "id": user.id,
+            "email": user.email,
+            "username": user.username,
+            "password_hash": getattr(user, 'password_hash', None),
+            "role": getattr(user, 'role', 'user'),
+            "permissions": getattr(user, 'permissions', ['read_own_data']),
+            "is_active": user.is_active,
+            "created_at": user.created_at.isoformat() if user.created_at else None
+        }
+    
+    async def get_user(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Get user by ID - low level method for auth.py"""
+        if not self.db:
+            return None
+        
+        from app.db.crud import UserCRUD
+        user = await UserCRUD.get_user(self.db, user_id)
+        if not user:
+            return None
+        
+        return {
+            "id": user.id,
+            "email": user.email,
+            "username": user.username,
+            "password_hash": getattr(user, 'password_hash', None),
+            "role": getattr(user, 'role', 'user'),
+            "permissions": getattr(user, 'permissions', ['read_own_data']),
+            "is_active": user.is_active,
+            "created_at": user.created_at.isoformat() if user.created_at else None
+        }
+    
+    async def create_user(self, user_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create user - low level method for auth.py"""
+        if not self.db:
+            raise RuntimeError("Database session is required for this operation")
+        
+        from app.models.user import UserCreate
+        user_create = UserCreate(**user_data)
+        user = await UserCRUD.create_user(self.db, user_create)
+        
+        return {
+            "id": user.id,
+            "email": user.email,
+            "username": user.username,
+            "password_hash": user_data.get("password_hash"),
+            "role": user_data.get("role", "user"),
+            "permissions": user_data.get("permissions", ["read_own_data"]),
+            "is_active": user_data.get("is_active", True),
+            "created_at": user.created_at.isoformat() if user.created_at else None
+        }
+
 
 # DatabaseService alias for backward compatibility
 DatabaseService = BiometricService

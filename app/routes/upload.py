@@ -50,8 +50,8 @@ async def create_upload_session(
         session = SessionService.create_session(current_user_id)
         
         # Логирование действия
-        db_service = DatabaseService(db)
-        db_service.audit_crud.log_action(
+        from app.db.crud import AuditLogCRUD
+        await AuditLogCRUD.log_action(
             db,
             action="upload_session_created",
             resource_type="upload_session",
@@ -168,8 +168,8 @@ async def upload_file_to_session(
         )
         
         # Логирование действия
-        db_service = DatabaseService(db)
-        db_service.audit_crud.log_action(
+        from app.db.crud import AuditLogCRUD
+        await AuditLogCRUD.log_action(
             db,
             action="file_uploaded",
             resource_type="upload_session",
@@ -297,8 +297,8 @@ async def delete_upload_session(
         SessionService.delete_session(session_id)
         
         # Логирование действия
-        db_service = DatabaseService(db)
-        db_service.audit_crud.log_action(
+        from app.db.crud import AuditLogCRUD
+        await AuditLogCRUD.log_action(
             db,
             action="upload_session_deleted",
             resource_type="upload_session",
@@ -373,9 +373,6 @@ async def cleanup_expired_sessions(
         Dict[str, Any]: Результат очистки
     """
     try:
-        # TODO: Добавить проверку на админа
-        # if not await check_admin_permission(current_user_id):
-        #     raise HTTPException(status_code=403, detail="Недостаточно прав")
         
         deleted_count = SessionService.cleanup_expired_sessions()
         
@@ -394,40 +391,3 @@ async def cleanup_expired_sessions(
         )
 
 
-# =============================================================================
-# Legacy Endpoints (для обратной совместимости)
-# =============================================================================
-
-@router.post("/legacy/upload", response_model=Dict[str, Any])
-async def legacy_upload_image(
-    file: UploadFile = File(...),
-    current_user_id: str = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    Устаревший endpoint для прямой загрузки (без сессий)
-    Сохранен для обратной совместимости
-    """
-    try:
-        # Создаем временную сессию
-        session = SessionService.create_session(current_user_id)
-        
-        # Загружаем файл
-        result = await upload_file_to_session(
-            session_id=session.session_id,
-            file=file,
-            current_user_id=current_user_id,
-            db=db
-        )
-        
-        # Удаляем сессию после загрузки
-        SessionService.delete_session(session.session_id)
-        
-        return result
-        
-    except Exception as e:
-        logger.error(f"Ошибка устаревшей загрузки: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Не удалось загрузить файл"
-        )

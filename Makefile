@@ -4,8 +4,8 @@
 .PHONY: help setup install install-dev test lint format clean run dev docker-up docker-down docker-logs
 
 # Переменные
-PYTHON := python3
-PIP := pip
+PYTHON := python3.11
+PIP := pip3.11
 VENV := venv
 PROJECT_NAME := face-recognition-service
 
@@ -35,15 +35,15 @@ setup: ## Настроить виртуальную среду
 
 install: ## Установить зависимости production
 	@echo "$(BLUE)[INFO]$(NC) Установка зависимостей..."
-	@$(PIP) install --upgrade pip setuptools wheel
-	@$(PIP) install --no-cache-dir -r requirements.txt
+	@$(PYTHON) -m pip install --upgrade pip setuptools wheel
+	@$(PYTHON) -m pip install --no-cache-dir -r requirements.txt
 	@echo "$(GREEN)[SUCCESS]$(NC) Зависимости установлены"
 
 install-dev: ## Установить все зависимости (production + dev)
 	@echo "$(BLUE)[INFO]$(NC) Установка всех зависимостей..."
-	@$(PIP) install --upgrade pip setuptools wheel
-	@$(PIP) install --no-cache-dir -r requirements.txt
-	@$(PIP) install --no-cache-dir -r requirements-dev.txt
+	@$(PYTHON) -m pip install --upgrade pip setuptools wheel
+	@$(PYTHON) -m pip install --no-cache-dir -r requirements.txt
+	@$(PYTHON) -m pip install --no-cache-dir -r requirements-dev.txt
 	@echo "$(GREEN)[SUCCESS]$(NC) Все зависимости установлены"
 
 install-poetry: ## Установить Poetry и зависимости
@@ -69,7 +69,7 @@ run: ## Запустить приложение в production режиме
 
 shell: ## Открыть Python shell с активированной средой
 	@echo "$(BLUE)[INFO]$(NC) Открытие Python shell..."
-	@source $(VENV)/bin/activate && python
+	@source $(VENV)/bin/activate && $(PYTHON)
 
 test: ## Запустить все тесты
 	@echo "$(BLUE)[INFO]$(NC) Запуск тестов..."
@@ -114,8 +114,8 @@ format-check: ## Проверить форматирование кода
 security: ## Проверить безопасность зависимостей
 	@echo "$(BLUE)[INFO]$(NC) Проверка безопасности..."
 	@source $(VENV)/bin/activate && \
-		safety check && \
-		pip-audit
+		$(PYTHON) -m safety check && \
+		$(PYTHON) -m pip audit
 
 clean: ## Очистить временные файлы
 	@echo "$(BLUE)[INFO]$(NC) Очистка временных файлов..."
@@ -198,16 +198,16 @@ status: ## Показать статус всех сервисов
 	@echo "=== Активная среда ==="
 	@echo $$VIRTUAL_ENV
 	@echo "=== Зависимости ==="
-	@source $(VENV)/bin/activate && pip list | head -20
+	@source $(VENV)/bin/activate && $(PYTHON) -m pip list | head -20
 
 # Утилиты
 deps-check: ## Проверить устаревшие зависимости
 	@echo "$(BLUE)[INFO]$(NC) Проверка устаревших зависимостей..."
-	@source $(VENV)/bin/activate && pip list --outdated
+	@source $(VENV)/bin/activate && $(PYTHON) -m pip list --outdated
 
 deps-update: ## Обновить зависимости
 	@echo "$(BLUE)[INFO]$(NC) Обновление зависимостей..."
-	@source $(VENV)/bin/activate && pip install --upgrade -r requirements.txt
+	@source $(VENV)/bin/activate && $(PYTHON) -m pip install --upgrade -r requirements.txt
 
 backup: ## Создать backup проекта
 	@echo "$(BLUE)[INFO]$(NC) Создание backup..."

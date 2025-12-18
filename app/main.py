@@ -8,13 +8,9 @@ import uvicorn
 
 from . import __version__
 from .config import settings
-from .routes import health
-
-from .routes import health, upload, verify, liveness, reference, admin
+from .routes import health, upload, verify, liveness, reference, admin, auth
 from .middleware.auth import AuthMiddleware
 from .middleware.rate_limit import RateLimitMiddleware
-# Phase 5: Add these when fully implemented
-# from .middleware.logging import LoggingMiddleware
 from .utils.logger import setup_logger
 
 
@@ -108,11 +104,72 @@ def create_app() -> FastAPI:
     app.add_api_route("/metrics", health.get_metrics, methods=["GET"])
 
     # Основные роуты
-    app.include_router(upload.router, prefix="/api/v1")
-    app.include_router(verify.router, prefix="/api/v1")
-    app.include_router(liveness.router, prefix="/api/v1")
-    app.include_router(reference.router, prefix="/api/v1")
-    app.include_router(admin.router, prefix="/api/v1")
+    # Роутеры уже имеют свои префиксы, поэтому не добавляем дополнительные
+    app.include_router(upload.router)
+    app.include_router(verify.router)
+    app.include_router(liveness.router)
+    app.include_router(reference.router)
+    app.include_router(admin.router)
+    app.include_router(auth.router)  # Добавляем роутер auth для тестов
+    app.include_router(auth.router)  # Включаем только один раз
+
+    return app
+
+
+def create_test_app() -> FastAPI:
+    """Создание тестового FastAPI приложения без middleware авторизации."""
+    app = FastAPI(
+        title="Face Recognition Service (Test)",
+        description="Тестовая версия API для распознавания лиц",
+        version=__version__,
+        docs_url="/docs",
+        redoc_url="/redoc",
+        openapi_url="/openapi.json",
+        lifespan=lifespan,
+    )
+
+    # CORS middleware (оставляем для тестов)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins_list,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+        allow_headers=["*"],
+        expose_headers=["X-Request-ID", "X-New-Access-Token"],
+    )
+
+    # НЕ добавляем AuthMiddleware и RateLimitMiddleware для тестов
+    # Это позволяет тестировать endpoints без необходимости в JWT токенах
+
+    # Root endpoint
+    @app.get("/")
+    async def root():
+        """Корневой endpoint."""
+        return {
+            "message": "Face Recognition Service API (Test)",
+            "version": __version__,
+            "docs": "/docs",
+            "health": "/health",
+            "status": "/status",
+        }
+
+    # Регистрация роутов
+    app.include_router(health.router, prefix="/api/v1")
+
+    # Алиасы для совместимости
+    app.add_api_route("/status", health.detailed_status_check, methods=["GET"])
+    app.add_api_route("/health", health.health_check, methods=["GET"])
+    app.add_api_route("/ready", health.readiness_check, methods=["GET"])
+    app.add_api_route("/live", health.liveness_check, methods=["GET"])
+    app.add_api_route("/metrics", health.get_metrics, methods=["GET"])
+
+    # Основные роуты
+    # Роутеры уже имеют свои префиксы, поэтому не добавляем дополнительные
+    app.include_router(upload.router)
+    app.include_router(verify.router)
+    app.include_router(liveness.router)
+    app.include_router(reference.router)
+    app.include_router(admin.router)
 
     return app
 

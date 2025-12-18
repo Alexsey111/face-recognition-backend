@@ -54,15 +54,26 @@ class CleanupTasks:
             for file_key in files:
                 try:
                     file_info = await storage.get_image_info(file_key)
+                    
                     if file_info and file_info.get('created_at'):
                         created_at = file_info['created_at']
+                        
+                        # Преобразуем строку в datetime если нужно
                         if isinstance(created_at, str):
                             created_at = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
                         
-                        if created_at.replace(tzinfo=None) < cutoff_date:
+                        # Убираем timezone info для корректного сравнения
+                        created_at_naive = created_at.replace(tzinfo=None)
+                        
+                        # Файл считается старым, если его дата создания раньше cutoff_date
+                        if created_at_naive < cutoff_date:
                             old_files.append(file_key)
+                    else:
+                        # Если не удалось получить информацию о файле, пропускаем его
+                        logger.warning(f"Не удалось получить информацию о файле {file_key}, пропускаем")
                 except Exception as e:
                     logger.warning(f"Ошибка проверки файла {file_key}: {e}")
+                    continue  # Важно: пропускаем файл при ошибке
             
             # Удаляем старые файлы
             deleted_count = 0
@@ -193,7 +204,7 @@ class CleanupTasks:
             
             for file_key in temp_files:
                 try:
-                    file_info = storage.get_image_info(file_key)
+                    file_info = await storage.get_image_info(file_key)
                     if file_info and file_info.get('created_at'):
                         created_at = file_info['created_at']
                         if isinstance(created_at, str):

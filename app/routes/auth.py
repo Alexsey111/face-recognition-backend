@@ -25,11 +25,61 @@ security = HTTPBearer(auto_error=False)
 # Зависимости FastAPI
 # =============================================================================
 
-async def get_current_user(request: Request) -> str:
+async def get_current_user_with_token(request: Request) -> tuple[str, str]:
     """
-    Зависимость FastAPI для получения текущего пользователя из JWT токена.
+    Зависимость FastAPI для получения ID пользователя и токена.
     
-    Используется как Depends(get_current_user) в endpoints.
+    Returns:
+        tuple: (user_id, token)
+        
+    Raises:
+        HTTPException: Если токен недействителен или отсутствует
+    """
+    try:
+        # Получаем токен из заголовка Authorization
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authorization header missing or invalid"
+            )
+        
+        token = auth_header.split(" ", 1)[1]
+        
+        # Верифицируем токен и получаем информацию о пользователе
+        user_info = await auth_service.get_user_info_from_token(token)
+        
+        if not user_info or "user_id" not in user_info:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token"
+            )
+        
+        # Проверяем, что пользователь существует и активен
+        user = await db_service.get_user(user_info["user_id"])
+        if not user or not user.get("is_active", True):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found or inactive"
+            )
+        
+        return user_info["user_id"], token
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting current user: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication failed"
+        )
+
+
+async def get_current_user_id(request: Request) -> str:
+    """
+    Зависимость FastAPI для получения ID текущего пользователя из JWT токена.
+    
+    Используется как Depends(get_current_user_id) в endpoints.
     
     Returns:
         str: ID пользователя
@@ -75,6 +125,13 @@ async def get_current_user(request: Request) -> str:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication failed"
         )
+
+
+async def get_current_user(request: Request) -> str:
+    """
+    Алиас для get_current_user_id для обратной совместимости.
+    """
+    return await get_current_user_id(request)
 
 # Инициализация сервисов
 auth_service = AuthService()
@@ -372,25 +429,28 @@ async def register(request: RegisterRequest):
     "/logout",
     response_model=LogoutResponse,
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(RequireAuth())],
+    dependencies=[Depends(get_current_user_with_token)],
     responses={
         401: {"model": ErrorResponse, "description": "Требуется аутентификация"}
     }
 )
-async def logout(request: Request):
+async def logout(user_data: tuple[str, str] = Depends(get_current_user_with_token)):
     """
     Выход из системы и отзыв токенов.
     """
     try:
-        # Получаем токен из заголовка Authorization
-        auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
-            token = auth_header.split(" ", 1)[1]
-            
-            # Отзываем токен
-            await auth_service.revoke_token(token)
+        user_id, token = user_data
         
-        logger.info(f"Logout successful for user: {getattr(request.state, 'user_id', 'unknown')}")
+        # Проверяем, является ли токен валидным JWT (содержит точки)
+        if token and "." in token and len(token.split(".")) == 3:
+            try:
+                # Отзываем только валидные JWT токены
+                await auth_service.revoke_token(token)
+            except Exception as e:
+                # Логируем ошибку, но не прерываем процесс logout
+                logger.warning(f"Error revoking token for user {user_id}: {str(e)}")
+        
+        logger.info(f"Logout successful for user: {user_id}")
         
         return LogoutResponse()
         
@@ -444,18 +504,17 @@ async def refresh_token(request: RefreshTokenRequest):
     "/me",
     response_model=UserInfo,
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(RequireAuth())],
+    dependencies=[Depends(get_current_user_id)],
     responses={
         401: {"model": ErrorResponse, "description": "Требуется аутентификация"},
         404: {"model": ErrorResponse, "description": "Пользователь не найден"}
     }
 )
-async def get_current_user_info(request: Request):
+async def get_current_user_info(user_id: str = Depends(get_current_user_id)) -> UserInfo:
     """
     Получение информации о текущем аутентифицированном пользователе.
     """
     try:
-        user_id = request.state.user_id
         
         # Получаем пользователя из базы данных
         user = await db_service.get_user(user_id)
@@ -516,30 +575,39 @@ async def verify_token(request: Request):
         
         token = auth_header.split(" ", 1)[1]
         
-        # Верифицируем токен
-        user_info = await auth_service.get_user_info_from_token(token)
-        token_info = auth_service.get_token_info(token)
-        
-        # Получаем полную информацию о пользователе
-        user = await db_service.get_user(user_info["user_id"])
-        if not user:
+        # Проверяем, является ли токен валидным JWT (содержит точки и имеет 3 сегмента)
+        if not token or "." not in token or len(token.split(".")) != 3:
             return VerifyTokenResponse(valid=False)
         
-        user_response = UserInfo(
-            user_id=user["id"],
-            email=user["email"],
-            username=user["username"],
-            role=user.get("role", "user"),
-            permissions=user.get("permissions", []),
-            is_active=user.get("is_active", True),
-            created_at=user.get("created_at", "")
-        )
+        try:
+            # Верифицируем токен
+            user_info = await auth_service.get_user_info_from_token(token)
+            token_info = auth_service.get_token_info(token)
+            
+            # Получаем полную информацию о пользователе
+            user = await db_service.get_user(user_info["user_id"])
+            if not user:
+                return VerifyTokenResponse(valid=False)
+            
+            user_response = UserInfo(
+                user_id=user["id"],
+                email=user["email"],
+                username=user["username"],
+                role=user.get("role", "user"),
+                permissions=user.get("permissions", []),
+                is_active=user.get("is_active", True),
+                created_at=user.get("created_at", "")
+            )
         
-        return VerifyTokenResponse(
-            valid=True,
-            user_info=user_response,
-            token_info=token_info
-        )
+            return VerifyTokenResponse(
+                valid=True,
+                user_info=user_response,
+                token_info=token_info
+            )
+        except Exception as e:
+            # Логируем ошибку, но возвращаем valid=False
+            logger.warning(f"Token verification failed: {str(e)}")
+            return VerifyTokenResponse(valid=False)
         
     except Exception as e:
         logger.error(f"Error verifying token: {str(e)}")
@@ -549,13 +617,13 @@ async def verify_token(request: Request):
 @router.post(
     "/change-password",
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(RequireAuth())],
+    dependencies=[Depends(get_current_user_id)],
     responses={
         400: {"model": ErrorResponse, "description": "Неверный текущий пароль"},
         422: {"model": ErrorResponse, "description": "Ошибка валидации"}
     }
 )
-async def change_password(request: ChangePasswordRequest, request_state: Request):
+async def change_password(request: ChangePasswordRequest, user_id: str = Depends(get_current_user_id)):
     """
     Смена пароля аутентифицированного пользователя.
     
@@ -563,7 +631,6 @@ async def change_password(request: ChangePasswordRequest, request_state: Request
     - **new_password**: Новый пароль
     """
     try:
-        user_id = request_state.state.user_id
         
         # Получаем пользователя
         user = await db_service.get_user(user_id)

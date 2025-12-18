@@ -151,7 +151,7 @@ class TestValidators:
         # Тест с размером больше лимита
         large_size = 20 * 1024 * 1024  # 20MB
         with pytest.raises(ValidationError):
-            validate_image_size("dGVzdCBkYXRh", max_size=1024)  # 1KB лимит
+            validate_image_size("x" * large_size, max_size=1024)  # 1KB лимит
     
     def test_validate_image_size_empty(self):
         """Тест пустых данных изображения"""

@@ -4,8 +4,8 @@ Pydantic модели для работы с эталонными изображ
 """
 
 from typing import Optional, List, Dict, Any, Union
-from pydantic import BaseModel, Field, validator
-from datetime import datetime
+from pydantic import BaseModel, Field, field_validator, model_validator
+from datetime import datetime, timezone
 import uuid
 
 
@@ -34,7 +34,7 @@ class ReferenceModel(BaseModel):
     )
     is_active: bool = Field(default=True, description="Активен ли эталон")
     created_at: datetime = Field(
-        default_factory=datetime.utcnow, description="Дата создания"
+        default_factory=lambda: datetime.now(timezone.utc), description="Дата создания"
     )
     updated_at: Optional[datetime] = Field(
         None, description="Дата последнего обновления"
@@ -55,9 +55,10 @@ class ReferenceModel(BaseModel):
     )
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
-    @validator("label")
+    @field_validator("label")
+    @classmethod
     def validate_label(cls, v):
         """Валидация метки эталона."""
         if v is not None:
@@ -91,12 +92,14 @@ class ReferenceCreate(BaseModel):
         default=True, description="Автоматически обрабатывать изображение"
     )
 
-    @validator("label")
+    @field_validator("label")
+    @classmethod
     def validate_label(cls, v):
         """Валидация метки эталона."""
         return ReferenceModel.validate_label(v)
 
-    @validator("image_data")
+    @field_validator("image_data")
+    @classmethod
     def validate_image_data(cls, v):
         """Валидация формата изображения."""
         if not v or len(v.strip()) == 0:
@@ -121,12 +124,14 @@ class ReferenceUpdate(BaseModel):
     )
     is_active: Optional[bool] = Field(None, description="Активен ли эталон")
 
-    @validator("label")
+    @field_validator("label")
+    @classmethod
     def validate_label(cls, v):
         """Валидация метки эталона."""
         return ReferenceModel.validate_label(v)
 
-    @validator("image_data")
+    @field_validator("image_data")
+    @classmethod
     def validate_image_data(cls, v):
         """Валидация формата изображения."""
         if v is not None:
@@ -157,28 +162,24 @@ class ReferenceSearch(BaseModel):
         None, ge=0, description="Максимальное количество использований"
     )
 
-    @validator("quality_min", "quality_max")
-    def validate_quality_range(cls, v, values):
-        """Валидация диапазона качества."""
-        if "quality_min" in values and "quality_max" in values:
-            if values["quality_min"] is not None and values["quality_max"] is not None:
-                if values["quality_min"] > values["quality_max"]:
-                    raise ValueError("quality_min cannot be greater than quality_max")
-        return v
-
-    @validator("usage_count_min", "usage_count_max")
-    def validate_usage_range(cls, v, values):
-        """Валидация диапазона использования."""
-        if "usage_count_min" in values and "usage_count_max" in values:
-            if (
-                values["usage_count_min"] is not None
-                and values["usage_count_max"] is not None
-            ):
-                if values["usage_count_min"] > values["usage_count_max"]:
-                    raise ValueError(
-                        "usage_count_min cannot be greater than usage_count_max"
-                    )
-        return v
+    @model_validator(mode="after")
+    def validate_ranges(self):
+        """Валидация диапазонов качества и использования."""
+        if (
+            self.quality_min is not None 
+            and self.quality_max is not None 
+            and self.quality_min > self.quality_max
+        ):
+            raise ValueError("quality_min cannot be greater than quality_max")
+        
+        if (
+            self.usage_count_min is not None 
+            and self.usage_count_max is not None 
+            and self.usage_count_min > self.usage_count_max
+        ):
+            raise ValueError("usage_count_min cannot be greater than usage_count_max")
+        
+        return self
 
 
 class ReferenceCompare(BaseModel):
@@ -204,14 +205,16 @@ class ReferenceCompare(BaseModel):
         default=False, description="Включить метаданные в результат"
     )
 
-    @validator("image_data")
+    @field_validator("image_data")
+    @classmethod
     def validate_image_data(cls, v):
         """Валидация формата изображения."""
         if not v or len(v.strip()) == 0:
             raise ValueError("Image data cannot be empty")
         return v
 
-    @validator("reference_ids")
+    @field_validator("reference_ids")
+    @classmethod
     def validate_reference_ids(cls, v):
         """Валидация списка ID эталонов."""
         if v is not None and len(v) > 100:
