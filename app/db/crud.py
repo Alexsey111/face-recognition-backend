@@ -133,6 +133,12 @@ class UserCRUD:
 
 class ReferenceCRUD:
     @staticmethod
+    async def get_reference_by_id(db: AsyncSession, reference_id: str) -> Optional[Reference]:
+        """Get reference by ID"""
+        result = await db.execute(select(Reference).where(Reference.id == reference_id))
+        return result.scalar_one_or_none()
+
+    @staticmethod
     async def get_latest_reference(db: AsyncSession, user_id: str) -> Optional[Reference]:
         stmt = (
             select(Reference)

@@ -140,39 +140,7 @@ class VerificationRequest(BaseModel):
         return v
 
 
-class LivenessRequest(BaseModel):
-    """
-    Модель для запроса проверки живости в рамках сессии.
-    """
-
-    session_id: str = Field(..., description="ID сессии проверки живости")
-    image_data: str = Field(
-        ..., description="Изображение для проверки живости в формате base64 или URL"
-    )
-    challenge_type: Optional[str] = Field(
-        "passive", description="Тип проверки: passive, active, blink, smile, turn_head"
-    )
-    challenge_data: Optional[Dict[str, Any]] = Field(
-        None, description="Данные для активной проверки"
-    )
-
-    @field_validator("challenge_type")
-    @classmethod
-    def validate_challenge_type(cls, v):
-        """Валидация типа проверки живости."""
-        if v is not None:
-            allowed_types = ["passive", "active", "blink", "smile", "turn_head"]
-            if v not in allowed_types:
-                raise ValueError(f"Challenge type must be one of: {allowed_types}")
-        return v
-
-    @field_validator("image_data")
-    @classmethod
-    def validate_image_data(cls, v):
-        """Валидация формата изображения."""
-        if not v or len(v.strip()) == 0:
-            raise ValueError("Image data cannot be empty")
-        return v
+# LivenessRequest model moved to models.request to avoid duplication
 
 
 class VerificationResult(BaseModel):

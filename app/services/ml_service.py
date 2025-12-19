@@ -188,17 +188,23 @@ class OptimizedMLService:
     def _detect_faces_optimized(self, image_pil: Image.Image) -> Tuple[bool, torch.Tensor, bool, int]:
         """
         Оптимизированная детекция лиц.
-        Исправлено: один вызов MTCNN, корректное определение multiple_faces.
+        
+        Note: Выполняет два вызова MTCNN:
+        1. self.mtcnn() для получения кропа лица
+        2. self.mtcnn.detect() для определения количества лиц
+        
+        Это приемлемо для текущих требований, так как multiple_faces
+        используется относительно редко. Опциональная оптимизация:
+        использовать только self.mtcnn.detect() и extract_face(boxes[0])
         """
         try:
-            # Один вызов MTCNN с return_prob=True
+            # Первый вызов MTCNN - получение кропа лица
             face_crop, prob = self.mtcnn(image_pil, return_prob=True)
             
             if face_crop is None or prob < self.face_detection_threshold:
                 return False, None, False, 0
             
-            # Корректное определение множественных лиц (исправлено)
-            # Используем detect() для подсчета лиц, но только если нужно
+            # Второй вызов MTCNN - определение количества лиц
             boxes, probs = self.mtcnn.detect(image_pil)
             faces_count = len(boxes) if boxes is not None else 1
             multiple_faces = faces_count > 1
@@ -214,8 +220,8 @@ class OptimizedMLService:
         Оценка качества лица (исправлено: по face_crop, а не по всему изображению).
         """
         try:
-            # Конвертируем в numpy для анализа
-            face_np = face_crop.cpu().numpy()
+            # Конвертируем в numpy для анализа (исправлено: правильная обработка формы)
+            face_np = face_crop[0].permute(1, 2, 0).cpu().numpy()
             
             # Конвертация в оттенки серого
             if len(face_np.shape) == 3:

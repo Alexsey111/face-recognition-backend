@@ -73,7 +73,7 @@ class WebhookService:
 
             return await self._send_webhook(
                 payload=payload,
-                webhook_url=webhook_url or settings.WEBHOOK_URL,
+                webhook_url=webhook_url or getattr(settings, 'WEBHOOK_URL', None),
                 event_type="verification",
             )
 
@@ -126,7 +126,7 @@ class WebhookService:
 
             return await self._send_webhook(
                 payload=payload,
-                webhook_url=webhook_url or settings.WEBHOOK_URL,
+                webhook_url=webhook_url or getattr(settings, 'WEBHOOK_URL', None),
                 event_type="liveness",
             )
 
@@ -174,7 +174,7 @@ class WebhookService:
 
             return await self._send_webhook(
                 payload=payload,
-                webhook_url=webhook_url or settings.WEBHOOK_URL,
+                webhook_url=webhook_url or getattr(settings, 'WEBHOOK_URL', None),
                 event_type="reference",
             )
 
@@ -218,7 +218,7 @@ class WebhookService:
 
             return await self._send_webhook(
                 payload=payload,
-                webhook_url=webhook_url or settings.WEBHOOK_URL,
+                webhook_url=webhook_url or getattr(settings, 'WEBHOOK_URL', None),
                 event_type="user_activity",
             )
 
@@ -264,7 +264,7 @@ class WebhookService:
 
             return await self._send_webhook(
                 payload=payload,
-                webhook_url=webhook_url or settings.WEBHOOK_URL,
+                webhook_url=webhook_url or getattr(settings, 'WEBHOOK_URL', None),
                 event_type="system_alert",
             )
 
@@ -296,7 +296,7 @@ class WebhookService:
                     payload=webhook_data.get("payload"),
                     webhook_url=webhook_url
                     or webhook_data.get("webhook_url")
-                    or settings.WEBHOOK_URL,
+                    or getattr(settings, 'WEBHOOK_URL', None),
                     event_type=webhook_data.get("event_type", "batch"),
                 )
             )
@@ -350,7 +350,7 @@ class WebhookService:
             start_time = asyncio.get_event_loop().time()
             success = await self._send_webhook(
                 payload=payload,
-                webhook_url=webhook_url or settings.WEBHOOK_URL,
+                webhook_url=webhook_url or getattr(settings, 'WEBHOOK_URL', None),
                 event_type="test",
             )
             end_time = asyncio.get_event_loop().time()
@@ -358,7 +358,7 @@ class WebhookService:
             return {
                 "success": success,
                 "response_time": end_time - start_time,
-                "webhook_url": webhook_url or settings.WEBHOOK_URL,
+                "webhook_url": webhook_url or getattr(settings, 'WEBHOOK_URL', None),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
@@ -367,7 +367,7 @@ class WebhookService:
             return {
                 "success": False,
                 "error": str(e),
-                "webhook_url": webhook_url or settings.WEBHOOK_URL,
+                "webhook_url": webhook_url or getattr(settings, 'WEBHOOK_URL', None),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-Синхронные тесты для CRUD операций - без проблем с pytest-asyncio
+Асинхронные тесты для CRUD операций - исправлены проблемы с coroutine objects
 """
 
 import pytest
 import sys
 import os
+import asyncio
 
 # Добавляем путь к проекту
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -13,138 +14,147 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from app.db.crud import UserCRUD, ReferenceCRUD, VerificationSessionCRUD, AuditLogCRUD
 from app.models.user import UserCreate, UserUpdate
 from app.db.models import User, Reference, VerificationSession, AuditLog, VerificationStatus
-from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
 
-# Синхронная настройка SQLite для тестов
-SQLALCHEMY_DATABASE_URL = "sqlite:///./test_sync.db"
+# Асинхронная настройка SQLite для тестов
+SQLALCHEMY_DATABASE_URL = "sqlite+aiosqlite:///./test_async.db"
 
-engine = create_engine(
+engine = create_async_engine(
     SQLALCHEMY_DATABASE_URL,
     connect_args={"check_same_thread": False}
 )
 
-TestingSessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=engine
+AsyncSessionLocal = sessionmaker(
+    engine, class_=AsyncSession, expire_on_commit=False
 )
 
 @pytest.fixture(scope="function")
-def db_session():
-    """Provides a sync session for tests."""
+async def db_session():
+    """Provides an async session for tests."""
     # Создаем таблицы
-    from app.db.database import Base
-    Base.metadata.create_all(bind=engine)
+    async with engine.begin() as conn:
+        from app.db.database import Base
+        await conn.run_sync(Base.metadata.create_all)
     
-    session = TestingSessionLocal()
+    session = AsyncSessionLocal()
     try:
         yield session
     finally:
-        session.close()
+        await session.close()
 
 class TestUserCRUDSync:
-    """Синхронные тесты для UserCRUD"""
+    """Асинхронные тесты для UserCRUD (исправлены coroutine проблемы)"""
     
-    def test_create_user(self, db_session):
-        """Test user creation (sync)"""
+    @pytest.mark.asyncio
+    async def test_create_user(self, db_session):
+        """Test user creation (async)"""
         user_data = UserCreate(
             email="test@example.com",
             phone="+1234567890",
             full_name="Test User"
         )
         
-        user = UserCRUD.create_user(db_session, user_data)
+        user = await UserCRUD.create_user(db_session, user_data)  # ✅ await
         
         assert user.id is not None
         assert user.email == "test@example.com"
         assert user.phone == "+1234567890"
         assert user.is_active == True
         
-    def test_get_user(self, db_session):
-        """Test get user by ID (sync)"""
+    @pytest.mark.asyncio
+    async def test_get_user(self, db_session):
+        """Test get user by ID (async)"""
         user_data = UserCreate(
             email="test2@example.com",
             phone="+1234567891",
             full_name="Test User 2"
         )
         
-        created = UserCRUD.create_user(db_session, user_data)
-        user = UserCRUD.get_user(db_session, created.id)
+        created = await UserCRUD.create_user(db_session, user_data)  # ✅ await
+        user = await UserCRUD.get_user(db_session, created.id)  # ✅ await
         
         assert user.id == created.id
         assert user.email == "test2@example.com"
         
-    def test_get_user_by_email(self, db_session):
-        """Test get user by email (sync)"""
+    @pytest.mark.asyncio
+    async def test_get_user_by_email(self, db_session):
+        """Test get user by email (async)"""
         user_data = UserCreate(
             email="test3@example.com",
             phone="+1234567892",
             full_name="Test User 3"
         )
         
-        created = UserCRUD.create_user(db_session, user_data)
-        user = UserCRUD.get_user_by_email(db_session, "test3@example.com")
+        created = await UserCRUD.create_user(db_session, user_data)  # ✅ await
+        user = await UserCRUD.get_user_by_email(db_session, "test3@example.com")  # ✅ await
         
         assert user.id == created.id
         
-    def test_count_users(self, db_session):
-        """Test count users (sync)"""
+    @pytest.mark.asyncio
+    async def test_count_users(self, db_session):
+        """Test count users (async)"""
         # Создаем двух пользователей
-        UserCRUD.create_user(db_session, UserCreate(
+        await UserCRUD.create_user(db_session, UserCreate(  # ✅ await
             email="count1@example.com", phone="+1111111111", full_name="Count 1"
         ))
-        UserCRUD.create_user(db_session, UserCreate(
+        await UserCRUD.create_user(db_session, UserCreate(  # ✅ await
             email="count2@example.com", phone="+2222222222", full_name="Count 2"
         ))
         
-        count = UserCRUD.count_users(db_session)
+        count = await UserCRUD.count_users(db_session)  # ✅ await
         assert count == 2
         
-    def test_update_user(self, db_session):
-        """Test user update (sync)"""
+    @pytest.mark.asyncio
+    async def test_update_user(self, db_session):
+        """Test user update (async)"""
         user_data = UserCreate(
             email="update@example.com",
             phone="+3333333333",
             full_name="Original Name"
         )
         
-        created = UserCRUD.create_user(db_session, user_data)
+        created = await UserCRUD.create_user(db_session, user_data)  # ✅ await
         updated_data = UserUpdate(full_name="Updated Name")
-        updated = UserCRUD.update_user(db_session, created.id, updated_data)
+        updated = await UserCRUD.update_user(db_session, created.id, updated_data)  # ✅ await
         
         assert updated.full_name == "Updated Name"
         
-    def test_delete_user(self, db_session):
-        """Test user deletion (sync)"""
+    @pytest.mark.asyncio
+    async def test_delete_user(self, db_session):
+        """Test user deletion (async)"""
         user_data = UserCreate(
             email="delete@example.com",
             phone="+4444444444",
             full_name="Delete Me"
         )
         
-        created = UserCRUD.create_user(db_session, user_data)
-        success = UserCRUD.delete_user(db_session, created.id)
+        created = await UserCRUD.create_user(db_session, user_data)  # ✅ await
+        success = await UserCRUD.delete_user(db_session, created.id)  # ✅ await
         
         assert success == True
-        assert UserCRUD.get_user(db_session, created.id) is None
+        user = await UserCRUD.get_user(db_session, created.id)  # ✅ await
+        assert user is None
 
 class TestReferenceCRUDSync:
-    """Синхронные тесты для ReferenceCRUD"""
+    """Асинхронные тесты для ReferenceCRUD (исправлены coroutine проблемы)"""
     
-    def test_create_reference(self, db_session):
-        """Test reference creation (sync)"""
+    @pytest.mark.asyncio
+    async def test_create_reference(self, db_session):
+        """Test reference creation (async)"""
         # Сначала создаем пользователя
         user_data = UserCreate(
             email="ref@example.com",
             phone="+5555555555",
             full_name="Reference User"
         )
-        user = UserCRUD.create_user(db_session, user_data)
+        user = await UserCRUD.create_user(db_session, user_data)  # ✅ await
         
-        ref = ReferenceCRUD.create_reference(
+        ref = await ReferenceCRUD.create_reference(  # ✅ await
             db_session,
             user_id=user.id,
+            embedding="test_embedding",
             embedding_encrypted=b"encrypted_data",
             embedding_hash="hash123",
             quality_score=0.95,
@@ -157,43 +167,47 @@ class TestReferenceCRUDSync:
         assert ref.version == 1
         assert ref.quality_score == 0.95
         
-    def test_get_latest_reference(self, db_session):
-        """Test getting latest reference (sync)"""
+    @pytest.mark.asyncio
+    async def test_get_latest_reference(self, db_session):
+        """Test getting latest reference (async)"""
         # Создаем пользователя
-        user = UserCRUD.create_user(db_session, UserCreate(
+        user = await UserCRUD.create_user(db_session, UserCreate(  # ✅ await
             email="latest@example.com", phone="+6666666666", full_name="Latest User"
         ))
         
         # Создаем два reference
-        ref1 = ReferenceCRUD.create_reference(
-            db_session, user_id=user.id, embedding_encrypted=b"data1",
+        ref1 = await ReferenceCRUD.create_reference(  # ✅ await
+            db_session, user_id=user.id, embedding="test_embedding1",
+            embedding_encrypted=b"data1",
             embedding_hash="hash1", quality_score=0.9,
             image_filename="photo1.jpg", image_size_mb=2.5,
             image_format="JPG"
         )
         
-        ref2 = ReferenceCRUD.create_reference(
-            db_session, user_id=user.id, embedding_encrypted=b"data2",
+        ref2 = await ReferenceCRUD.create_reference(  # ✅ await
+            db_session, user_id=user.id, embedding="test_embedding2",
+            embedding_encrypted=b"data2",
             embedding_hash="hash2", quality_score=0.95,
             image_filename="photo2.jpg", image_size_mb=2.5,
             image_format="JPG"
         )
         
-        latest = ReferenceCRUD.get_latest_reference(db_session, user.id)
+        latest = await ReferenceCRUD.get_latest_reference(db_session, user.id)  # ✅ await
         assert latest.id == ref2.id
         assert latest.version == 2
 
 class TestVerificationSessionCRUDSync:
-    """Синхронные тесты для VerificationSessionCRUD"""
+    """Асинхронные тесты для VerificationSessionCRUD (исправлены coroutine проблемы)"""
     
-    def test_create_session(self, db_session):
-        """Test session creation (sync)"""
+    @pytest.mark.asyncio
+    async def test_create_session(self, db_session):
+        """Test session creation (async)"""
         # Создаем пользователя
-        user = UserCRUD.create_user(db_session, UserCreate(
+        user = await UserCRUD.create_user(db_session, UserCreate(  # ✅ await
             email="session@example.com", phone="+7777777777", full_name="Session User"
         ))
         
-        session = VerificationSessionCRUD.create_session(
+        session = await VerificationSessionCRUD.create_session(  # ✅ await
             db_session,
             user_id=user.id,
             session_id="test_session_123",
@@ -202,16 +216,17 @@ class TestVerificationSessionCRUDSync:
         )
         
         assert session.id is not None
-        assert session.status == "pending"
+        assert session.status == VerificationStatus.PENDING
         
-    def test_complete_session(self, db_session):
-        """Test completing session (sync)"""
+    @pytest.mark.asyncio
+    async def test_complete_session(self, db_session):
+        """Test completing session (async)"""
         # Создаем пользователя
-        user = UserCRUD.create_user(db_session, UserCreate(
+        user = await UserCRUD.create_user(db_session, UserCreate(  # ✅ await
             email="complete@example.com", phone="+8888888888", full_name="Complete User"
         ))
         
-        session = VerificationSessionCRUD.create_session(
+        session = await VerificationSessionCRUD.create_session(  # ✅ await
             db_session,
             user_id=user.id,
             session_id="complete_session_123",
@@ -219,7 +234,7 @@ class TestVerificationSessionCRUDSync:
             image_size_mb=1.5
         )
         
-        completed = VerificationSessionCRUD.complete_session(
+        completed = await VerificationSessionCRUD.complete_session(  # ✅ await
             db_session,
             session_id="complete_session_123",
             is_match=True,
@@ -227,20 +242,21 @@ class TestVerificationSessionCRUDSync:
             confidence=0.98
         )
         
-        assert completed.status == "success"
+        assert completed.status == VerificationStatus.SUCCESS
         assert completed.is_match == True
 
 class TestAuditLogCRUDSync:
-    """Синхронные тесты для AuditLogCRUD"""
+    """Асинхронные тесты для AuditLogCRUD (исправлены coroutine проблемы)"""
     
-    def test_log_action(self, db_session):
-        """Test logging action (sync)"""
+    @pytest.mark.asyncio
+    async def test_log_action(self, db_session):
+        """Test logging action (async)"""
         # Создаем пользователя
-        user = UserCRUD.create_user(db_session, UserCreate(
+        user = await UserCRUD.create_user(db_session, UserCreate(  # ✅ await
             email="audit@example.com", phone="+9999999999", full_name="Audit User"
         ))
         
-        log = AuditLogCRUD.log_action(
+        log = await AuditLogCRUD.log_action(  # ✅ await
             db_session,
             action="user_created",
             resource_type="user",
@@ -252,15 +268,16 @@ class TestAuditLogCRUDSync:
         assert log is not None
         assert log.action == "user_created"
         
-    def test_get_logs(self, db_session):
-        """Test getting logs (sync)"""
+    @pytest.mark.asyncio
+    async def test_get_logs(self, db_session):
+        """Test getting logs (async)"""
         # Создаем пользователя
-        user = UserCRUD.create_user(db_session, UserCreate(
+        user = await UserCRUD.create_user(db_session, UserCreate(  # ✅ await
             email="log@example.com", phone="+1010101010", full_name="Log User"
         ))
         
         # Создаем два лога
-        AuditLogCRUD.log_action(
+        await AuditLogCRUD.log_action(  # ✅ await
             db_session,
             action="user_created",
             resource_type="user",
@@ -268,7 +285,7 @@ class TestAuditLogCRUDSync:
             user_id=user.id
         )
         
-        AuditLogCRUD.log_action(
+        await AuditLogCRUD.log_action(  # ✅ await
             db_session,
             action="user_updated",
             resource_type="user",
@@ -276,5 +293,5 @@ class TestAuditLogCRUDSync:
             user_id=user.id
         )
         
-        logs = AuditLogCRUD.get_logs(db_session, user_id=user.id)
+        logs = await AuditLogCRUD.get_logs(db_session, user_id=user.id)  # ✅ await
         assert len(logs) >= 2

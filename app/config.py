@@ -112,6 +112,7 @@ class Settings(BaseSettings):
     TARGET_FRR: float = 0.02  # < 2%
 
     # Webhook настройки
+    WEBHOOK_URL: Optional[str] = None  # Основной webhook URL для уведомлений
     WEBHOOK_TIMEOUT: int = 10
     WEBHOOK_MAX_RETRIES: int = 3
     WEBHOOK_RETRY_DELAY: int = 5

@@ -79,6 +79,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             "/docs",
             "/redoc",
             "/openapi.json",
+            "/favicon.ico",  # Favicon для браузеров
             # ✅ API v1 health endpoints
             "/api/v1/health",
             "/api/v1/status",
@@ -243,6 +244,3 @@ class RequireAuth:
             return await func(*args, **kwargs)
 
         return wrapper
-
-
-

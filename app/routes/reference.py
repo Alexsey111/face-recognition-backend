@@ -65,20 +65,8 @@ async def get_references(
         logger.info(f"Getting references with filters, request {request_id}")
 
         # Инициализация сервисов
-        db_service = DatabaseService()
-
-        # Построение фильтров
-        filters = {}
-        if user_id:
-            filters["user_id"] = user_id
-        if label:
-            filters["label"] = label
-        if is_active is not None:
-            filters["is_active"] = is_active
-        if quality_min is not None:
-            filters["quality_min"] = quality_min
-        if quality_max is not None:
-            filters["quality_max"] = quality_max
+        from app.db.crud import ReferenceCRUD
+        from app.db.database import get_async_db_manager
 
         # Валидация параметров сортировки
         allowed_sort_fields = [
@@ -97,29 +85,91 @@ async def get_references(
             raise ValidationError("sort_order must be 'asc' or 'desc'")
 
         # Получение эталонов из БД
-        result = await db_service.get_references(
-            filters=filters,
-            page=page,
-            per_page=per_page,
-            sort_by=sort_by,
-            sort_order=sort_order,
-        )
+        all_references = []
+        async with get_async_db_manager().get_session() as db:
+            # Если указан user_id, получаем только его эталоны
+            if user_id:
+                all_references = await ReferenceCRUD.get_all_references(db, user_id)
+            else:
+                # Если user_id не указан, получаем все эталоны (упрощенная реализация)
+                # В реальном проекте здесь должен быть более эффективный запрос
+                from sqlalchemy import select
+                result = await db.execute(select(Reference))
+                all_references = list(result.scalars().all())
 
+        # Применение фильтров
+        filtered_references = []
+        for ref in all_references:
+            # Фильтр по label
+            if label and (not ref.label or label not in ref.label):
+                continue
+            # Фильтр по is_active
+            if is_active is not None and ref.is_active != is_active:
+                continue
+            # Фильтр по quality_min
+            if quality_min is not None and (ref.quality_score or 0) < quality_min:
+                continue
+            # Фильтр по quality_max
+            if quality_max is not None and (ref.quality_score or 0) > quality_max:
+                continue
+            filtered_references.append(ref)
+
+        # Сортировка
+        reverse = sort_order == "desc"
+        if sort_by == "created_at":
+            filtered_references.sort(key=lambda x: x.created_at, reverse=reverse)
+        elif sort_by == "updated_at":
+            filtered_references.sort(key=lambda x: x.updated_at or datetime.min, reverse=reverse)
+        elif sort_by == "quality_score":
+            filtered_references.sort(key=lambda x: x.quality_score or 0, reverse=reverse)
+        elif sort_by == "usage_count":
+            filtered_references.sort(key=lambda x: x.usage_count or 0, reverse=reverse)
+        elif sort_by == "label":
+            filtered_references.sort(key=lambda x: x.label or "", reverse=reverse)
+
+        # Пагинация
+        total_count = len(filtered_references)
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        paginated_references = filtered_references[start_idx:end_idx]
+
+        # Создание ответов
         references = []
-        for ref_data in result["items"]:
-            # Дешифрация эмбеддинга (не возвращаем сам эмбеддинг)
-            ref_data.pop("embedding", None)
+        for ref in paginated_references:
+            ref_data = {
+                "success": True,
+                "reference_id": ref.id,
+                "user_id": ref.user_id,
+                "label": ref.label,
+                "file_url": ref.file_url,
+                "created_at": ref.created_at,
+                "updated_at": ref.updated_at,
+                "quality_score": ref.quality_score,
+                "usage_count": ref.usage_count or 0,
+                "last_used": ref.last_used,
+                "metadata": ref.metadata,
+            }
             references.append(ReferenceResponse(**ref_data))
+
+        # Вычисление пагинации
+        has_next = end_idx < total_count
+        has_prev = start_idx > 0
 
         response = ReferenceListResponse(
             success=True,
             references=references,
-            total_count=result["total_count"],
+            total_count=total_count,
             page=page,
             per_page=per_page,
-            has_next=result["has_next"],
-            has_prev=result["has_prev"],
-            filters_applied=filters,
+            has_next=has_next,
+            has_prev=has_prev,
+            filters_applied={
+                "user_id": user_id,
+                "label": label,
+                "is_active": is_active,
+                "quality_min": quality_min,
+                "quality_max": quality_max,
+            },
             request_id=request_id,
         )
 
@@ -173,10 +223,12 @@ async def get_reference(reference_id: str, http_request: Request):
         logger.info(f"Getting reference {reference_id}, request {request_id}")
 
         # Инициализация сервисов
-        db_service = DatabaseService()
+        from app.db.crud import ReferenceCRUD
+        from app.db.database import get_async_db_manager
 
         # Получение эталона из БД
-        reference_data = await db_service.get_reference_by_id(reference_id)
+        async with get_async_db_manager().get_session() as db:
+            reference_data = await ReferenceCRUD.get_reference_by_id(db, reference_id)
 
         if not reference_data:
             raise NotFoundError(f"Reference {reference_id} not found")
@@ -296,29 +348,23 @@ async def create_reference(request: ReferenceCreateRequest, http_request: Reques
             )
 
         # Создание записи в БД
-        reference_data = {
-            "user_id": request.user_id,
-            "label": request.label,
-            "file_url": upload_result.get("file_url") if upload_result else None,
-            "file_size": (
-                upload_result.get("file_size")
-                if upload_result
-                else len(validation_result.image_data)
-            ),
-            "image_format": validation_result.image_format,
-            "image_dimensions": validation_result.dimensions,
-            "embedding": encrypted_embedding,
-            "quality_score": quality_score,
-            "metadata": {
-                "request_id": request_id,
-                "original_metadata": request.metadata,
-                "upload_timestamp": datetime.now(timezone.utc).isoformat(),
-                "ml_model_version": embedding_result.get("model_version", "unknown"),
-                "processing_time": time.time() - start_time,
-            },
-        }
-
-        created_reference = await db_service.create_reference(reference_data)
+        async with get_async_db_manager().get_session() as db:
+            created_reference = await ReferenceCRUD.create_reference(
+                db,
+                user_id=request.user_id,
+                embedding=str(encrypted_embedding),  # Конвертируем bytes в строку для БД
+                embedding_encrypted=encrypted_embedding,
+                embedding_hash=str(hash(encrypted_embedding)),  # Простой хеш
+                quality_score=quality_score,
+                image_filename=upload_result.get("file_url") if upload_result else f"reference_{request_id}.jpg",
+                image_size_mb=(
+                    upload_result.get("file_size", len(validation_result.image_data)) / (1024 * 1024)
+                    if upload_result
+                    else len(validation_result.image_data) / (1024 * 1024)
+                ),
+                image_format=validation_result.image_format,
+                file_url=upload_result.get("file_url") if upload_result else None
+            )
 
         # Удаляем исходный файл, если он был сохранен и включено авто-удаление
         if (
@@ -412,14 +458,16 @@ async def update_reference(
         logger.info(f"Updating reference {reference_id}, request {request_id}")
 
         # Инициализация сервисов
-        db_service = DatabaseService()
+        from app.db.crud import ReferenceCRUD
+        from app.db.database import get_async_db_manager
         validation_service = ValidationService()
         storage_service = StorageService()
         ml_service = MLService()
         encryption_service = EncryptionService()
 
         # Получение существующего эталона
-        existing_reference = await db_service.get_reference_by_id(reference_id)
+        async with get_async_db_manager().get_session() as db:
+            existing_reference = await ReferenceCRUD.get_reference_by_id(db, reference_id)
 
         if not existing_reference:
             raise NotFoundError(f"Reference {reference_id} not found")
@@ -530,7 +578,8 @@ async def update_reference(
                     )
 
         # Обновление в БД
-        updated_reference = await db_service.update_reference(reference_id, update_data)
+        async with get_db_session() as db:
+            updated_reference = await ReferenceCRUD.update_reference(db, reference_id, **update_data)
 
         # Удаляем эмбеддинг из ответа
         updated_reference.pop("embedding", None)
@@ -619,17 +668,19 @@ async def delete_reference(reference_id: str, http_request: Request):
         logger.info(f"Deleting reference {reference_id}, request {request_id}")
 
         # Инициализация сервисов
-        db_service = DatabaseService()
+        from app.db.crud import ReferenceCRUD
+        from app.db.database import get_async_db_manager
         storage_service = StorageService()
 
         # Получение информации о эталоне для удаления файла
-        reference_data = await db_service.get_reference_by_id(reference_id)
+        async with get_async_db_manager().get_session() as db:
+            reference_data = await ReferenceCRUD.get_reference_by_id(db, reference_id)
 
-        if not reference_data:
-            raise NotFoundError(f"Reference {reference_id} not found")
+            if not reference_data:
+                raise NotFoundError(f"Reference {reference_id} not found")
 
-        # Удаление из БД
-        await db_service.delete_reference(reference_id)
+            # Удаление из БД
+            await ReferenceCRUD.delete_reference(db, reference_id)
 
         # Удаление файла из хранилища
         if reference_data.get("file_url"):
@@ -696,9 +747,10 @@ async def compare_with_references(request: ReferenceCompare, http_request: Reque
         logger.info(f"Starting reference comparison, request {request_id}")
 
         # Инициализация сервисов
+        from app.db.crud import ReferenceCRUD
+        from app.db.database import get_async_db_manager
         validation_service = ValidationService()
         ml_service = MLService()
-        db_service = DatabaseService()
         encryption_service = EncryptionService()
 
         # Валидация изображения
@@ -714,21 +766,24 @@ async def compare_with_references(request: ReferenceCompare, http_request: Reque
             )
 
         # Получение эталонов для сравнения
-        if request.reference_ids:
-            # Используем указанные ID эталонов
-            references = []
-            for ref_id in request.reference_ids:
-                ref_data = await db_service.get_reference_by_id(ref_id)
-                if ref_data and ref_data.get("is_active", True):
-                    references.append(ref_data)
-        else:
-            # Получаем все активные эталоны пользователя
-            if not request.user_id:
-                raise ValidationError(
-                    "Either reference_ids or user_id must be provided"
-                )
+        references = []
+        async with get_async_db_manager().get_session() as db:
+            if request.reference_ids:
+                # Используем указанные ID эталонов
+                for ref_id in request.reference_ids:
+                    ref_data = await ReferenceCRUD.get_reference_by_id(db, ref_id)
+                    if ref_data and ref_data.get("is_active", True):
+                        references.append(ref_data)
+            else:
+                # Получаем все активные эталоны пользователя
+                if not request.user_id:
+                    raise ValidationError(
+                        "Either reference_ids or user_id must be provided"
+                    )
 
-            references = await db_service.get_active_references_by_user(request.user_id)
+                # Получаем все эталоны пользователя и фильтруем активные
+                all_references = await ReferenceCRUD.get_all_references(db, request.user_id)
+                references = [ref for ref in all_references if ref.is_active]
 
         if not references:
             raise NotFoundError("No active references found for comparison")

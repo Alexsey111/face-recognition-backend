@@ -15,7 +15,6 @@ from ..models.request import LivenessRequest
 from ..models.response import LivenessResponse, SessionResponse
 from ..models.verification import (
     VerificationSessionCreate,
-    LivenessRequest as SessionLivenessRequest,
     LivenessResult,
 )
 from ..services.ml_service import MLService
@@ -271,7 +270,7 @@ async def create_liveness_session(
 
 @router.post("/liveness/session/{session_id}", response_model=LivenessResponse)
 async def check_liveness_in_session(
-    session_id: str, request: SessionLivenessRequest, http_request: Request
+    session_id: str, request: LivenessRequest, http_request: Request
 ):
     """
     Проверка живости в рамках сессии.
@@ -312,16 +311,8 @@ async def check_liveness_in_session(
             session_id, session_data, expire_seconds=1800
         )  # 30 минут
 
-        # Создание запроса проверки живости
-        liveness_request = LivenessRequest(
-            session_id=session_id,
-            image_data=request.image_data,
-            challenge_type=request.challenge_type,
-            challenge_data=request.challenge_data,
-        )
-
-        # Выполнение проверки живости
-        liveness_response = await check_liveness(liveness_request, http_request)
+        # Выполнение проверки живости (используем request напрямую)
+        liveness_response = await check_liveness(request, http_request)
 
         # Обновление статуса сессии
         session_data["status"] = "completed"
