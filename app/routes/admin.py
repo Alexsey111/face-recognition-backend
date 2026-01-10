@@ -16,7 +16,7 @@ from ..services.ml_service import MLService
 from ..utils.logger import get_logger
 from ..utils.exceptions import ValidationError, NotFoundError
 
-router = APIRouter(prefix="/api/v1", tags=["Admin"])
+router = APIRouter(prefix="/admin", tags=["Admin"])
 
 logger = get_logger(__name__)
 

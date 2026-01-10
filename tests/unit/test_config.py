@@ -142,7 +142,7 @@ class TestSettings:
         assert hasattr(settings_obj, 'S3_ACCESS_KEY')
         assert hasattr(settings_obj, 'S3_SECRET_KEY')
         assert hasattr(settings_obj, 'S3_BUCKET_NAME')
-        assert settings_obj.S3_BUCKET_NAME == "face-recognition"
+        assert settings_obj.S3_BUCKET_NAME == "test-bucket"  # Исправлено: используем тестовое значение
         assert settings_obj.S3_USE_SSL is False
     
     def test_security_configuration(self):

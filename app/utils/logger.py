@@ -1,428 +1,395 @@
-"""
-Настройка логгера.
-Конфигурация системы логирования для приложения.
-"""
-
 import logging
-import logging.handlers
 import sys
-from pathlib import Path
-from typing import Optional, Dict, Any
 import json
-import uuid
-from datetime import datetime
+import time
+import asyncio
+import inspect
+import functools
+from logging.handlers import RotatingFileHandler
+try:
+    from pythonjsonlogger import jsonlogger
+    JsonFormatterBase = jsonlogger.JsonFormatter
+except Exception:
+    JsonFormatterBase = logging.Formatter
+from typing import Optional, Callable, Any, Dict
 
 from ..config import settings
-from .constants import LOG_LEVELS, TIME_FORMATS
-
-# Глобальная переменная для хранения логгера
-_logger = None
 
 
-class ColoredFormatter(logging.Formatter):
-    """
-    Цветной форматтер для консольного вывода.
-    """
+SENSITIVE_KEYS = {
+    "password",
+    "passwd",
+    "token",
+    "access_token",
+    "refresh_token",
+    "embeddings",
+    "image",
+    "file",
+    "ssn",
+    "credit_card",
+}
 
-    # Цветовые коды для разных уровней логирования
-    COLORS = {
-        "DEBUG": "\033[36m",  # Cyan
-        "INFO": "\033[32m",  # Green
-        "WARNING": "\033[33m",  # Yellow
-        "ERROR": "\033[31m",  # Red
-        "CRITICAL": "\033[35m",  # Magenta
-        "RESET": "\033[0m",  # Reset
-    }
+
+def _redact(obj: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(obj, dict):
+        return obj
+    redacted: Dict[str, Any] = {}
+    for k, v in obj.items():
+        if k and k.lower() in SENSITIVE_KEYS:
+            redacted[k] = "[REDACTED]"
+        else:
+            redacted[k] = v
+    return redacted
+
+
+class StructuredFormatter(JsonFormatterBase):
+    def add_fields(self, log_record, record, message_dict=None):
+        # If the base formatter provides add_fields, try to reuse it.
+        if hasattr(super(), "add_fields"):
+            try:
+                super().add_fields(log_record, record, message_dict or {})
+            except Exception:
+                pass
+
+        # Ensure basic fields exist regardless of underlying formatter
+        if "timestamp" not in log_record:
+            try:
+                log_record["timestamp"] = self.formatTime(record, self.datefmt) if hasattr(self, "formatTime") else time.time()
+            except Exception:
+                log_record["timestamp"] = time.time()
+        if "level" not in log_record:
+            log_record["level"] = record.levelname
+        log_record.setdefault("logger", record.name)
+        if "message" not in log_record:
+            log_record["message"] = record.getMessage()
 
     def format(self, record):
-        # Добавляем цвет к уровню логирования
-        if hasattr(record, "levelname"):
-            color = self.COLORS.get(record.levelname, self.COLORS["RESET"])
-            record.levelname = f"{color}{record.levelname}{self.COLORS['RESET']}"
+        # Build a JSON-serializable record dict and emit as JSON string
+        log_record: Dict[str, Any] = {}
+        try:
+            self.add_fields(log_record, record, {})
+            return json.dumps(log_record, default=str)
+        except Exception:
+            # Last-resort fallback to plain text
+            try:
+                return super().format(record)
+            except Exception:
+                return str(record)
 
-        return super().format(record)
+
+def _make_rotating_handler(path: str, max_bytes: int, backup_count: int):
+    handler = RotatingFileHandler(path, maxBytes=max_bytes, backupCount=backup_count)
+    handler.setLevel(logging.INFO)
+    return handler
 
 
-class JSONFormatter(logging.Formatter):
+def setup_logger(name: Optional[str] = None, level: Optional[str] = None, log_file: Optional[str] = None):
+    """Configure and return a structured JSON logger.
+
+    This is idempotent: calling multiple times for the same name won't add duplicate handlers.
     """
-    JSON форматтер для структурированного логирования.
-    """
-
-    def format(self, record: logging.LogRecord) -> str:
-        # Базовые данные
-        log_data = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "level": record.levelname,
-            "logger": record.name,
-            "message": record.getMessage(),
-            "module": record.module,
-            "function": record.funcName,
-            "line": record.lineno,
-        }
-
-        # Добавляем request_id если есть
-        if hasattr(record, "request_id"):
-            log_data["request_id"] = record.request_id
-
-        # Добавляем user_id если есть
-        if hasattr(record, "user_id"):
-            log_data["user_id"] = record.user_id
-
-        # Добавляем event_type если есть
-        if hasattr(record, "event_type"):
-            log_data["event_type"] = record.event_type
-
-        # Добавляем дополнительные данные из extra
-        for key, value in record.__dict__.items():
-            if key not in [
-                "name",
-                "msg",
-                "args",
-                "levelname",
-                "levelno",
-                "pathname",
-                "filename",
-                "module",
-                "lineno",
-                "funcName",
-                "created",
-                "msecs",
-                "relativeCreated",
-                "thread",
-                "threadName",
-                "processName",
-                "process",
-                "getMessage",
-                "exc_info",
-                "exc_text",
-                "stack_info",
-            ]:
-                log_data[key] = value
-
-        # Добавляем исключение если есть
-        if record.exc_info:
-            log_data["exception"] = self.formatException(record.exc_info)
-
-        return json.dumps(log_data, ensure_ascii=False, default=str)
-
-
-class RequestContextFilter(logging.Filter):
-    """
-    Фильтр для добавления контекста запроса в логи.
-    """
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        # Инициализируем атрибуты
-        if not hasattr(record, "request_id"):
-            record.request_id = None
-        if not hasattr(record, "user_id"):
-            record.user_id = None
-        if not hasattr(record, "event_type"):
-            record.event_type = None
-
-        return True
-
-
-def setup_logger(
-    name: str = "face_recognition_service",
-    level: Optional[str] = None,
-    log_file: Optional[str] = None,
-    max_file_size: int = 100 * 1024 * 1024,  # 100MB
-    backup_count: int = 5,
-    json_format: bool = False,
-) -> logging.Logger:
-    """
-    Настройка системы логирования.
-
-    Args:
-        name: Имя логгера
-        level: Уровень логирования
-        log_file: Путь к файлу логов
-        max_file_size: Максимальный размер файла логов
-        backup_count: Количество backup файлов
-        json_format: Использовать ли JSON формат
-
-    Returns:
-        logging.Logger: Настроенный логгер
-    """
-    global _logger
-
-    # Используем уровень из настроек если не указан
-    if level is None:
-        level = settings.LOG_LEVEL.upper()
-
-    # Создаем логгер
-    logger = logging.getLogger(name)
-    logger.setLevel(LOG_LEVELS.get(level, logging.INFO))
-
-    # Очищаем существующие обработчики
-    logger.handlers.clear()
-
-    # Создаем форматтер
-    if json_format:
-        formatter = JSONFormatter()
+    # Accept either numeric (e.g. logging.INFO) or string levels (e.g. 'INFO').
+    if isinstance(level, int):
+        lvl_value = level
     else:
-        # Определяем формат сообщения
-        if settings.DEBUG:
-            format_string = (
-                "%(asctime)s - %(name)s - %(levelname)s - "
-                "[%(filename)s:%(lineno)d] - %(message)s"
-            )
-        else:
-            format_string = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        raw = (level or getattr(settings, "LOG_LEVEL", "INFO") or "INFO")
+        # Coerce to string and uppercase to match logging names, but fall back
+        # to INT conversion if provided (e.g. '20').
+        try:
+            lvl_name = str(raw).upper()
+            lvl_value = getattr(logging, lvl_name, None)
+            if lvl_value is None:
+                lvl_value = int(raw)
+        except Exception:
+            lvl_value = logging.INFO
 
-        formatter = logging.Formatter(format_string)
+    logger_name = name or "app"
 
-    # Добавляем консольный обработчик
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(LOG_LEVELS.get(level, logging.INFO))
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(lvl_value)
 
-    if settings.DEBUG and not json_format:
-        # В debug режиме используем цветной форматтер для консоли
-        console_formatter = ColoredFormatter(format_string)
-    else:
-        console_formatter = formatter
+    # If logger already configured, return it
+    if logger.handlers:
+        return logger
 
-    console_handler.setFormatter(console_formatter)
-    logger.addHandler(console_handler)
+    fmt = StructuredFormatter('%(timestamp)s %(level)s %(name)s %(message)s')
 
-    # Добавляем файловый обработчик если указан файл
-    if log_file or settings.LOG_FILE_PATH:
-        log_file_path = log_file or settings.LOG_FILE_PATH
+    # Console handler
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setLevel(lvl_value)
+    ch.setFormatter(fmt)
+    logger.addHandler(ch)
 
-        # Создаем директорию если не существует
-        log_dir = Path(log_file_path).parent
-        log_dir.mkdir(parents=True, exist_ok=True)
+    # File handler if configured
+    path = log_file or getattr(settings, "LOG_FILE_PATH", None)
+    if path:
+        max_size = int(getattr(settings, "LOG_MAX_SIZE", 10 * 1024 * 1024))
+        backup = int(getattr(settings, "LOG_BACKUP_COUNT", 5))
+        fh = _make_rotating_handler(path, max_size, backup)
+        fh.setFormatter(fmt)
+        logger.addHandler(fh)
 
-        # Ротирующий файловый обработчик
-        file_handler = logging.handlers.RotatingFileHandler(
-            log_file_path,
-            maxBytes=max_file_size,
-            backupCount=backup_count,
-            encoding="utf-8",
-        )
-        file_handler.setLevel(LOG_LEVELS.get(level, logging.INFO))
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
-
-    # Добавляем фильтр контекста
-    context_filter = RequestContextFilter()
-    logger.addFilter(context_filter)
-
-    # Предотвращаем дублирование логов
-    logger.propagate = False
-
-    # Сохраняем логгер в глобальной переменной
-    _logger = logger
+    # Configure audit logger
+    audit_logger = logging.getLogger("audit")
+    audit_logger.setLevel(logging.INFO)
+    if not audit_logger.handlers:
+        audit_path = f"{path}.audit" if path else "./audit.log"
+        try:
+            af = _make_rotating_handler(audit_path, int(getattr(settings, "LOG_MAX_SIZE", 10 * 1024 * 1024)), int(getattr(settings, "LOG_BACKUP_COUNT", 5)))
+            af.setFormatter(fmt)
+            audit_logger.addHandler(af)
+        except Exception:
+            # Fallback: console-only audit logger
+            ach = logging.StreamHandler(sys.stdout)
+            ach.setFormatter(fmt)
+            audit_logger.addHandler(ach)
 
     return logger
 
 
-def get_logger(name: Optional[str] = None) -> logging.Logger:
-    """
-    Получение логгера.
-
-    Args:
-        name: Имя логгера
-
-    Returns:
-        logging.Logger: Логгер
-    """
-    global _logger
-
-    if _logger is None:
-        # Создаем логгер если еще не создан
-        _logger = setup_logger()
-
-    if name:
-        return logging.getLogger(name)
-    return _logger
+def get_logger(name: Optional[str] = None):
+    logger = setup_logger(name)
+    return logging.getLogger(logger.name if isinstance(logger, logging.Logger) else (name or "app"))
 
 
+# Backwards-compatible helpers expected by other modules/tests
 class LoggerMixin:
-    """
-    Миксин для добавления логгера в классы.
-    """
-
     @property
     def logger(self) -> logging.Logger:
-        """Логгер для класса."""
-        if not hasattr(self, "_logger"):
-            self._logger = get_logger(self.__class__.__module__)
-        return self._logger
+        return get_logger(self.__class__.__module__)
 
 
-class StructuredLogger:
+class StructuredLogger(logging.Logger):
+    pass
+
+
+def structured_logger(name: Optional[str] = None) -> logging.Logger:
+    return get_logger(name)
+
+
+def configure_logging_for_environment(env: Optional[str] = None):
+    # Lightweight configuration hook for tests/environments
+    setup_logger()
+
+
+# Context-based logging helpers used by middleware
+import contextvars
+
+_LOG_CONTEXT: contextvars.ContextVar[Dict[str, Any]] = contextvars.ContextVar("_LOG_CONTEXT", default={})
+
+
+class LogContext:
+    def __init__(self, request_id: Optional[str] = None, user_id: Optional[str] = None, extra: Optional[Dict[str, Any]] = None):
+        self.request_id = request_id
+        self.user_id = user_id
+        self.extra = extra or {}
+        self._token = None
+
+    def __enter__(self):
+        ctx = _LOG_CONTEXT.get().copy()
+        ctx.update({"request_id": self.request_id, "user_id": self.user_id})
+        ctx.setdefault("extra", {})
+        ctx["extra"].update(self.extra)
+        self._token = _LOG_CONTEXT.set(ctx)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self._token is not None:
+            try:
+                _LOG_CONTEXT.reset(self._token)
+            except Exception:
+                pass
+
+    async def __aenter__(self):
+        return self.__enter__()
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return self.__exit__(exc_type, exc, tb)
+
+
+def redact_sensitive_data(payload: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(payload, dict):
+        return payload
+    sensitive = {"password", "passwd", "token", "access_token", "refresh_token", "embeddings", "image", "file"}
+    redacted = {}
+    for k, v in payload.items():
+        if k and k.lower() in sensitive:
+            redacted[k] = "[REDACTED]"
+        else:
+            redacted[k] = v
+    return redacted
+
+
+def log_with_context(log_method, message, **context):
     """
-    Структурированный логгер для удобного логирования событий.
+    Log with additional context.
+    
+    Args:
+        log_method: Logger method (logger.info, logger.error, etc.)
+        message: Log message
+        **context: Additional context fields
     """
-
-    def __init__(self, name: str = None):
-        self.logger = get_logger(name)
-
-    def log_event(self, event_type: str, message: str, level: str = "INFO", **kwargs):
-        """
-        Логирование события с дополнительными данными.
-
-        Args:
-            event_type: Тип события
-            message: Сообщение
-            level: Уровень логирования
-            **kwargs: Дополнительные данные
-        """
-        extra = {"event_type": event_type, **kwargs}
-
-        log_level = getattr(logging, level.upper(), logging.INFO)
-        self.logger.log(log_level, message, extra=extra)
-
-    def log_user_action(self, user_id: str, action: str, **kwargs):
-        """Логирование действий пользователя."""
-        self.log_event(
-            event_type="user_action",
-            message=f"User action: {action}",
-            user_id=user_id,
-            action=action,
-            **kwargs,
-        )
-
-    def log_api_request(
-        self,
-        method: str,
-        path: str,
-        status_code: int,
-        response_time: float,
-        user_id: str = None,
-        request_id: str = None,
-        **kwargs,
-    ):
-        """Логирование API запросов."""
-        self.log_event(
-            event_type="api_request",
-            message=f"{method} {path} - {status_code}",
-            method=method,
-            path=path,
-            status_code=status_code,
-            response_time=response_time,
-            user_id=user_id,
-            request_id=request_id,
-            **kwargs,
-        )
-
-    def log_error(
-        self,
-        error: Exception,
-        context: Dict[str, Any] = None,
-        user_id: str = None,
-        request_id: str = None,
-    ):
-        """Логирование ошибок."""
-        self.logger.error(
-            f"Error: {str(error)}",
-            extra={
-                "event_type": "error",
-                "error_type": type(error).__name__,
-                "error_message": str(error),
-                "context": context or {},
-                "user_id": user_id,
-                "request_id": request_id,
-            },
-            exc_info=True,
-        )
-
-    def log_performance(
-        self, operation: str, duration: float, success: bool = True, **kwargs
-    ):
-        """Логирование метрик производительности."""
-        self.log_event(
-            event_type="performance",
-            message=f"Operation {operation} completed in {duration:.3f}s",
-            operation=operation,
-            duration=duration,
-            success=success,
-            **kwargs,
-        )
-
-    def log_security_event(
-        self, event_type: str, description: str, severity: str = "WARNING", **kwargs
-    ):
-        """Логирование событий безопасности."""
-        self.log_event(
-            event_type="security_event",
-            message=f"Security event: {description}",
-            security_event_type=event_type,
-            description=description,
-            severity=severity,
-            **kwargs,
-        )
+    # Просто вызываем переданный метод
+    log_method(message, extra=context)
 
 
-# Создаем глобальный структурированный логгер
-structured_logger = StructuredLogger()
+
+def audit_event(event_type: str, payload: Dict[str, Any], level: str = "info") -> None:
+    """Write an audit event to the `audit` logger as structured JSON.
+
+    Payload will be redacted for known sensitive keys.
+    """
+    audit_logger = logging.getLogger("audit")
+    try:
+        data = {
+            "event_type": event_type,
+            "payload": _redact(payload or {}),
+            "timestamp": time.time(),
+        }
+        # Use audit logger to emit JSON structure
+        if level.lower() == "info":
+            audit_logger.info(json.dumps(data, default=str))
+        else:
+            audit_logger.warning(json.dumps(data, default=str))
+    except Exception:
+        # Best-effort; don't crash the app for audit failures
+        audit_logger.exception("Failed to emit audit event")
+
+
+def retry_with_backoff(
+    func: Callable,
+    max_retries: int = 3,
+    base_delay: float = 1.0,
+    factor: float = 2.0,
+    exceptions: tuple = (Exception,),
+):
+    last_exc = None
+    for attempt in range(max_retries + 1):
+        try:
+            return func()
+        except exceptions as exc:
+            last_exc = exc
+            if attempt == max_retries:
+                break
+            delay = base_delay * (factor ** attempt)
+            logging.getLogger(func.__module__).warning("Retry %s in %.2fs: %s", attempt + 1, delay, exc)
+            time.sleep(delay)
+    raise last_exc
+
+
+async def async_retry_with_backoff(
+    func: Callable,
+    max_retries: int = 3,
+    base_delay: float = 1.0,
+    factor: float = 2.0,
+    exceptions: tuple = (Exception,),
+):
+    last_exc = None
+    for attempt in range(max_retries + 1):
+        try:
+            res = func()
+            if inspect.isawaitable(res):
+                return await res
+            return res
+        except exceptions as exc:
+            last_exc = exc
+            if attempt == max_retries:
+                break
+            delay = base_delay * (factor ** attempt)
+            logging.getLogger(func.__module__).warning("Async retry %s in %.2fs: %s", attempt + 1, delay, exc)
+            await asyncio.sleep(delay)
+    raise last_exc
+
+
+class Timer:
+    def __init__(self):
+        self.start_time: Optional[float] = None
+        self.end_time: Optional[float] = None
+
+    def start(self) -> "Timer":
+        self.start_time = time.perf_counter()
+        return self
+
+    def stop(self) -> "Timer":
+        self.end_time = time.perf_counter()
+        return self
+
+    @property
+    def elapsed(self) -> float:
+        if self.start_time is None:
+            return 0.0
+        end = self.end_time or time.perf_counter()
+        return end - self.start_time
+
+    def __str__(self) -> str:
+        return f"{self.elapsed:.4f}s"
 
 
 def log_function_call(func):
-    """
-    Декоратор для логирования вызовов функций.
+    """Decorator for logging sync/async function calls with duration and errors."""
 
-    Args:
-        func: Функция для декорирования
+    if inspect.iscoroutinefunction(func):
 
-    Returns:
-        Декорированная функция
-    """
+        @functools.wraps(func)
+        async def async_wrapper(*args, **kwargs):
+            logger = get_logger(func.__module__)
+            start = time.perf_counter()
+            try:
+                result = await func(*args, **kwargs)
+                duration = time.perf_counter() - start
+                logger.info(
+                    "Async function executed",
+                    extra={
+                        "function": func.__name__,
+                        "duration": duration,
+                        "success": True,
+                    },
+                )
+                return result
+            except Exception as exc:
+                duration = time.perf_counter() - start
+                logger.error(
+                    "Async function failed",
+                    extra={
+                        "function": func.__name__,
+                        "duration": duration,
+                        "success": False,
+                        "error": str(exc),
+                    },
+                    exc_info=True,
+                )
+                raise
 
-    def wrapper(*args, **kwargs):
+        return async_wrapper
+
+    @functools.wraps(func)
+    def sync_wrapper(*args, **kwargs):
         logger = get_logger(func.__module__)
-        start_time = datetime.utcnow()
-
+        start = time.perf_counter()
         try:
             result = func(*args, **kwargs)
-            duration = (datetime.utcnow() - start_time).total_seconds()
-
+            duration = time.perf_counter() - start
             logger.info(
-                f"Function {func.__name__} executed successfully",
+                "Function executed",
                 extra={
                     "function": func.__name__,
                     "duration": duration,
                     "success": True,
                 },
             )
-
             return result
-
-        except Exception as e:
-            duration = (datetime.utcnow() - start_time).total_seconds()
-
+        except Exception as exc:
+            duration = time.perf_counter() - start
             logger.error(
-                f"Function {func.__name__} failed: {str(e)}",
+                "Function failed",
                 extra={
                     "function": func.__name__,
                     "duration": duration,
                     "success": False,
-                    "error": str(e),
+                    "error": str(exc),
                 },
                 exc_info=True,
             )
-
             raise
 
-    return wrapper
-
-
-def configure_logging_for_environment():
-    """
-    Настройка логирования в зависимости от окружения.
-    """
-    if settings.DEBUG:
-        # В debug режиме более подробное логирование
-        setup_logger(level="DEBUG", json_format=False)
-    elif settings.ENVIRONMENT == "production":
-        # В production режиме логируем в JSON формате
-        setup_logger(level="INFO", json_format=True, log_file=settings.LOG_FILE_PATH)
-    else:
-        # В других режимах стандартное логирование
-        setup_logger(level="INFO", json_format=False)
-
-
-# Автоматическая настройка при импорте модуля
-configure_logging_for_environment()
+    return sync_wrapper

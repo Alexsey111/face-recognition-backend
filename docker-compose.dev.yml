@@ -1,3 +1,4 @@
+# docker-compose.dev.yml
 # Development Docker Compose для Face Recognition Service
 version: '3.8'
 

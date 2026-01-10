@@ -1,222 +1,176 @@
-from sqlalchemy import create_engine, text, event
-from sqlalchemy.orm import sessionmaker, Session, DeclarativeBase
-from sqlalchemy.pool import QueuePool
+# app/db/database.py
+"""
+PostgreSQL Database Manager (asyncpg + psycopg2 для Alembic).
+✅ Удален весь код для SQLite.
+"""
+
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from typing import Generator, AsyncGenerator, Optional
-from contextlib import asynccontextmanager, contextmanager
+from sqlalchemy import text
+from sqlalchemy.orm import DeclarativeBase
+try:
+    from ..middleware.metrics import database_connections_active as DATABASE_CONNECTIONS_ACTIVE
+except Exception:
+    DATABASE_CONNECTIONS_ACTIVE = None
+from typing import AsyncGenerator
+from contextlib import asynccontextmanager
+import os
+
 from ..config import settings
 from ..utils.logger import get_logger
+
 logger = get_logger(__name__)
 
-# --- 1. Modern SQLAlchemy 2.0 Base ---
+# Базовый класс для всех моделей
 class Base(DeclarativeBase):
-    """Базовый класс для всех моделей (SQLAlchemy 2.0 style)"""
     pass
 
-# ============================================================================
-# Database Configuration
-# ============================================================================
-
-def get_database_url(database_type: str = "sync") -> str:
-    """Получение URL базы данных в зависимости от типа."""
-    base_url = settings.DATABASE_URL
-    
-    if database_type == "async":
-        # Более надежная замена драйвера
-        if base_url.startswith("postgresql://") or base_url.startswith("postgresql+psycopg2://"):
-            return base_url.replace("postgresql://", "postgresql+asyncpg://") \
-                   .replace("postgresql+psycopg2://", "postgresql+asyncpg://")
-        elif base_url.startswith("sqlite://"):
-            return base_url.replace("sqlite://", "sqlite+aiosqlite://")
-    
-    return base_url
 
 # ============================================================================
-# Database Manager Classes
+# PostgreSQL Database Manager (только asyncpg)
 # ============================================================================
-
 class DatabaseManager:
-    """Менеджер синхронной базы данных."""
-    
-    def __init__(self, database_url: Optional[str] = None):
-        self.database_url = database_url or get_database_url("sync")
-        self.engine = create_engine(
-            self.database_url,
-            poolclass=QueuePool,
-            pool_size=settings.DATABASE_POOL_SIZE or 10,
-            max_overflow=settings.DATABASE_MAX_OVERFLOW or 20,
-            pool_pre_ping=True,
-            echo=settings.DEBUG,
-            connect_args={"connect_timeout": 30} if "postgresql" in self.database_url else {}
-        )
-        self.SessionLocal = sessionmaker(
-            autocommit=False,
-            autoflush=False,
-            bind=self.engine,
-            expire_on_commit=False
-        )
-        
-    @contextmanager
-    def get_session(self) -> Generator[Session, None, None]:
-        """Получение сессии базы данных через контекстный менеджер."""
-        session = self.SessionLocal()
-        try:
-            yield session
-            session.commit()
-        except Exception as e:
-            session.rollback()
-            logger.error(f"Sync DB Session Error: {e}")
-            raise
-        finally:
-            session.close()
+    """Менеджер для работы с PostgreSQL через asyncpg."""
 
-    def create_tables(self):
-        """Создание всех таблиц в базе данных."""
-        Base.metadata.create_all(bind=self.engine)
+    def __init__(self, database_url: str | None = None):
+        self._provided_database_url = database_url
+        self.database_url = None
+        self.engine = None
+        self.SessionLocal = None
+        self._engine_initialized = False
 
-    def health_check(self) -> bool:
-        """Проверка подключения к базе данных."""
-        try:
-            with self.engine.connect() as conn:
-                result = conn.execute(text("SELECT 1"))
-                return result.fetchone() is not None
-        except Exception as e:
-            logger.error(f"Database health check failed: {e}")
-            return False
+    def _ensure_engine(self):
+        """Ленивая инициализация async engine для PostgreSQL."""
+        if self._engine_initialized:
+            return
 
-    def close_connections(self):
-        """Закрытие всех подключений к базе данных."""
-        try:
-            self.engine.dispose()
-            logger.info("Database connections closed")
-        except Exception as e:
-            logger.error(f"Failed to close database connections: {e}")
+        # Используем предоставленный URL или из settings
+        base_url = self._provided_database_url or settings.DATABASE_URL
 
+        # ✅ Проверка, что это PostgreSQL
+        if not base_url.startswith(("postgresql://", "postgres://")):
+            raise ValueError(
+                f"❌ Only PostgreSQL is supported!\n"
+                f"Got: {base_url[:50]}...\n"
+                f"Please configure DATABASE_URL with postgresql:// or postgres://"
+            )
 
-class AsyncDatabaseManager:
-    """Менеджер асинхронной базы данных."""
-    
-    def __init__(self, database_url: Optional[str] = None):
-        self.database_url = database_url or get_database_url("async")
+        # Преобразуем в async URL (asyncpg)
+        async_url = base_url
+        if async_url.startswith("postgresql://"):
+            async_url = async_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        elif async_url.startswith("postgres://"):
+            async_url = async_url.replace("postgres://", "postgresql+asyncpg://", 1)
+
+        self.database_url = async_url
+
+        # Настройка async engine для PostgreSQL
         self.engine = create_async_engine(
             self.database_url,
             pool_size=settings.DATABASE_POOL_SIZE,
             max_overflow=settings.DATABASE_MAX_OVERFLOW,
+            pool_timeout=settings.DATABASE_POOL_TIMEOUT,
+            pool_recycle=settings.DATABASE_POOL_RECYCLE,
             pool_pre_ping=True,
             echo=settings.DEBUG,
+            # PostgreSQL specific optimizations
+            connect_args={
+                "server_settings": {
+                    "application_name": "face_recognition_service",
+                    "jit": "off",  # Отключаем JIT для стабильности
+                },
+                "command_timeout": 60,
+                "timeout": 10,
+            },
         )
-        # Используем async_sessionmaker (нововведение в новых версиях)
-        self.AsyncSessionLocal = async_sessionmaker(
+
+        self.SessionLocal = async_sessionmaker(
             self.engine,
             class_=AsyncSession,
             expire_on_commit=False,
-            autoflush=False
+            autoflush=False,
         )
+
+        self._engine_initialized = True
+        logger.info(f"✅ PostgreSQL engine initialized: {self.database_url.split('@')[-1]}")
 
     @asynccontextmanager
     async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
-        """Получение асинхронной сессии базы данных."""
-        async with self.AsyncSessionLocal() as session:
+        """Безопасное получение сессии с автоматическим commit/rollback."""
+        self._ensure_engine()
+        
+        async with self.SessionLocal() as session:
+            if DATABASE_CONNECTIONS_ACTIVE is not None:
+                try:
+                    DATABASE_CONNECTIONS_ACTIVE.inc()
+                except Exception:
+                    pass
+            
             try:
                 yield session
                 await session.commit()
             except Exception as e:
                 await session.rollback()
-                logger.error(f"Async DB Session Error: {e}")
+                logger.error(f"❌ Database session error: {e}")
                 raise
-            # session.close() вызывается автоматически контекстным менеджером async with
+            finally:
+                if DATABASE_CONNECTIONS_ACTIVE is not None:
+                    try:
+                        DATABASE_CONNECTIONS_ACTIVE.dec()
+                    except Exception:
+                        pass
 
     async def create_tables(self):
-        """Создание всех таблиц в асинхронной базе данных."""
+        """Создание таблиц (для тестов или первого запуска)."""
+        self._ensure_engine()
         async with self.engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        logger.info("✅ PostgreSQL tables created")
+
+    async def drop_tables(self):
+        """Удаление всех таблиц (для тестов)."""
+        self._ensure_engine()
+        async with self.engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        logger.warning("⚠️  PostgreSQL tables dropped")
 
     async def health_check(self) -> bool:
-        """Асинхронная проверка подключения к базе данных."""
+        """Проверка подключения к PostgreSQL."""
         try:
-            async with self.AsyncSessionLocal() as session:
-                await session.execute(text("SELECT 1"))
+            self._ensure_engine()
+            async with self.SessionLocal() as session:
+                result = await session.execute(text("SELECT 1"))
+                result.scalar_one()
             return True
         except Exception as e:
-            logger.error(f"Async database health check failed: {e}")
+            logger.error(f"❌ PostgreSQL health check failed: {e}")
             return False
 
-    async def close_connections(self):
-        """Закрытие всех асинхронных подключений к базе данных."""
-        try:
+    async def close(self):
+        """Закрытие всех подключений."""
+        if self.engine is not None:
             await self.engine.dispose()
-            logger.info("Async database connections closed")
-        except Exception as e:
-            logger.error(f"Failed to close async database connections: {e}")
+            logger.info("✅ PostgreSQL connections closed")
 
 
 # ============================================================================
-# Global Instances
+# Глобальный экземпляр менеджера
 # ============================================================================
+db_manager = DatabaseManager()
 
-# Временно отключено для тестирования
-# Создаем глобальные экземпляры менеджеров
-# db_manager = DatabaseManager()
-# async_db_manager = AsyncDatabaseManager()
-
-# Lazy initialization для тестирования
-_db_manager = None
-_async_db_manager = None
-
-def get_db_manager():
-    """Lazy initialization для db_manager"""
-    global _db_manager
-    if _db_manager is None:
-        _db_manager = DatabaseManager()
-    return _db_manager
-
-def get_async_db_manager():
-    """Lazy initialization для async_db_manager"""
-    global _async_db_manager
-    if _async_db_manager is None:
-        _async_db_manager = AsyncDatabaseManager()
-    return _async_db_manager
-
-# Алиас для обратной совместимости
-Base_metadata = Base.metadata
 
 # ============================================================================
-# Dependency Injection for FastAPI
+# Dependency для FastAPI
 # ============================================================================
-
-def get_db() -> Generator[Session, None, None]:
-    """Dependency injection для FastAPI - синхронная сессия."""
-    db_mgr = get_db_manager()
-    with db_mgr.get_session() as session:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
+    """Зависимость для маршрутов FastAPI."""
+    async with db_manager.get_session() as session:
         yield session
 
-async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
-    """Dependency injection для FastAPI - асинхронная сессия."""
-    async_db_mgr = get_async_db_manager()
-    async with async_db_mgr.get_session() as session:
-        yield session
 
-# ============================================================================
-# SQLite Configuration
-# ============================================================================
+# Backwards compatibility
+get_async_db = get_db
 
-# Отключено для тестирования - можно включить при необходимости
-# @event.listens_for(db_manager.engine, "connect")
-# def set_sqlite_pragma(dbapi_connection, connection_record):
-#     """Настройка SQLite для production."""
-#     if "sqlite" in str(db_manager.database_url):
-#         cursor = dbapi_connection.cursor()
-#         cursor.execute("PRAGMA foreign_keys=ON")
-#         cursor.close()
 
-# ============================================================================
-# Auto-Init Logic (Refined)
-# ============================================================================
-
-def initialize_database():
-    """Функция для явного вызова при старте приложения"""
-    logger.info("Initializing database...")
-    db_manager.create_tables()
-
-# Убрали автоматический вызов при импорте!
-# Лучше вызывать initialize_database() в main.py в событии startup
+def get_async_db_manager() -> DatabaseManager:
+    """Возврат глобального DatabaseManager."""
+    return db_manager

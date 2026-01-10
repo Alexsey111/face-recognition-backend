@@ -63,6 +63,7 @@ class VerifyResponse(BaseResponse):
     Модель для ответа верификации лица.
     """
 
+    verification_id: str = Field(..., description="Уникальный ID верификации")
     session_id: str = Field(..., description="ID сессии верификации")
     verified: bool = Field(..., description="Результат верификации")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Уровень уверенности")
@@ -75,6 +76,12 @@ class VerifyResponse(BaseResponse):
     face_detected: bool = Field(..., description="Обнаружено лицо на изображении")
     face_quality: Optional[float] = Field(
         None, ge=0.0, le=1.0, description="Качество распознанного лица"
+    )
+    liveness_score: Optional[float] = Field(
+        None, ge=0.0, le=1.0, description="Оценка живости"
+    )
+    liveness_passed: Optional[bool] = Field(
+        None, description="Прошла ли проверка живости"
     )
     metadata: Optional[Dict[str, Any]] = Field(
         None, description="Дополнительные метаданные"
@@ -101,6 +108,190 @@ class LivenessResponse(BaseResponse):
     )
     recommendations: Optional[List[str]] = Field(
         None, description="Рекомендации для улучшения"
+    )
+    # Дополнительные поля для новой функциональности
+    challenge_specific_data: Optional[Dict[str, Any]] = Field(
+        None, description="Специфичные данные для типа челленджа"
+    )
+    liveness_type: Optional[str] = Field(
+        None, description="Детальный тип проверки живости"
+    )
+    depth_analysis: Optional[Dict[str, Any]] = Field(
+        None, description="Анализ глубины (для advanced anti-spoofing)"
+    )
+    reasoning_result: Optional[Dict[str, Any]] = Field(
+        None, description="Результат multi-turn reasoning"
+    )
+
+
+class VideoLivenessResponse(BaseResponse):
+    """
+    Модель для ответа проверки живости по видео.
+    """
+
+    session_id: str = Field(..., description="ID сессии проверки")
+    liveness_detected: bool = Field(..., description="Обнаружены признаки живости")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Уровень уверенности")
+    challenge_type: str = Field(..., description="Тип анализа видео")
+    frames_processed: int = Field(..., description="Количество обработанных кадров")
+    processing_time: float = Field(..., description="Время обработки в секундах")
+    sequence_data: Optional[Dict[str, Any]] = Field(
+        None, description="Данные анализа последовательности кадров"
+    )
+    anti_spoofing_score: Optional[float] = Field(
+        None, ge=0.0, le=1.0, description="Оценка антиспуфинга"
+    )
+    face_detected: bool = Field(..., description="Обнаружено лицо в кадрах")
+    recommendations: Optional[List[str]] = Field(
+        None, description="Рекомендации для улучшения"
+    )
+
+
+class BatchEmbeddingResponse(BaseResponse):
+    """
+    Модель для ответа пакетной генерации эмбеддингов.
+    """
+
+    batch_id: str = Field(..., description="ID батча")
+    total_images: int = Field(..., description="Общее количество изображений")
+    successful_embeddings: int = Field(..., description="Успешно обработанные эмбеддинги")
+    failed_embeddings: int = Field(..., description="Неудачные попытки")
+    processing_time: float = Field(..., description="Время обработки в секундах")
+    results: List[Dict[str, Any]] = Field(
+        ..., description="Результаты для каждого изображения"
+    )
+    performance_metrics: Optional[Dict[str, Any]] = Field(
+        None, description="Метрики производительности батча"
+    )
+
+
+class BatchVerificationResponse(BaseResponse):
+    """
+    Модель для ответа пакетной верификации лиц.
+    """
+
+    batch_id: str = Field(..., description="ID батча")
+    total_images: int = Field(..., description="Общее количество изображений")
+    verified_matches: int = Field(..., description="Количество совпадений")
+    failed_verifications: int = Field(..., description="Неудачные верификации")
+    threshold_used: float = Field(..., description="Использованный порог")
+    processing_time: float = Field(..., description="Время обработки в секундах")
+    results: List[Dict[str, Any]] = Field(
+        ..., description="Результаты для каждого изображения"
+    )
+    summary: Optional[Dict[str, Any]] = Field(
+        None, description="Сводка результатов верификации"
+    )
+
+
+class AdvancedAntiSpoofingResponse(BaseResponse):
+    """
+    Модель для ответа продвинутой проверки anti-spoofing.
+    """
+
+    session_id: str = Field(..., description="ID сессии проверки")
+    liveness_detected: bool = Field(..., description="Обнаружены признаки живости")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Уровень уверенности")
+    analysis_type: str = Field(..., description="Тип выполненного анализа")
+    processing_time: float = Field(..., description="Время обработки в секундах")
+    anti_spoofing_score: float = Field(..., ge=0.0, le=1.0, description="Общая оценка anti-spoofing")
+    
+    # Результаты различных анализов
+    depth_analysis: Optional[Dict[str, Any]] = Field(
+        None, description="Результаты анализа глубины"
+    )
+    texture_analysis: Optional[Dict[str, Any]] = Field(
+        None, description="Результаты анализа текстуры"
+    )
+    certified_analysis: Optional[Dict[str, Any]] = Field(
+        None, description="Результаты сертифицированной проверки"
+    )
+    
+    # Multi-turn reasoning
+    reasoning_result: Optional[Dict[str, Any]] = Field(
+        None, description="Результат multi-turn reasoning анализа"
+    )
+    reasoning_summary: Optional[str] = Field(
+        None, description="Краткое описание reasoning процесса"
+    )
+    
+    # Компонентные оценки
+    component_scores: Optional[Dict[str, float]] = Field(
+        None, description="Оценки отдельных компонентов анализа"
+    )
+    
+    # Сертификация
+    certification_level: Optional[str] = Field(
+        None, description="Уровень сертификации (basic, standard, premium)"
+    )
+    certification_passed: bool = Field(
+        ..., description="Прошла ли сертификация"
+    )
+    
+    face_detected: bool = Field(..., description="Обнаружено лицо на изображении")
+    multiple_faces: bool = Field(..., description="Обнаружено несколько лиц")
+    recommendations: Optional[List[str]] = Field(
+        None, description="Рекомендации для улучшения"
+    )
+
+
+class ChallengeResponse(BaseResponse):
+    """
+    Модель для ответа challenge-response проверки.
+    """
+
+    session_id: str = Field(..., description="ID сессии")
+    challenge_type: str = Field(..., description="Тип челленджа")
+    instruction: str = Field(..., description="Инструкция для пользователя")
+    expected_action: Optional[str] = Field(
+        None, description="Ожидаемое действие"
+    )
+    response_detected: bool = Field(..., description="Обнаружен ответ на челлендж")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Уровень уверенности в ответе")
+    response_analysis: Optional[Dict[str, Any]] = Field(
+        None, description="Анализ ответа на челлендж"
+    )
+    processing_time: float = Field(..., description="Время обработки")
+    recommendations: Optional[List[str]] = Field(
+        None, description="Рекомендации"
+    )
+
+
+class ActiveLivenessResponse(BaseResponse):
+    """
+    Модель для ответа активной проверки живости.
+    """
+
+    session_id: str = Field(..., description="ID сессии")
+    challenge_type: str = Field(..., description="Тип активной проверки")
+    liveness_detected: bool = Field(..., description="Обнаружены признаки живости")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Уровень уверенности")
+    processing_time: float = Field(..., description="Время обработки в секундах")
+    
+    # Специфичные данные для типа активной проверки
+    blink_analysis: Optional[Dict[str, Any]] = Field(
+        None, description="Анализ моргания (для blink challenge)"
+    )
+    smile_analysis: Optional[Dict[str, Any]] = Field(
+        None, description="Анализ улыбки (для smile challenge)"
+    )
+    head_turn_analysis: Optional[Dict[str, Any]] = Field(
+        None, description="Анализ поворота головы (для turn_head challenge)"
+    )
+    challenge_response_analysis: Optional[Dict[str, Any]] = Field(
+        None, description="Анализ challenge-response"
+    )
+    
+    # Общие результаты
+    anti_spoofing_score: Optional[float] = Field(
+        None, ge=0.0, le=1.0, description="Оценка anti-spoofing"
+    )
+    face_detected: bool = Field(..., description="Обнаружено лицо")
+    image_quality: Optional[float] = Field(
+        None, ge=0.0, le=1.0, description="Качество изображения"
+    )
+    recommendations: Optional[List[str]] = Field(
+        None, description="Рекомендации"
     )
 
 
@@ -218,7 +409,7 @@ class SessionResponse(BaseResponse):
 
     session_id: str = Field(..., description="Уникальный ID сессии")
     session_type: str = Field(..., description="Тип сессии")
-    expires_at: datetime = Field(..., description="Время истечения сессии")
+    expires_at: str = Field(..., description="Время истечения сессии (ISO формат)")
     user_id: Optional[str] = Field(None, description="ID пользователя")
     metadata: Optional[Dict[str, Any]] = Field(None, description="Метаданные сессии")
 

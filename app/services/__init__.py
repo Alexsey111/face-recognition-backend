@@ -3,7 +3,7 @@
 Модуль содержит основные сервисы приложения.
 """
 
-from .ml_service import MLService
+from .ml_service import OptimizedMLService as MLService
 from .database_service import DatabaseService
 from .encryption_service import EncryptionService
 from .storage_service import StorageService

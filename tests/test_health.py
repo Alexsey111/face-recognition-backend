@@ -11,7 +11,7 @@ import time
 import psutil
 import os
 
-from app.main import create_app
+from app.main import create_test_app
 from app import __version__
 
 
@@ -20,7 +20,7 @@ class TestHealthEndpoints:
     
     def setup_method(self):
         """Настройка для каждого теста"""
-        self.app = create_app()
+        self.app = create_test_app()
         self.client = TestClient(self.app)
     
     def test_health_basic_success(self):
@@ -125,7 +125,7 @@ class TestStatusEndpoints:
     
     def setup_method(self):
         """Настройка для каждого теста"""
-        self.app = create_app()
+        self.app = create_test_app()
         self.client = TestClient(self.app)
     
     def test_status_detailed_success(self):
@@ -172,7 +172,7 @@ class TestReadinessEndpoints:
     
     def setup_method(self):
         """Настройка для каждого теста"""
-        self.app = create_app()
+        self.app = create_test_app()
         self.client = TestClient(self.app)
     
     def test_readiness_success(self):
@@ -198,7 +198,7 @@ class TestLivenessEndpoints:
     
     def setup_method(self):
         """Настройка для каждого теста"""
-        self.app = create_app()
+        self.app = create_test_app()
         self.client = TestClient(self.app)
     
     def test_liveness_success(self):
@@ -239,7 +239,7 @@ class TestMetricsEndpoints:
     
     def setup_method(self):
         """Настройка для каждого теста"""
-        self.app = create_app()
+        self.app = create_test_app()
         self.client = TestClient(self.app)
     
     def test_metrics_success(self):
@@ -333,7 +333,7 @@ class TestHealthCheckScenarios:
     
     def setup_method(self):
         """Настройка для каждого теста"""
-        self.app = create_app()
+        self.app = create_test_app()
         self.client = TestClient(self.app)
     
     def test_health_endpoints_order(self):
@@ -415,7 +415,7 @@ class TestHealthCheckErrorHandling:
     
     def setup_method(self):
         """Настройка для каждого теста"""
-        self.app = create_app()
+        self.app = create_test_app()
         self.client = TestClient(self.app)
     
     def test_health_invalid_method(self):

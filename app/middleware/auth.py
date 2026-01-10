@@ -86,15 +86,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
             "/api/v1/ready",
             "/api/v1/live",
             "/api/v1/metrics",
-            # ✅ Auth endpoints (критично!) - поддерживаем оба формата
+            # ✅ Auth endpoints - только с префиксом /api/v1 (после исправления в main.py)
             "/api/v1/auth/login",
             "/api/v1/auth/register",
             "/api/v1/auth/refresh",
             "/api/v1/auth/verify",
-            "/auth/login",
-            "/auth/register", 
-            "/auth/refresh",
-            "/auth/verify",
+            "/api/v1/auth/change-password",
+            # ✅ Reference endpoints (только GET для публичного доступа)
+            "/api/v1/reference/",
         ]
 
         path = request.url.path
@@ -108,6 +107,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if request.method in ["GET", "HEAD", "OPTIONS"]:
             # GET запросы к публичным ресурсам
             if path.startswith("/api/v1/reference/") and request.method == "GET":
+                return True
+            # GET запросы к health endpoints без префикса /api/v1
+            if path.startswith("/") and path.split("/")[1] in ["health", "status", "ready", "live", "metrics"]:
                 return True
 
         return False

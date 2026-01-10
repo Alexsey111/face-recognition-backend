@@ -1,504 +1,489 @@
-"""
-Сервис вебхуков.
-Отправка уведомлений и событий в внешние системы через webhook-и.
-"""
+"""Сервис webhook-уведомлений."""
 
-import json
 import asyncio
-from typing import Optional, Dict, Any, List
-import httpx
-from datetime import datetime, timezone
+import json
+import hmac
+import hashlib
 import uuid
+import time
+from datetime import datetime, timezone, timedelta
+from typing import Dict, Any, Optional
 
-from .. import __version__
-from ..config import settings
+import aiohttp
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, update
+
+from ..db.models import WebhookConfig, WebhookLog, WebhookStatus
 from ..utils.logger import get_logger
-from ..utils.exceptions import WebhookError, RetryExhaustedError
 
 logger = get_logger(__name__)
+
+# Константы
+MAX_RESPONSE_LENGTH = 1000
+MAX_ERROR_LENGTH = 1000
+DEFAULT_TIMEOUT = 10
+DEFAULT_MAX_RETRIES = 3
+DEFAULT_RETRY_DELAY = 1
 
 
 class WebhookService:
     """
-    Сервис для отправки webhook уведомлений.
+    Сервис webhook-уведомлений.
+
+    ЗАДАЧИ СЕРВИСА:
+    - формирование payload
+    - подпись HMAC
+    - отправка webhook
+    - retry с backoff
+    - обновление логов
+    - дедупликация событий
+
+    ROUTES:
+    - НИЧЕГО не знают о retry
+    - НИЧЕГО не знают о логах
     """
 
-    def __init__(self):
-        self.timeout = settings.WEBHOOK_TIMEOUT
-        self.max_retries = settings.WEBHOOK_MAX_RETRIES
-        self.retry_delay = settings.WEBHOOK_RETRY_DELAY
-        self.client = httpx.AsyncClient(timeout=self.timeout)
+    def __init__(self, db: AsyncSession):
+        self.db = db
+        self.user_agent = "FaceVerify-Service/2.0"
+        self.default_timeout = DEFAULT_TIMEOUT
+        self.default_max_retries = DEFAULT_MAX_RETRIES
 
-    async def send_verification_result(
+    # ------------------------------------------------------------------
+    # PAYLOAD + SIGNATURE
+    # ------------------------------------------------------------------
+
+    def create_webhook_payload(
         self,
+        *,
+        event_type: str,
         user_id: str,
-        session_id: str,
-        verification_result: Dict[str, Any],
-        webhook_url: Optional[str] = None,
-        additional_data: Optional[Dict[str, Any]] = None,
-    ) -> bool:
-        """
-        Отправка результата верификации.
-
-        Args:
-            user_id: ID пользователя
-            session_id: ID сессии
-            verification_result: Результат верификации
-            webhook_url: URL webhook (если None, используется стандартный)
-            additional_data: Дополнительные данные
-
-        Returns:
-            bool: True если webhook отправлен успешно
-        """
-        try:
-            payload = {
-                "event_type": "verification.completed",
-                "event_id": str(uuid.uuid4()),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "user_id": user_id,
-                "session_id": session_id,
-                "data": {
-                    "verified": verification_result.get("verified", False),
-                    "confidence": verification_result.get("confidence", 0.0),
-                    "similarity_score": verification_result.get(
-                        "similarity_score", 0.0
-                    ),
-                    "threshold_used": verification_result.get("threshold_used", 0.8),
-                    "processing_time": verification_result.get("processing_time", 0.0),
-                    "face_detected": verification_result.get("face_detected", False),
-                    "reference_id": verification_result.get("reference_id"),
-                    **(additional_data or {}),
-                },
-            }
-
-            return await self._send_webhook(
-                payload=payload,
-                webhook_url=webhook_url or getattr(settings, 'WEBHOOK_URL', None),
-                event_type="verification",
-            )
-
-        except Exception as e:
-            logger.error(f"Failed to send verification webhook: {str(e)}")
-            return False
-
-    async def send_liveness_result(
-        self,
-        user_id: str,
-        session_id: str,
-        liveness_result: Dict[str, Any],
-        webhook_url: Optional[str] = None,
-        additional_data: Optional[Dict[str, Any]] = None,
-    ) -> bool:
-        """
-        Отправка результата проверки живости.
-
-        Args:
-            user_id: ID пользователя
-            session_id: ID сессии
-            liveness_result: Результат проверки живости
-            webhook_url: URL webhook (если None, используется стандартный)
-            additional_data: Дополнительные данные
-
-        Returns:
-            bool: True если webhook отправлен успешно
-        """
-        try:
-            payload = {
-                "event_type": "liveness.completed",
-                "event_id": str(uuid.uuid4()),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "user_id": user_id,
-                "session_id": session_id,
-                "data": {
-                    "liveness_detected": liveness_result.get(
-                        "liveness_detected", False
-                    ),
-                    "confidence": liveness_result.get("confidence", 0.0),
-                    "challenge_type": liveness_result.get("challenge_type", "passive"),
-                    "anti_spoofing_score": liveness_result.get("anti_spoofing_score"),
-                    "processing_time": liveness_result.get("processing_time", 0.0),
-                    "face_detected": liveness_result.get("face_detected", False),
-                    "multiple_faces": liveness_result.get("multiple_faces", False),
-                    "recommendations": liveness_result.get("recommendations", []),
-                    **(additional_data or {}),
-                },
-            }
-
-            return await self._send_webhook(
-                payload=payload,
-                webhook_url=webhook_url or getattr(settings, 'WEBHOOK_URL', None),
-                event_type="liveness",
-            )
-
-        except Exception as e:
-            logger.error(f"Failed to send liveness webhook: {str(e)}")
-            return False
-
-    async def send_reference_created(
-        self,
-        user_id: str,
-        reference_id: str,
-        reference_data: Dict[str, Any],
-        webhook_url: Optional[str] = None,
-        additional_data: Optional[Dict[str, Any]] = None,
-    ) -> bool:
-        """
-        Отправка уведомления о создании эталона.
-
-        Args:
-            user_id: ID пользователя
-            reference_id: ID эталона
-            reference_data: Данные эталона
-            webhook_url: URL webhook (если None, используется стандартный)
-            additional_data: Дополнительные данные
-
-        Returns:
-            bool: True если webhook отправлен успешно
-        """
-        try:
-            payload = {
-                "event_type": "reference.created",
-                "event_id": str(uuid.uuid4()),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "user_id": user_id,
-                "reference_id": reference_id,
-                "data": {
-                    "label": reference_data.get("label"),
-                    "quality_score": reference_data.get("quality_score"),
-                    "file_url": reference_data.get("file_url"),
-                    "image_dimensions": reference_data.get("image_dimensions"),
-                    "processing_time": reference_data.get("processing_time"),
-                    **(additional_data or {}),
-                },
-            }
-
-            return await self._send_webhook(
-                payload=payload,
-                webhook_url=webhook_url or getattr(settings, 'WEBHOOK_URL', None),
-                event_type="reference",
-            )
-
-        except Exception as e:
-            logger.error(f"Failed to send reference webhook: {str(e)}")
-            return False
-
-    async def send_user_activity(
-        self,
-        user_id: str,
-        activity_type: str,
-        activity_data: Dict[str, Any],
-        webhook_url: Optional[str] = None,
-        additional_data: Optional[Dict[str, Any]] = None,
-    ) -> bool:
-        """
-        Отправка уведомления о активности пользователя.
-
-        Args:
-            user_id: ID пользователя
-            activity_type: Тип активности (login, logout, upload, etc.)
-            activity_data: Данные активности
-            webhook_url: URL webhook (если None, используется стандартный)
-            additional_data: Дополнительные данные
-
-        Returns:
-            bool: True если webhook отправлен успешно
-        """
-        try:
-            payload = {
-                "event_type": f"user.{activity_type}",
-                "event_id": str(uuid.uuid4()),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "user_id": user_id,
-                "data": {
-                    "activity_type": activity_type,
-                    "activity_data": activity_data,
-                    **(additional_data or {}),
-                },
-            }
-
-            return await self._send_webhook(
-                payload=payload,
-                webhook_url=webhook_url or getattr(settings, 'WEBHOOK_URL', None),
-                event_type="user_activity",
-            )
-
-        except Exception as e:
-            logger.error(f"Failed to send user activity webhook: {str(e)}")
-            return False
-
-    async def send_system_alert(
-        self,
-        alert_type: str,
-        message: str,
-        severity: str = "info",
-        additional_data: Optional[Dict[str, Any]] = None,
-        webhook_url: Optional[str] = None,
-    ) -> bool:
-        """
-        Отправка системного уведомления.
-
-        Args:
-            alert_type: Тип предупреждения
-            message: Сообщение
-            severity: Серьезность (info, warning, error, critical)
-            additional_data: Дополнительные данные
-            webhook_url: URL webhook (если None, используется стандартный)
-
-        Returns:
-            bool: True если webhook отправлен успешно
-        """
-        try:
-            payload = {
-                "event_type": "system.alert",
-                "event_id": str(uuid.uuid4()),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "data": {
-                    "alert_type": alert_type,
-                    "message": message,
-                    "severity": severity,
-                    "service": "face-recognition-service",
-                    "version": __version__,
-                    **(additional_data or {}),
-                },
-            }
-
-            return await self._send_webhook(
-                payload=payload,
-                webhook_url=webhook_url or getattr(settings, 'WEBHOOK_URL', None),
-                event_type="system_alert",
-            )
-
-        except Exception as e:
-            logger.error(f"Failed to send system alert webhook: {str(e)}")
-            return False
-
-    async def send_batch_webhooks(
-        self, webhooks_data: List[Dict[str, Any]], webhook_url: Optional[str] = None
-    ) -> Dict[str, int]:
-        """
-        Отправка пакетных webhook уведомлений.
-
-        Args:
-            webhooks_data: Список данных для webhook-ов
-            webhook_url: URL webhook (если None, используется стандартный)
-
-        Returns:
-            Dict[str, int]: Статистика отправки (successful, failed)
-        """
-        successful = 0
-        failed = 0
-
-        # Отправляем webhook-и параллельно
-        tasks = []
-        for webhook_data in webhooks_data:
-            task = asyncio.create_task(
-                self._send_webhook(
-                    payload=webhook_data.get("payload"),
-                    webhook_url=webhook_url
-                    or webhook_data.get("webhook_url")
-                    or getattr(settings, 'WEBHOOK_URL', None),
-                    event_type=webhook_data.get("event_type", "batch"),
-                )
-            )
-            tasks.append(task)
-
-        # Ждем завершения всех задач
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # Подсчитываем результаты
-        for result in results:
-            if isinstance(result, Exception):
-                logger.error(f"Batch webhook failed: {str(result)}")
-                failed += 1
-            elif result:
-                successful += 1
-            else:
-                failed += 1
-
-        logger.info(f"Batch webhooks sent: {successful} successful, {failed} failed")
-
-        return {"successful": successful, "failed": failed, "total": len(webhooks_data)}
-
-    async def test_webhook(
-        self,
-        webhook_url: Optional[str] = None,
-        test_data: Optional[Dict[str, Any]] = None,
+        data: Dict[str, Any],
     ) -> Dict[str, Any]:
         """
-        Тестирование webhook endpoint.
+        Создание стандартизированного payload для webhook.
+        
+        Args:
+            event_type: Тип события (например, "liveness.completed")
+            user_id: ID пользователя
+            data: Данные события
+            
+        Returns:
+            Сформированный payload
+        """
+        return {
+            "event": event_type,
+            "user_id": user_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "payload": data,
+            "version": "1.0",
+        }
+
+    def compute_hmac_signature(self, payload: Dict[str, Any], secret: str) -> str:
+        """
+        Вычисление HMAC подписи для payload.
+        
+        Args:
+            payload: Данные для подписи
+            secret: Секретный ключ
+            
+        Returns:
+            HMAC подпись в формате "sha256=<digest>"
+        """
+        message = json.dumps(payload, sort_keys=True).encode("utf-8")
+        digest = hmac.new(
+            secret.encode("utf-8"),
+            message,
+            hashlib.sha256,
+        ).hexdigest()
+        return f"sha256={digest}"
+
+    def compute_payload_hash(self, payload: Dict[str, Any]) -> str:
+        """
+        Вычисление хеша payload для дедупликации.
+        
+        Args:
+            payload: Данные события
+            
+        Returns:
+            SHA256 хеш payload
+        """
+        message = json.dumps(payload, sort_keys=True).encode("utf-8")
+        return hashlib.sha256(message).hexdigest()
+
+    # ------------------------------------------------------------------
+    # PUBLIC API — ЕДИНСТВЕННАЯ ТОЧКА ВХОДА
+    # ------------------------------------------------------------------
+
+    async def emit_event(
+        self,
+        *,
+        event_type: str,
+        user_id: str,
+        payload: Dict[str, Any],
+        skip_duplicates: bool = True,
+        max_retries: Optional[int] = None,
+    ) -> None:
+        """
+        ЕДИНСТВЕННЫЙ публичный метод для отправки webhook событий.
+
+        Используется:
+        - верификацией
+        - liveness detection
+        - тестами
+        - bulk retry
 
         Args:
-            webhook_url: URL webhook для тестирования
-            test_data: Тестовые данные
-
-        Returns:
-            Dict[str, Any]: Результат тестирования
+            event_type: Тип события
+            user_id: ID пользователя
+            payload: Данные события
+            skip_duplicates: Пропускать дубликаты (по умолчанию True)
+            max_retries: Переопределить количество retry (опционально)
         """
-        try:
-            payload = {
-                "event_type": "webhook.test",
-                "event_id": str(uuid.uuid4()),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "data": {
-                    "message": "This is a test webhook from Face Recognition Service",
-                    "service": "face-recognition-service",
-                    "version": __version__,
-                    **(test_data or {}),
-                },
-            }
+        # Получаем активные конфигурации для данного пользователя и типа события
+        result = await self.db.execute(
+            select(WebhookConfig)
+            .where(WebhookConfig.user_id == user_id)
+            .where(WebhookConfig.is_active.is_(True))
+            .where(WebhookConfig.event_types.contains([event_type]))
+        )
 
-            start_time = asyncio.get_event_loop().time()
-            success = await self._send_webhook(
+        configs = result.scalars().all()
+        if not configs:
+            logger.debug(f"No active webhook configs found for user {user_id} and event {event_type}")
+            return
+
+        # Вычисляем хеш payload для дедупликации
+        payload_hash = self.compute_payload_hash(payload) if skip_duplicates else None
+
+        for config in configs:
+            # Проверка на дубликаты (если включено)
+            if skip_duplicates and payload_hash:
+                duplicate_check = await self.db.execute(
+                    select(WebhookLog).where(
+                        WebhookLog.webhook_config_id == config.id,
+                        WebhookLog.payload_hash == payload_hash,
+                        WebhookLog.created_at >= datetime.now(timezone.utc) - timedelta(hours=1)
+                    ).limit(1)
+                )
+                
+                if duplicate_check.scalar_one_or_none():
+                    logger.info(
+                        f"Skipping duplicate webhook for config {config.id}, "
+                        f"event {event_type}, hash {payload_hash[:8]}..."
+                    )
+                    continue
+
+            log_id = uuid.uuid4()
+
+            # Создаем лог с подписью
+            signature = self.compute_hmac_signature(payload, config.secret)
+
+            log = WebhookLog(
+                id=log_id,
+                webhook_config_id=config.id,
+                event_type=event_type,
                 payload=payload,
-                webhook_url=webhook_url or getattr(settings, 'WEBHOOK_URL', None),
-                event_type="test",
+                payload_hash=payload_hash,
+                signature=signature,
+                attempts=0,
+                status=WebhookStatus.PENDING,
+                created_at=datetime.now(timezone.utc),
             )
-            end_time = asyncio.get_event_loop().time()
 
-            return {
-                "success": success,
-                "response_time": end_time - start_time,
-                "webhook_url": webhook_url or getattr(settings, 'WEBHOOK_URL', None),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
+            self.db.add(log)
+            await self.db.commit()
 
-        except Exception as e:
-            logger.error(f"Webhook test failed: {str(e)}")
-            return {
-                "success": False,
-                "error": str(e),
-                "webhook_url": webhook_url or getattr(settings, 'WEBHOOK_URL', None),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
+            # Запускаем отправку асинхронно
+            asyncio.create_task(
+                self._send_with_retry(
+                    payload=payload,
+                    config=config,
+                    log_id=log_id,
+                    signature=signature,
+                    max_retries_override=max_retries,
+                )
+            )
 
-    async def _send_webhook(
-        self, payload: Dict[str, Any], webhook_url: str, event_type: str
-    ) -> bool:
+            logger.info(
+                f"Webhook queued: config={config.id}, event={event_type}, "
+                f"log={log_id}, user={user_id}"
+            )
+
+    # ------------------------------------------------------------------
+    # RETRY LOGIC
+    # ------------------------------------------------------------------
+
+    async def _send_with_retry(
+        self,
+        *,
+        payload: Dict[str, Any],
+        config: WebhookConfig,
+        log_id: uuid.UUID,
+        signature: str,
+        max_retries_override: Optional[int] = None,
+    ) -> None:
         """
-        Отправка webhook с повторными попытками.
-
+        Отправка webhook с retry логикой.
+        
         Args:
             payload: Данные для отправки
-            webhook_url: URL webhook
-            event_type: Тип события
-
-        Returns:
-            bool: True если отправлен успешно
+            config: Конфигурация webhook
+            log_id: ID лога
+            signature: HMAC подпись
+            max_retries_override: Переопределить max_retries из конфига
         """
-        if not webhook_url:
-            logger.warning(f"No webhook URL provided for {event_type}")
-            return False
+        max_retries = max_retries_override or config.max_retries or self.default_max_retries
 
-        last_error = None
+        for attempt in range(1, max_retries + 1):
+            start_time = time.time()
 
-        for attempt in range(self.max_retries + 1):
             try:
-                logger.debug(
-                    f"Sending webhook {event_type} (attempt {attempt + 1}) to {webhook_url}"
+                success, status_code, response_text = await self._send_once(
+                    payload=payload,
+                    config=config,
+                    signature=signature,
                 )
 
-                # Подготавливаем заголовки
-                headers = {
-                    "Content-Type": "application/json",
-                    "User-Agent": "FaceRecognitionService/1.0",
-                    "X-Event-Type": event_type,
-                    "X-Event-ID": payload.get("event_id", str(uuid.uuid4())),
-                    "X-Timestamp": payload.get(
-                        "timestamp", datetime.now(timezone.utc).isoformat()
-                    ),
-                }
+                processing_time = time.time() - start_time
 
-                # Отправляем запрос
-                response = await self.client.post(
-                    webhook_url, json=payload, headers=headers
-                )
-
-                # Проверяем ответ
-                if response.status_code >= 200 and response.status_code < 300:
+                if success:
+                    await self._update_log_success(
+                        log_id=log_id,
+                        status_code=status_code,
+                        response=response_text,
+                        processing_time=processing_time,
+                        attempt=attempt,
+                    )
                     logger.info(
-                        f"Webhook {event_type} sent successfully (status: {response.status_code})"
+                        f"Webhook delivered successfully: log={log_id}, "
+                        f"attempt={attempt}/{max_retries}, time={processing_time:.3f}s"
                     )
-                    return True
-                elif response.status_code >= 400 and response.status_code < 500:
-                    # Клиентские ошибки - не повторяем
-                    logger.warning(
-                        f"Webhook {event_type} failed with client error {response.status_code}: {response.text}"
-                    )
-                    return False
-                else:
-                    # Серверные ошибки - повторяем
-                    logger.warning(
-                        f"Webhook {event_type} failed with server error {response.status_code}: {response.text}"
-                    )
-                    last_error = f"HTTP {response.status_code}: {response.text}"
+                    return
 
-            except httpx.TimeoutException:
-                logger.warning(f"Webhook {event_type} timeout (attempt {attempt + 1})")
-                last_error = "Timeout"
-
-            except httpx.ConnectError as e:
-                logger.warning(
-                    f"Webhook {event_type} connection error (attempt {attempt + 1}): {str(e)}"
+                await self._update_log_retry(
+                    log_id=log_id,
+                    attempt=attempt,
+                    status_code=status_code,
+                    error=response_text,
+                    max_retries=max_retries,
                 )
-                last_error = f"Connection error: {str(e)}"
-
-            except Exception as e:
+                
                 logger.warning(
-                    f"Webhook {event_type} unexpected error (attempt {attempt + 1}): {str(e)}"
+                    f"Webhook delivery failed: log={log_id}, "
+                    f"attempt={attempt}/{max_retries}, status={status_code}"
                 )
-                last_error = str(e)
 
-            # Если это не последняя попытка, ждем перед повтором
-            if attempt < self.max_retries:
-                await asyncio.sleep(
-                    self.retry_delay * (attempt + 1)
-                )  # Экспоненциальная задержка
+            except Exception as exc:
+                processing_time = time.time() - start_time
+                await self._update_log_retry(
+                    log_id=log_id,
+                    attempt=attempt,
+                    status_code=0,
+                    error=str(exc),
+                    max_retries=max_retries,
+                )
+                
+                logger.error(
+                    f"Webhook delivery exception: log={log_id}, "
+                    f"attempt={attempt}/{max_retries}, error={str(exc)}"
+                )
+
+            # Exponential backoff для следующей попытки
+            if attempt < max_retries:
+                delay_base = config.retry_delay or DEFAULT_RETRY_DELAY
+                delay = delay_base * (2 ** (attempt - 1))
+                logger.debug(f"Waiting {delay}s before retry {attempt + 1}")
+                await asyncio.sleep(delay)
 
         # Все попытки исчерпаны
-        logger.error(
-            f"Webhook {event_type} failed after {self.max_retries + 1} attempts: {last_error}"
-        )
-        return False
+        await self._mark_log_failed(log_id)
+        logger.error(f"Webhook delivery failed after {max_retries} attempts: log={log_id}")
 
-    async def validate_webhook_url(self, webhook_url: str) -> Dict[str, Any]:
+    # ------------------------------------------------------------------
+    # SINGLE SEND
+    # ------------------------------------------------------------------
+
+    async def _send_once(
+        self,
+        *,
+        payload: Dict[str, Any],
+        config: WebhookConfig,
+        signature: str,
+    ) -> tuple[bool, int, str]:
         """
-        Валидация webhook URL.
-
+        Однократная отправка webhook.
+        
         Args:
-            webhook_url: URL для валидации
-
+            payload: Данные для отправки
+            config: Конфигурация webhook
+            signature: HMAC подпись
+            
         Returns:
-            Dict[str, Any]: Результат валидации
+            Tuple (success, status_code, response_text)
+        """
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": self.user_agent,
+            "X-Webhook-Signature": signature,
+            "X-Webhook-Event": payload.get("event"),
+            "X-Webhook-Delivery": str(uuid.uuid4()),  # Уникальный ID доставки
+        }
+
+        timeout = aiohttp.ClientTimeout(total=config.timeout or self.default_timeout)
+
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    config.webhook_url,
+                    json=payload,
+                    headers=headers,
+                ) as response:
+                    text = await response.text()
+                    success = 200 <= response.status < 300
+                    return success, response.status, text[:MAX_RESPONSE_LENGTH]
+                    
+        except aiohttp.ClientError as e:
+            return False, 0, f"Client error: {str(e)}"[:MAX_ERROR_LENGTH]
+        except asyncio.TimeoutError:
+            return False, 0, "Request timeout"
+        except Exception as e:
+            return False, 0, f"Unexpected error: {str(e)}"[:MAX_ERROR_LENGTH]
+
+    # ------------------------------------------------------------------
+    # LOG UPDATES
+    # ------------------------------------------------------------------
+
+    async def _update_log_success(
+        self,
+        *,
+        log_id: uuid.UUID,
+        status_code: int,
+        response: str,
+        processing_time: float,
+        attempt: int,
+    ) -> None:
+        """Обновление лога при успешной доставке."""
+        await self.db.execute(
+            update(WebhookLog)
+            .where(WebhookLog.id == log_id)
+            .values(
+                status=WebhookStatus.SUCCESS,
+                attempts=attempt,
+                http_status=status_code,
+                response_body=response[:MAX_RESPONSE_LENGTH],
+                processing_time=processing_time,
+                last_attempt_at=datetime.now(timezone.utc),
+                next_retry_at=None,
+                error_message=None,
+            )
+        )
+        await self.db.commit()
+
+    async def _update_log_retry(
+        self,
+        *,
+        log_id: uuid.UUID,
+        attempt: int,
+        status_code: int,
+        error: str,
+        max_retries: int,
+    ) -> None:
+        """Обновление лога при неудачной попытке."""
+        # Вычисляем время следующей попытки
+        next_retry_at = None
+        if attempt < max_retries:
+            # Получаем конфигурацию для вычисления задержки
+            result = await self.db.execute(
+                select(WebhookConfig)
+                .join(WebhookLog, WebhookLog.webhook_config_id == WebhookConfig.id)
+                .where(WebhookLog.id == log_id)
+            )
+            config = result.scalar_one_or_none()
+            
+            if config:
+                delay_base = config.retry_delay or DEFAULT_RETRY_DELAY
+                delay_seconds = delay_base * (2 ** attempt)
+                next_retry_at = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
+
+        await self.db.execute(
+            update(WebhookLog)
+            .where(WebhookLog.id == log_id)
+            .values(
+                status=WebhookStatus.RETRY,
+                attempts=attempt,
+                http_status=status_code,
+                error_message=error[:MAX_ERROR_LENGTH],
+                last_attempt_at=datetime.now(timezone.utc),
+                next_retry_at=next_retry_at,
+            )
+        )
+        await self.db.commit()
+
+    async def _mark_log_failed(self, log_id: uuid.UUID) -> None:
+        """Пометка лога как окончательно неудавшегося."""
+        await self.db.execute(
+            update(WebhookLog)
+            .where(WebhookLog.id == log_id)
+            .values(
+                status=WebhookStatus.FAILED,
+                last_attempt_at=datetime.now(timezone.utc),
+                next_retry_at=None,
+            )
+        )
+        await self.db.commit()
+
+    # ------------------------------------------------------------------
+    # URL VALIDATION (used in routes)
+    # ------------------------------------------------------------------
+
+    async def validate_webhook_url(self, url: str) -> Dict[str, Any]:
+        """
+        Валидация webhook URL путем тестовой отправки HEAD запроса.
+        
+        Args:
+            url: URL для проверки
+            
+        Returns:
+            Dict с результатом валидации
         """
         try:
-            # Проверяем формат URL
-            if not webhook_url.startswith(("http://", "https://")):
-                return {
-                    "valid": False,
-                    "error": "URL must start with http:// or https://",
-                }
-
-            # Пробуем подключиться к endpoint
-            response = await self.client.get(
-                webhook_url, headers={"User-Agent": "FaceRecognitionService/1.0"}
-            )
-
+            timeout = aiohttp.ClientTimeout(total=5)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.head(url, allow_redirects=True) as response:
+                    return {
+                        "valid": True,
+                        "status": response.status,
+                        "reachable": True
+                    }
+        except aiohttp.ClientError as e:
             return {
-                "valid": True,
-                "status_code": response.status_code,
-                "response_time": response.elapsed.total_seconds(),
-                "url": webhook_url,
+                "valid": False,
+                "error": f"Connection error: {str(e)}",
+                "reachable": False
+            }
+        except asyncio.TimeoutError:
+            return {
+                "valid": False,
+                "error": "Connection timeout",
+                "reachable": False
+            }
+        except Exception as exc:
+            return {
+                "valid": False,
+                "error": str(exc),
+                "reachable": False
             }
 
-        except httpx.TimeoutException:
-            return {"valid": False, "error": "Connection timeout", "url": webhook_url}
-        except httpx.ConnectError:
-            return {"valid": False, "error": "Connection failed", "url": webhook_url}
-        except Exception as e:
-            return {"valid": False, "error": str(e), "url": webhook_url}
+    # ------------------------------------------------------------------
+    # UTILITY METHODS
+    # ------------------------------------------------------------------
 
     async def close(self):
         """
-        Закрытие HTTP клиента.
+        Закрытие сервиса (если требуется cleanup).
+        Вызывается при shutdown приложения.
         """
-        await self.client.aclose()
+        # В текущей реализации нет ресурсов для закрытия,
+        # но метод оставлен для возможного расширения
+        logger.info("WebhookService closed")

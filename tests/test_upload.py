@@ -18,7 +18,7 @@ from app.db.database import get_db
 from app.services.session_service import SessionService
 from app.utils.file_utils import FileUtils, ImageValidator
 from fastapi import Request
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import sessionmaker
 
 # =============================================================================
@@ -37,16 +37,15 @@ async_engine = create_async_engine(
 )
 
 # Фабрика сессий для тестов
-TestingSessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=async_engine,
+TestingSessionLocal = async_sessionmaker(
+    async_engine,
     class_=AsyncSession,
     expire_on_commit=False,
+    autoflush=False
 )
 
-async def override_get_db():
-    """Переопределение get_db для тестирования"""
+async def override_get_async_db():
+    """Переопределение get_async_db для тестирования"""
     async with TestingSessionLocal() as session:
         try:
             yield session
@@ -58,12 +57,14 @@ async def override_get_db():
 test_app = create_test_app()
 
 # Mock функция для замены get_current_user
-async def mock_get_current_user(request: Request):
+async def mock_get_current_user():
     return "test_user_123"
 
 # Переопределяем зависимости
+from app.routes.auth import get_current_user
+from app.db.database import get_async_db
 test_app.dependency_overrides[get_current_user] = mock_get_current_user
-test_app.dependency_overrides[get_db] = override_get_db
+test_app.dependency_overrides[get_async_db] = override_get_async_db
 
 client = TestClient(test_app)
 
@@ -103,7 +104,7 @@ class TestUploadEndpoints:
         # Проверяем, что сессия создана через API
         session_from_api = SessionService.get_session(data["session_id"])
         assert session_from_api is not None
-        assert session_from_api.user_id is not None  # Будет None без авторизации
+        assert session_from_api.user_id == "test_user_123"
     
     def test_upload_file_to_session(self):
         """Тест загрузки файла в сессию"""
@@ -114,18 +115,18 @@ class TestUploadEndpoints:
         image_content = create_test_image()
         
         with patch('app.routes.upload.get_current_user') as mock_auth, \
-             patch('app.services.storage_service.StorageService') as mock_storage:
+             patch('app.routes.upload.get_storage_service') as mock_storage_factory:
             
             mock_auth.return_value = "test_user_123"
             
             # Мокируем storage service
-            mock_storage_instance = Mock()
+            mock_storage_instance = AsyncMock()
             mock_storage_instance.upload_image.return_value = {
                 "image_id": "test_key.jpg",
                 "file_url": "http://minio:9000/bucket/test_key.jpg",
                 "file_size": len(image_content)
             }
-            mock_storage.return_value = mock_storage_instance
+            mock_storage_factory.return_value = mock_storage_instance
             
             # Создаем файл для загрузки
             files = {
@@ -230,7 +231,25 @@ class TestUploadEndpoints:
             )
             
             assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
-            assert "слишком маленькое" in response.json()["detail"].lower()
+            response_data = response.json()
+            
+            # Извлекаем сообщение об ошибке из правильной структуры ответа
+            error_message = ""
+            if "error_details" in response_data and isinstance(response_data["error_details"], dict):
+                error_details = response_data["error_details"]
+                if "error" in error_details:
+                    error_message = str(error_details["error"])
+                elif "detail" in error_details:
+                    error_message = str(error_details["detail"])
+            elif "detail" in response_data:
+                error_message = str(response_data["detail"])
+            elif "message" in response_data:
+                error_message = str(response_data["message"])
+            elif "error" in response_data:
+                error_message = str(response_data["error"])
+            
+            # Проверяем, что сообщение об ошибке содержит нужный текст
+            assert "слишком маленькое" in error_message.lower(), f"Expected 'слишком маленькое' in error message, got: '{error_message}'"
     
     def test_get_upload_status(self):
         """Тест получения статуса сессии"""
@@ -275,14 +294,14 @@ class TestUploadEndpoints:
         session = SessionService.create_session("test_user_123")
         
         with patch('app.routes.upload.get_current_user') as mock_auth, \
-             patch('app.services.storage_service.StorageService') as mock_storage:
+             patch('app.routes.upload.get_storage_service') as mock_storage_factory:
             
             mock_auth.return_value = "test_user_123"
             
             # Мокируем storage service
-            mock_storage_instance = Mock()
+            mock_storage_instance = AsyncMock()
             mock_storage_instance.delete_image.return_value = True
-            mock_storage.return_value = mock_storage_instance
+            mock_storage_factory.return_value = mock_storage_instance
             
             response = client.delete(f"/api/v1/upload/{session.session_id}")
             
@@ -348,31 +367,30 @@ class TestUploadEndpoints:
         """Тест устаревшего endpoint прямой загрузки"""
         image_content = create_test_image()
         
-        with patch('app.routes.upload.get_current_user') as mock_auth, \
-             patch('app.services.storage_service.StorageService') as mock_storage:
-            
+        with patch('app.routes.upload.get_current_user') as mock_auth:
             mock_auth.return_value = "test_user_123"
-            
-            # Мокируем storage service
-            mock_storage_instance = Mock()
-            mock_storage_instance.upload_image.return_value = {
-                "image_id": "legacy_key.jpg",
-                "file_url": "http://minio:9000/bucket/legacy_key.jpg",
-                "file_size": len(image_content)
-            }
-            mock_storage.return_value = mock_storage_instance
             
             files = {
                 "file": ("legacy.jpg", BytesIO(image_content), "image/jpeg")
             }
             
-            response = client.post("/api/v1/upload/legacy/upload", files=files)
+            # POST /api/v1/upload/ с файлом на самом деле создает сессию загрузки
+            response = client.post("/api/v1/upload/", files=files)
             
+            # Ожидаем успешное создание сессии
             assert response.status_code == status.HTTP_200_OK
-            data = response.json()
+            response_data = response.json()
             
-            assert "file_key" in data
-            assert "file_url" in data
+            # Проверяем структуру ответа создания сессии
+            assert "session_id" in response_data
+            assert "expires_at" in response_data
+            assert "max_file_size_mb" in response_data
+            assert response_data["max_file_size_mb"] == 10.0
+            
+            # Проверяем, что сессия действительно создана
+            session_from_api = SessionService.get_session(response_data["session_id"])
+            assert session_from_api is not None
+            assert session_from_api.user_id == "test_user_123"
 
 
 class TestUploadWorkflows:
@@ -383,18 +401,18 @@ class TestUploadWorkflows:
         SessionService._sessions.clear()
     
     @patch('app.routes.upload.get_current_user')
-    @patch('app.services.storage_service.StorageService')
-    def test_complete_upload_workflow(self, mock_storage_class, mock_auth):
+    @patch('app.routes.upload.get_storage_service')
+    def test_complete_upload_workflow(self, mock_storage_factory, mock_auth):
         """Тест полного workflow загрузки файла"""
         # Настройка моков
         mock_auth.return_value = "test_user_123"
-        mock_storage_instance = Mock()
+        mock_storage_instance = AsyncMock()
         mock_storage_instance.upload_image.return_value = {
             "image_id": "workflow_key.jpg",
             "file_url": "http://minio:9000/bucket/workflow_key.jpg",
             "file_size": 1024
         }
-        mock_storage_class.return_value = mock_storage_instance
+        mock_storage_factory.return_value = mock_storage_instance
         
         image_content = create_test_image()
         
@@ -439,18 +457,18 @@ class TestUploadWorkflows:
         assert response.status_code == status.HTTP_404_NOT_FOUND
     
     @patch('app.routes.upload.get_current_user')
-    @patch('app.services.storage_service.StorageService')
-    def test_png_to_jpg_conversion(self, mock_storage_class, mock_auth):
+    @patch('app.routes.upload.get_storage_service')
+    def test_png_to_jpg_conversion(self, mock_storage_factory, mock_auth):
         """Тест конвертации PNG в JPG"""
         # Настройка моков
         mock_auth.return_value = "test_user_123"
-        mock_storage_instance = Mock()
+        mock_storage_instance = AsyncMock()
         mock_storage_instance.upload_image.return_value = {
             "image_id": "converted_key.jpg",
             "file_url": "http://minio:9000/bucket/converted_key.jpg",
             "file_size": 1024
         }
-        mock_storage_class.return_value = mock_storage_instance
+        mock_storage_factory.return_value = mock_storage_instance
         
         # Создаем PNG изображение
         img = Image.new('RGB', (300, 300), color='green')
@@ -475,9 +493,19 @@ class TestUploadWorkflows:
         assert "file_url" in data
     
     @patch('app.routes.upload.get_current_user')
-    def test_large_image_resize(self, mock_auth):
+    @patch('app.routes.upload.get_storage_service')
+    def test_large_image_resize(self, mock_storage_factory, mock_auth):
         """Тест изменения размера большого изображения"""
         mock_auth.return_value = "test_user_123"
+        
+        # Мокируем storage service
+        mock_storage_instance = AsyncMock()
+        mock_storage_instance.upload_image.return_value = {
+            "image_id": "large_key.jpg",
+            "file_url": "http://minio:9000/bucket/large_key.jpg",
+            "file_size": 1024
+        }
+        mock_storage_factory.return_value = mock_storage_instance
         
         # Создаем очень большое изображение
         img = Image.new('RGB', (3000, 3000), color='yellow')

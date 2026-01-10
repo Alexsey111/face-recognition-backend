@@ -1,18 +1,30 @@
 """
-Сервис хранилища файлов.
-Работа с S3/MinIO для загрузки, хранения и управления файлами изображений.
+File Storage Service (S3 / MinIO)
+
+Асинхронный сервис работы с объектным хранилищем.
+boto3 используется через executor (boto3 НЕ async).
+
+⚠️ Важно:
+- Этот сервис безопасен для production при корректных настройках
+- Public-read используется ТОЛЬКО если явно включён в settings
 """
+
+from __future__ import annotations
 
 import io
 import mimetypes
 import asyncio
 import functools
 import json
-from typing import Optional, Dict, Any, Tuple
-from botocore.exceptions import ClientError, NoCredentialsError
+import socket
+import uuid
+from datetime import datetime
+from typing import Optional, Dict, Any, List, Tuple
+
 import boto3
 from botocore.config import Config
-from PIL import Image
+from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
+from PIL import Image, UnidentifiedImageError
 
 from ..config import settings
 from ..utils.logger import get_logger
@@ -21,12 +33,30 @@ from ..utils.exceptions import StorageError, ValidationError
 logger = get_logger(__name__)
 
 
+# =============================================================================
+# Constants & Limits
+# =============================================================================
+
+ALLOWED_IMAGE_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+}
+
+MAX_IMAGE_SIZE_BYTES = getattr(settings, "MAX_IMAGE_SIZE_BYTES", 10 * 1024 * 1024)  # 10MB
+
+
+# =============================================================================
+# Storage Service
+# =============================================================================
+
 class StorageService:
     """
-    Сервис для работы с хранилищем файлов (S3/MinIO).
+    S3 / MinIO storage service
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.endpoint_url = settings.S3_ENDPOINT_URL
         self.access_key = settings.S3_ACCESS_KEY
         self.secret_key = settings.S3_SECRET_KEY
@@ -34,17 +64,16 @@ class StorageService:
         self.region = settings.S3_REGION
         self.use_ssl = settings.S3_USE_SSL
         self.public_read = bool(getattr(settings, "S3_PUBLIC_READ", False))
+        self.auto_create_bucket = bool(
+            getattr(settings, "S3_AUTO_CREATE_BUCKET", False)
+        )
 
-        # Инициализация S3 клиента
-        self.s3_client = self._initialize_s3_client()
+        self.s3_client = self._init_client()
+        self._reconnect_lock = asyncio.Lock()  # асинхронный lock
 
-    def _initialize_s3_client(self):
-        """
-        Инициализация S3 клиента.
+    # ---------------------------------------------------------------------
 
-        Returns:
-            boto3.client: S3 клиент
-        """
+    def _init_client(self):
         try:
             config = Config(
                 region_name=self.region,
@@ -52,7 +81,7 @@ class StorageService:
                 retries={"max_attempts": 3, "mode": "standard"},
             )
 
-            client = boto3.client(
+            return boto3.client(
                 "s3",
                 endpoint_url=self.endpoint_url,
                 aws_access_key_id=self.access_key,
@@ -60,585 +89,271 @@ class StorageService:
                 config=config,
                 use_ssl=self.use_ssl,
             )
-
-            return client
-
         except Exception as e:
-            logger.error(f"Failed to initialize S3 client: {str(e)}")
-            raise StorageError(f"S3 client initialization failed: {str(e)}")
+            raise StorageError(f"S3 client initialization failed: {e}")
+
+    # ---------------------------------------------------------------------
+
+    async def _run(self, func, *args, **kwargs):
+        loop = asyncio.get_running_loop()
+        max_retries = 5
+        delays = [1, 2, 4, 8, 16]
+        
+        for attempt in range(max_retries):
+            try:
+                return await loop.run_in_executor(
+                    None, functools.partial(func, *args, **kwargs)
+                )
+            except (ClientError, ConnectionError, EndpointConnectionError, socket.timeout) as e:
+                if attempt == max_retries - 1:
+                    raise
+                
+                async with self._reconnect_lock:  # только один поток делает reconnect
+                    logger.warning(f"S3 error (attempt {attempt + 1}/{max_retries}): {e}. Reconnecting...")
+                    self.s3_client = self._init_client()
+                
+                await asyncio.sleep(delays[attempt])
+        
+        raise RuntimeError("Unexpected exit from retry loop")
+    #--------------------------------------------------
 
     async def health_check(self) -> bool:
-        """
-        Проверка состояния хранилища (асинхронно).
-
-        Returns:
-            bool: True если хранилище доступно
-        """
         try:
-            loop = asyncio.get_running_loop()
-            
-            # Пробуем получить информацию о бакете асинхронно
-            await loop.run_in_executor(
-                None,
-                functools.partial(self.s3_client.head_bucket, Bucket=self.bucket_name)
+            await self._run(
+                self.s3_client.head_bucket, Bucket=self.bucket_name
             )
             return True
 
         except ClientError as e:
-            error_code = e.response["Error"]["Code"]
-            if error_code == "404":
-                # Бакет не существует, пытаемся создать
-                await self._create_bucket_if_not_exists()
-                return True
-            else:
-                logger.error(f"S3 health check failed: {str(e)}")
+            if e.response["Error"]["Code"] == "404":
+                if self.auto_create_bucket:
+                    await self._create_bucket()
+                    return True
                 return False
-        except Exception as e:
-            logger.error(f"S3 health check error: {str(e)}")
             return False
 
-    async def _create_bucket_if_not_exists(self):
-        """
-        Создание бакета если он не существует (асинхронно).
-        """
+        except NoCredentialsError:
+            return False
+
+    # ---------------------------------------------------------------------
+
+    async def _create_bucket(self) -> None:
         try:
-            loop = asyncio.get_running_loop()
-            
             if self.region == "us-east-1":
-                await loop.run_in_executor(
-                    None,
-                    functools.partial(self.s3_client.create_bucket, Bucket=self.bucket_name)
+                await self._run(
+                    self.s3_client.create_bucket,
+                    Bucket=self.bucket_name,
                 )
             else:
-                await loop.run_in_executor(
-                    None,
-                    functools.partial(self.s3_client.create_bucket,
-                                    Bucket=self.bucket_name,
-                                    CreateBucketConfiguration={"LocationConstraint": self.region})
+                await self._run(
+                    self.s3_client.create_bucket,
+                    Bucket=self.bucket_name,
+                    CreateBucketConfiguration={
+                        "LocationConstraint": self.region
+                    },
                 )
 
-            # Настройка политики доступа (публичное чтение для файлов)
             if self.public_read:
-                await self._setup_bucket_policy()
-
-            logger.info(f"Bucket {self.bucket_name} created successfully")
+                await self._setup_public_policy()
 
         except Exception as e:
-            logger.error(f"Failed to create bucket {self.bucket_name}: {str(e)}")
-            raise StorageError(f"Bucket creation failed: {str(e)}")
+            raise StorageError(f"Bucket creation failed: {e}")
 
-    async def _setup_bucket_policy(self):
-        """
-        Настройка политики доступа к бакету (асинхронно).
-        """
+    # ---------------------------------------------------------------------
+
+    async def _setup_public_policy(self) -> None:
+        policy = {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": "*",
+                    "Action": "s3:GetObject",
+                    "Resource": f"arn:aws:s3:::{self.bucket_name}/*",
+                }
+            ],
+        }
+
         try:
-            loop = asyncio.get_running_loop()
-            
-            policy = {
-                "Version": "2012-10-17",
-                "Statement": [
-                    {
-                        "Sid": "PublicReadGetObject",
-                        "Effect": "Allow",
-                        "Principal": "*",
-                        "Action": "s3:GetObject",
-                        "Resource": f"arn:aws:s3:::{self.bucket_name}/*",
-                    }
-                ],
-            }
+            await self._run(
+                self.s3_client.put_bucket_policy,
+                Bucket=self.bucket_name,
+                Policy=json.dumps(policy),
+            )
+        except Exception as e:
+            logger.warning("Failed to set bucket policy: %s", e)
 
-            await loop.run_in_executor(
-                None,
-                functools.partial(self.s3_client.put_bucket_policy,
-                                Bucket=self.bucket_name,
-                                Policy=json.dumps(policy))
+    # ---------------------------------------------------------------------
+    """
+    Загружает изображение в S3/MinIO хранилище.
+
+    Args:
+        image_data: Байты изображения
+        key: Ключ объекта (если None — генерируется автоматически)
+        metadata: Дополнительные метаданные (опционально)
+
+    Returns:
+        dict с key, file_url, file_size, content_type
+
+    Raises:
+        ValidationError: Если изображение не проходит валидацию (размер, тип, формат)
+        StorageError: При ошибке загрузки в S3
+    """
+    async def upload_image(
+        self,
+        image_data: bytes,
+        key: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+
+        if not image_data:
+            raise ValidationError("Empty image data")
+
+        if len(image_data) > MAX_IMAGE_SIZE_BYTES:
+            raise ValidationError("Image size exceeds limit")
+
+        mime_type, width, height = self._detect_image_mime(image_data)
+
+        if width > settings.MAX_IMAGE_WIDTH or height > settings.MAX_IMAGE_HEIGHT:
+            raise ValidationError(
+                f"Image dimensions {width}x{height} exceed maximum allowed "
+                f"{settings.MAX_IMAGE_WIDTH}x{settings.MAX_IMAGE_HEIGHT}. "
+                "Please resize to 4096x4096 or smaller."
             )
 
-        except Exception as e:
-            logger.warning(f"Failed to setup bucket policy: {str(e)}")
+        if mime_type not in ALLOWED_IMAGE_MIME_TYPES:
+            raise ValidationError(f"Unsupported image type: {mime_type}")
 
-    async def upload_image(
-        self, 
-        image_data: bytes, 
-        key: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """
-        Загрузка изображения в хранилище (асинхронно).
+        if not key:
+            key = self._generate_object_key(mime_type)
 
-        Args:
-            image_data: Двоичные данные изображения
-            key: Ключ файла (если не указан, генерируется автоматически)
-            metadata: Дополнительные метаданные
+        s3_metadata = self._prepare_metadata(metadata)
 
-        Returns:
-            Dict[str, Any]: Информация о загруженном файле
-        """
+        put_args = {
+            "Bucket": self.bucket_name,
+            "Key": key,
+            "Body": image_data,
+            "ContentType": mime_type,
+            "Metadata": s3_metadata,
+        }
+
+        if self.public_read:
+            put_args["ACL"] = "public-read"
+
         try:
-            # Определяем MIME тип используя PIL
-            try:
-                img = Image.open(io.BytesIO(image_data))
-                mime_type = Image.MIME.get(img.format, "application/octet-stream")
-            except Exception:
-                # Если PIL не может определить формат, используем mimetypes как fallback
-                mime_type, _ = mimetypes.guess_type("image.jpg")
-                if not mime_type:
-                    mime_type = "application/octet-stream"
-
-            # Генерируем ключ файла
-            if key is None:
-                # Генерируем уникальное имя файла
-                import uuid
-                import time
-                from datetime import datetime
-
-                file_extension = self._get_extension_from_mime_type(mime_type)
-                filename = f"{int(time.time())}_{uuid.uuid4().hex[:8]}{file_extension}"
-
-                # Создаем путь с организацией по датам
-                now = datetime.now()
-                key = f"images/{now.year}/{now.month:02d}/{now.day:02d}/{filename}"
-            # Если ключ передан, используем его как есть
-
-            # Подготавливаем метаданные
-            s3_metadata = self._prepare_s3_metadata(metadata)
-
-            # Загружаем файл асинхронно
-            try:
-                loop = asyncio.get_running_loop()
-                put_kwargs = dict(
-                    Bucket=self.bucket_name,
-                    Key=key,
-                    Body=image_data,
-                    ContentType=mime_type,
-                    Metadata=s3_metadata,
-                )
-                if self._is_public_bucket():
-                    put_kwargs["ACL"] = "public-read"
-
-                # Оборачиваем синхронный вызов в async executor
-                await loop.run_in_executor(
-                    None,  # Использует дефолтный executor
-                    functools.partial(self.s3_client.put_object, **put_kwargs)
-                )
-                
-            except Exception as e:
-                logger.error(f"S3 upload failed for key {key}: {str(e)}")
-                raise StorageError(f"Failed to upload image: {str(e)}")
-
-            # Формируем URL файла
-            file_url = self._generate_file_url(key)
-
-            logger.info(f"Image uploaded successfully: {key} ({len(image_data)} bytes)")
-
-            return {
-                "image_id": key,
-                "file_url": file_url,
-                "file_size": len(image_data),
-                "content_type": mime_type,
-                "key": key,
-                "bucket": self.bucket_name,
-                "metadata": metadata,
-            }
-
+            await self._run(self.s3_client.put_object, **put_args)
         except Exception as e:
-            logger.error(f"Image upload failed: {str(e)}")
-            raise StorageError(f"Failed to upload image: {str(e)}")
+            raise StorageError(f"Upload failed: {e}")
+
+        return {
+            "key": key,
+            "file_url": self._build_file_url(key),
+            "file_size": len(image_data),
+            "content_type": mime_type,
+        }
+
+    # ---------------------------------------------------------------------
 
     async def download_image(self, file_key: str) -> bytes:
-        """
-        Скачивание изображения из хранилища (асинхронно).
-
-        Args:
-            file_key: Ключ файла в хранилище
-
-        Returns:
-            bytes: Двоичные данные изображения
-        """
         try:
-            loop = asyncio.get_running_loop()
-            
-            # Получаем объект асинхронно
-            response = await loop.run_in_executor(
-                None,
-                functools.partial(self.s3_client.get_object, 
-                                Bucket=self.bucket_name, 
-                                Key=file_key)
+            response = await self._run(
+                self.s3_client.get_object,
+                Bucket=self.bucket_name,
+                Key=file_key,
             )
-
-            # Читаем данные асинхронно
-            image_data = await loop.run_in_executor(
-                None,
-                lambda: response["Body"].read()
-            )
-
-            logger.info(
-                f"Image downloaded successfully: {file_key} ({len(image_data)} bytes)"
-            )
-            return image_data
-
+            return response["Body"].read()
         except ClientError as e:
-            error_code = e.response["Error"]["Code"]
-            if error_code == "NoSuchKey":
-                raise StorageError(f"File not found: {file_key}")
-            else:
-                logger.error(f"S3 download failed for key {file_key}: {str(e)}")
-                raise StorageError(f"Failed to download image: {str(e)}")
-        except Exception as e:
-            logger.error(f"Image download failed: {str(e)}")
-            raise StorageError(f"Failed to download image: {str(e)}")
+            if e.response["Error"]["Code"] == "NoSuchKey":
+                raise StorageError("File not found")
+            raise StorageError(f"Download failed: {e}")
+
+    # ---------------------------------------------------------------------
 
     async def delete_image(self, file_key: str) -> bool:
-        """
-        Удаление изображения из хранилища (асинхронно).
-
-        Args:
-            file_key: Ключ файла для удаления
-
-        Returns:
-            bool: True если файл удален
-        """
         try:
-            loop = asyncio.get_running_loop()
-            
-            await loop.run_in_executor(
-                None,
-                functools.partial(self.s3_client.delete_object,
-                                Bucket=self.bucket_name,
-                                Key=file_key)
+            await self._run(
+                self.s3_client.delete_object,
+                Bucket=self.bucket_name,
+                Key=file_key,
             )
-
-            logger.info(f"Image deleted successfully: {file_key}")
             return True
-
         except ClientError as e:
-            error_code = e.response["Error"]["Code"]
-            if error_code == "NoSuchKey":
-                logger.warning(f"File not found for deletion: {file_key}")
+            if e.response["Error"]["Code"] == "NoSuchKey":
                 return False
-            else:
-                logger.error(f"S3 delete failed for key {file_key}: {str(e)}")
-                raise StorageError(f"Failed to delete image: {str(e)}")
-        except Exception as e:
-            logger.error(f"Image deletion failed: {str(e)}")
-            raise StorageError(f"Failed to delete image: {str(e)}")
+            raise StorageError(f"Delete failed: {e}")
 
-    async def delete_image_by_url(self, file_url: str) -> bool:
-        """
-        Удаление изображения по URL.
-
-        Args:
-            file_url: URL файла для удаления
-
-        Returns:
-            bool: True если файл удален
-        """
-        try:
-            # Извлекаем ключ из URL
-            file_key = self._extract_key_from_url(file_url)
-            if not file_key:
-                logger.warning(f"Could not extract key from URL: {file_url}")
-                return False
-
-            return await self.delete_image(file_key)
-
-        except Exception as e:
-            logger.error(f"Failed to delete image by URL {file_url}: {str(e)}")
-            return False
-
-    async def get_image_info(self, file_key: str) -> Optional[Dict[str, Any]]:
-        """
-        Получение информации о изображении (асинхронно).
-
-        Args:
-            file_key: Ключ файла
-
-        Returns:
-            Optional[Dict[str, Any]]: Информация о файле
-        """
-        try:
-            loop = asyncio.get_running_loop()
-            
-            response = await loop.run_in_executor(
-                None,
-                functools.partial(self.s3_client.head_object,
-                                Bucket=self.bucket_name,
-                                Key=file_key)
-            )
-
-            metadata = response.get("Metadata", {})
-            content_type = response.get("ContentType", "application/octet-stream")
-
-            return {
-                "file_url": self._generate_file_url(file_key),
-                "file_size": response.get("ContentLength"),
-                "image_format": self._get_format_from_content_type(content_type),
-                "image_dimensions": metadata.get("dimensions"),
-                "created_at": response.get("LastModified"),
-                "metadata": metadata,
-            }
-
-        except ClientError as e:
-            error_code = e.response["Error"]["Code"]
-            if error_code == "NoSuchKey":
-                return None
-            else:
-                logger.error(f"S3 head object failed for key {file_key}: {str(e)}")
-                raise StorageError(f"Failed to get image info: {str(e)}")
-        except Exception as e:
-            logger.error(f"Get image info failed: {str(e)}")
-            raise StorageError(f"Failed to get image info: {str(e)}")
-
-    async def list_images(
-        self, prefix: Optional[str] = None, max_keys: int = 1000
-    ) -> list:
-        """
-        Список изображений в хранилище (асинхронно).
-
-        Args:
-            prefix: Префикс для фильтрации
-            max_keys: Максимальное количество ключей
-
-        Returns:
-            list: Список ключей файлов
-        """
-        try:
-            loop = asyncio.get_running_loop()
-            
-            response = await loop.run_in_executor(
-                None,
-                functools.partial(self.s3_client.list_objects_v2,
-                                Bucket=self.bucket_name,
-                                Prefix=prefix,
-                                MaxKeys=max_keys)
-            )
-
-            keys = []
-            if "Contents" in response:
-                keys = [obj["Key"] for obj in response["Contents"]]
-
-            logger.info(f"Listed {len(keys)} images with prefix: {prefix}")
-            return keys
-
-        except Exception as e:
-            logger.error(f"List images failed: {str(e)}")
-            raise StorageError(f"Failed to list images: {str(e)}")
+    # ---------------------------------------------------------------------
 
     async def generate_presigned_url(
-        self, file_key: str, expires_in: int = 3600, operation: str = "get_object"
+        self,
+        file_key: str,
+        expires_in: int = 3600,
+        operation: str = "get_object",
     ) -> str:
-        """
-        Генерация подписанного URL для доступа к файлу (асинхронно).
 
-        Args:
-            file_key: Ключ файла
-            expires_in: Время жизни URL в секундах
-            operation: Операция ('get_object' или 'put_object')
+        if operation not in {"get_object", "put_object"}:
+            raise ValidationError("Invalid presigned URL operation")
 
-        Returns:
-            str: Подписанный URL
-        """
+        def _gen():
+            return self.s3_client.generate_presigned_url(
+                operation,
+                Params={"Bucket": self.bucket_name, "Key": file_key},
+                ExpiresIn=expires_in,
+            )
+
         try:
-            loop = asyncio.get_running_loop()
-            
-            def _generate_url():
-                if operation == "get_object":
-                    return self.s3_client.generate_presigned_url(
-                        "get_object",
-                        Params={"Bucket": self.bucket_name, "Key": file_key},
-                        ExpiresIn=expires_in,
-                    )
-                elif operation == "put_object":
-                    return self.s3_client.generate_presigned_url(
-                        "put_object",
-                        Params={"Bucket": self.bucket_name, "Key": file_key},
-                        ExpiresIn=expires_in,
-                    )
-                else:
-                    raise ValueError(f"Unsupported operation: {operation}")
-
-            url = await loop.run_in_executor(None, _generate_url)
-            return url
-
+            return await self._run(_gen)
         except Exception as e:
-            logger.error(f"Failed to generate presigned URL for {file_key}: {str(e)}")
-            raise StorageError(f"Failed to generate presigned URL: {str(e)}")
+            raise StorageError(f"Presigned URL failed: {e}")
 
-    def _get_extension_from_mime_type(self, mime_type: str) -> str:
-        """
-        Получение расширения файла из MIME типа.
+    # =============================================================================
+    # Helpers
+    # =============================================================================
 
-        Args:
-            mime_type: MIME тип
+    def _detect_image_mime(self, data: bytes) -> Tuple[str, int, int]:
+        try:
+            with Image.open(io.BytesIO(data)) as img:
+                img.verify()
+                mime_type = Image.MIME.get(img.format, "application/octet-stream")
+                return mime_type, img.width, img.height
+        except UnidentifiedImageError:
+            raise ValidationError("Invalid image data")
 
-        Returns:
-            str: Расширение файла
-        """
-        extension_map = {
+    def _generate_object_key(self, mime_type: str) -> str:
+        ext = {
             "image/jpeg": ".jpg",
-            "image/jpg": ".jpg",
             "image/png": ".png",
             "image/webp": ".webp",
             "image/gif": ".gif",
-        }
-        return extension_map.get(mime_type, ".jpg")
+        }.get(mime_type, ".img")
 
-    def _get_format_from_content_type(self, content_type: str) -> str:
-        """
-        Получение формата изображения из Content-Type.
+        now = datetime.utcnow()
+        return (
+            f"images/{now.year}/{now.month:02d}/{now.day:02d}/"
+            f"{uuid.uuid4().hex}{ext}"
+        )
 
-        Args:
-            content_type: Content-Type заголовок
-
-        Returns:
-            str: Формат изображения
-        """
-        if "jpeg" in content_type.lower() or "jpg" in content_type.lower():
-            return "JPEG"
-        elif "png" in content_type.lower():
-            return "PNG"
-        elif "webp" in content_type.lower():
-            return "WEBP"
-        elif "gif" in content_type.lower():
-            return "GIF"
-        else:
-            return "UNKNOWN"
-
-    def _prepare_s3_metadata(
+    def _prepare_metadata(
         self, metadata: Optional[Dict[str, Any]]
     ) -> Dict[str, str]:
-        """
-        Подготовка метаданных для S3.
+        result: Dict[str, str] = {}
 
-        Args:
-            metadata: Метаданные для подготовки
+        if not metadata:
+            return result
 
-        Returns:
-            Dict[str, str]: Подготовленные метаданные
-        """
-        s3_metadata = {}
+        for key, value in metadata.items():
+            k = str(key)[:128]
+            v = str(value)[:1024]
+            result[k] = v
 
-        if metadata:
-            # Преобразуем все значения в строки для S3
-            for key, value in metadata.items():
-                if key.lower() in [
-                    "cache-control",
-                    "content-type",
-                    "content-encoding",
-                    "content-disposition",
-                ]:
-                    continue  # Пропускаем заголовки HTTP
+        return result
 
-                # Ограничиваем длину ключей и значений
-                str_key = str(key)[:128]
-                str_value = str(value)[:2048]
-
-                s3_metadata[str_key] = str_value
-
-        return s3_metadata
-
-    def _generate_file_url(self, file_key: str) -> str:
-        """
-        Генерация URL файла.
-
-        Args:
-            file_key: Ключ файла
-
-        Returns:
-            str: URL файла
-        """
+    def _build_file_url(self, key: str) -> str:
         if self.endpoint_url:
-            # Для S3 совместимых сервисов
-            base_url = self.endpoint_url.rstrip("/")
-            if base_url.endswith(self.bucket_name):
-                return f"{base_url}/{file_key}"
-            else:
-                return f"{base_url}/{self.bucket_name}/{file_key}"
-        else:
-            # Стандартный S3 URL
-            return (
-                f"https://{self.bucket_name}.s3.{self.region}.amazonaws.com/{file_key}"
-            )
+            base = self.endpoint_url.rstrip("/")
+            return f"{base}/{self.bucket_name}/{key}"
+        return (
+            f"https://{self.bucket_name}.s3."
+            f"{self.region}.amazonaws.com/{key}"
+        )
 
-    def _extract_key_from_url(self, file_url: str) -> Optional[str]:
-        """
-        Извлечение ключа файла из URL (улучшенная версия).
-
-        Args:
-            file_url: URL файла
-
-        Returns:
-            Optional[str]: Ключ файла или None
-        """
-        try:
-            from urllib.parse import urlparse, unquote
-            
-            parsed_url = urlparse(file_url)
-            path = unquote(parsed_url.path)
-            
-            # Если это S3 URL с именем бакета
-            if self.bucket_name in file_url:
-                parts = path.split(f"/{self.bucket_name}/", 1)
-                if len(parts) > 1:
-                    return parts[1]
-                # Или если путь начинается с имени бакета
-                if path.startswith(f"/{self.bucket_name}/"):
-                    return path[len(f"/{self.bucket_name}/"):]
-            
-            # Если это прямая ссылка на объект (без имени бакета в URL)
-            # Предполагаем, что путь - это ключ объекта
-            if path.startswith("/"):
-                return path[1:]  # Убираем начальный слеш
-            
-            return path if path else None
-
-        except Exception as e:
-            logger.warning(f"Failed to extract key from URL {file_url}: {e}")
-            return None
-
-    def _is_public_bucket(self) -> bool:
-        """
-        Проверка, является ли бакет публичным.
-
-        Returns:
-            bool: True если бакет публичный
-        """
-        # Логика определения публичности бакета
-        return self.public_read
-
-    async def get_storage_stats(self) -> Dict[str, Any]:
-        """
-        Получение статистики хранилища (асинхронно).
-
-        Returns:
-            Dict[str, Any]: Статистика хранилища
-        """
-        try:
-            loop = asyncio.get_running_loop()
-            
-            # Получаем информацию о бакete асинхронно
-            await loop.run_in_executor(
-                None,
-                functools.partial(self.s3_client.head_bucket, Bucket=self.bucket_name)
-            )
-
-            # Получаем список объектов для подсчета асинхронно
-            objects_response = await loop.run_in_executor(
-                None,
-                functools.partial(self.s3_client.list_objects_v2,
-                                Bucket=self.bucket_name,
-                                MaxKeys=1)
-            )
-
-            return {
-                "bucket_name": self.bucket_name,
-                "region": self.region,
-                "endpoint_url": self.endpoint_url,
-                "total_objects": objects_response.get("KeyCount", 0),
-                "is_public": self._is_public_bucket(),
-                "status": "accessible",
-            }
-
-        except Exception as e:
-            logger.error(f"Failed to get storage stats: {str(e)}")
-            return {"bucket_name": self.bucket_name, "status": "error", "error": str(e)}

@@ -1,3 +1,4 @@
+# Dockerfile
 # Multi-stage production Dockerfile для Face Recognition Service
 # Этап 1: Сборка зависимостей
 FROM python:3.11-slim as builder

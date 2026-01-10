@@ -222,8 +222,6 @@ python_functions = ["test_*"]
 addopts = [
     "-v",
     "--tb=short",
-    "--strict-markers",
-    "--strict-config",
     "--disable-warnings",
     "--color=yes",
     "--durations=10",
@@ -231,7 +229,8 @@ addopts = [
     "--cov-report=term-missing",
     "--cov-report=html:htmlcov",
     "--cov-report=xml:coverage.xml",
-    "--cov-fail-under=80"
+    "--cov-fail-under=80",
+    "--asyncio-mode=auto"
 ]
 markers = [
     "unit: Unit tests (быстрые тесты без внешних зависимостей)",

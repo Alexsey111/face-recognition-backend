@@ -476,7 +476,7 @@ class TestGlobalScheduler:
         # Проверяем, что был создан экземпляр CleanupScheduler
         mock_scheduler_class.assert_called_once()
         
-        # Проверяем, что метод start был вызван
+        # Проверяем, что метод start был вызван у созданного экземпляра
         mock_scheduler_instance.start.assert_called_once()
         
         # Устанавливаем is_running в True, чтобы stop тоже сработал

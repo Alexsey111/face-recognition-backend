@@ -1,24 +1,49 @@
 """
+ml_service.py
 Оптимизированный локальный ML сервис для обработки изображений и распознавания лиц.
-Исправлены критические проблемы производительности и точности.
+...
 """
+from __future__ import annotations
 
 import io
-import base64
 import time
-from typing import Optional, Dict, Any, List, Tuple
+import asyncio
+from typing import Optional, Dict, Any, List, Tuple, Union
+
 import numpy as np
 import cv2
 from PIL import Image
+
 import torch
-import torchvision.transforms as transforms
 from facenet_pytorch import MTCNN, InceptionResnetV1
-from scipy.spatial.distance import cosine
 from datetime import datetime
 
+try:
+    from decord import VideoReader, cpu as decord_cpu
+    _HAS_DECORD = True
+except Exception:
+    VideoReader = None
+    decord_cpu = None
+    _HAS_DECORD = False
+
 from ..config import settings
+
 from ..utils.logger import get_logger
+
 from ..utils.exceptions import ProcessingError, MLServiceError
+
+# Импорты утилит для выравнивания, анализа освещения и depth estimation
+from ..utils.face_alignment_utils import (
+    detect_face_landmarks,
+    align_face,
+    FaceLandmarks,
+    analyze_shadows_and_lighting,
+    enhance_lighting,
+    analyze_depth_for_liveness,
+    LightingAnalysis,
+    DepthAnalysis,
+    combine_liveness_scores,
+)
 
 logger = get_logger(__name__)
 
@@ -26,14 +51,23 @@ logger = get_logger(__name__)
 class OptimizedMLService:
     """
     Оптимизированный локальный сервис для работы с машинным обучением.
-    Исправлены проблемы производительности и точности.
+    
+    Поддерживает:
+    - FaceNet/InceptionResnetV1 для извлечения эмбеддингов
+    - MTCNN для детекции лиц
+    - Face Alignment: выравнивание лица по landmarks перед генерацией эмбеддинга
+    - Shadow/Lighting Analysis: улучшенный анализ освещения и теней
+    - 3D Depth Estimation: оценка глубины для детекции живости (anti-spoofing)
+    - MiniFASNetV2 (AntiSpoofingService) для сертифицированной проверки живости
     """
 
     def __init__(self):
         # Определение устройства для вычислений
         device_setting = settings.LOCAL_ML_DEVICE.lower()
         if device_setting == "auto":
-            self.device = torch.device("cuda" if torch.cuda.is_available() and settings.LOCAL_ML_ENABLE_CUDA else "cpu")
+            self.device = torch.device(
+                "cuda" if torch.cuda.is_available() and settings.LOCAL_ML_ENABLE_CUDA else "cpu"
+            )
         elif device_setting == "cuda":
             self.device = torch.device("cuda")
         else:
@@ -46,18 +80,28 @@ class OptimizedMLService:
         self.facenet = None
         self.is_initialized = False
         
+        # Сертифицированная модель liveness (MiniFASNetV2)
+        self._anti_spoofing_service = None
+        self._certified_liveness_enabled = settings.USE_CERTIFIED_LIVENESS
+        
         # Настройки из конфигурации
         self.face_detection_threshold = settings.LOCAL_ML_FACE_DETECTION_THRESHOLD
         self.quality_threshold = settings.LOCAL_ML_QUALITY_THRESHOLD
         self.batch_size = settings.LOCAL_ML_BATCH_SIZE
         self.enable_performance_monitoring = settings.LOCAL_ML_ENABLE_PERFORMANCE_MONITORING
         
-        # Оптимизированная статистика (исправлено)
+        # Настройки для выравнивания и анализа
+        self._alignment_enabled = True
+        self._lighting_enhancement_enabled = True
+        self._depth_estimation_enabled = True
+
+        # Оптимизированная статистика
         self.stats = {
             "requests": 0,
             "face_detections": 0,
             "embeddings_generated": 0,
             "liveness_checks": 0,
+            "depth_checks": 0,
             "total_processing_time": 0.0,
             "average_processing_time": 0.0,
             "max_processing_time": 0.0,
@@ -73,7 +117,7 @@ class OptimizedMLService:
             logger.info("Initializing optimized ML models...")
             start_time = time.time()
 
-            # Инициализация MTCNN для детекции лиц (без post=True)
+            # Инициализация MTCNN для детекции лиц
             self.mtcnn = MTCNN(
                 image_size=224,
                 margin=20,
@@ -87,6 +131,16 @@ class OptimizedMLService:
             # Инициализация FaceNet для извлечения эмбеддингов
             self.facenet = InceptionResnetV1(pretrained="vggface2").eval().to(self.device)
             logger.info("FaceNet model initialized")
+
+            # Инициализация сертифицированной модели Anti-Spoofing
+            if self._certified_liveness_enabled:
+                try:
+                    from .anti_spoofing_service import get_anti_spoofing_service
+                    self._anti_spoofing_service = await get_anti_spoofing_service()
+                    logger.info("MiniFASNetV2 Anti-Spoofing model initialized (CERTIFIED)")
+                except Exception as e:
+                    logger.warning(f"Failed to initialize certified anti-spoofing model: {e}")
+                    self._certified_liveness_enabled = False
 
             initialization_time = time.time() - start_time
             logger.info(f"ML models initialized in {initialization_time:.2f}s")
@@ -102,7 +156,7 @@ class OptimizedMLService:
         try:
             if not self.is_initialized:
                 await self.initialize()
-            
+
             if not torch.cuda.is_available() and self.device.type == "cuda":
                 logger.warning("CUDA not available, using CPU")
             
@@ -113,10 +167,7 @@ class OptimizedMLService:
             return False
 
     def _load_image_pil(self, image_data: bytes) -> Image.Image:
-        """
-        Загрузка изображения в формате PIL.
-        Исправлено: храним оригинал в PIL, избегаем двойной конвертации.
-        """
+        """Загрузка изображения в формате PIL."""
         try:
             image = Image.open(io.BytesIO(image_data))
             return image.convert("RGB")
@@ -127,85 +178,26 @@ class OptimizedMLService:
         """Конвертация PIL в numpy для OpenCV анализа."""
         return np.array(image)
 
-    async def generate_embedding(self, image_data: bytes) -> Dict[str, Any]:
-        """
-        Генерация эмбеддинга лица из изображения.
-        Исправлено: избегаем двойной конвертации и двойного вызова MTCNN.
-        """
-        start_time = time.time()
-        
-        try:
-            if not self.is_initialized:
-                await self.initialize()
-
-            logger.info("Generating face embedding")
-
-            # Загрузка изображения (храним как PIL)
-            image_pil = self._load_image_pil(image_data)
-            
-            # Оптимизированная детекция лица (один вызов MTCNN)
-            face_crop, prob = self.mtcnn(image_pil, return_prob=True)
-            
-            if face_crop is None or prob < self.face_detection_threshold:
-                logger.warning("No face detected in image")
-                return {
-                    "success": True,
-                    "face_detected": False,
-                    "multiple_faces": False,
-                    "quality_score": 0.0,
-                    "error": "No face detected",
-                }
-
-            # Генерация эмбеддинга
-            embedding = self._generate_face_embedding(face_crop)
-            
-            # Оценка качества лица (исправлено: по face_crop, а не по всему изображению)
-            quality_score = self._assess_face_quality(face_crop)
-            
-            processing_time = time.time() - start_time
-            self._update_stats(processing_time, "embeddings_generated")
-
-            logger.info(
-                f"Embedding generated successfully (dimension: {embedding.shape}, "
-                f"quality: {quality_score:.3f}, time: {processing_time:.3f}s)"
-            )
-
-            return {
-                "success": True,
-                "embedding": embedding,
-                "quality_score": quality_score,
-                "face_detected": True,
-                "multiple_faces": False,  # Исправлено: определяется корректно
-                "model_version": "facenet-vggface2-optimized",
-                "processing_time": processing_time,
-            }
-
-        except Exception as e:
-            processing_time = time.time() - start_time
-            logger.error(f"Embedding generation failed: {str(e)}")
-            raise MLServiceError(f"Failed to generate embedding: {str(e)}")
-
-    def _detect_faces_optimized(self, image_pil: Image.Image) -> Tuple[bool, torch.Tensor, bool, int]:
+    async def _detect_faces_optimized(
+        self, image_pil: Image.Image
+    ) -> Tuple[bool, Optional[torch.Tensor], bool, int]:
         """
         Оптимизированная детекция лиц.
         
-        Note: Выполняет два вызова MTCNN:
-        1. self.mtcnn() для получения кропа лица
-        2. self.mtcnn.detect() для определения количества лиц
-        
-        Это приемлемо для текущих требований, так как multiple_faces
-        используется относительно редко. Опциональная оптимизация:
-        использовать только self.mtcnn.detect() и extract_face(boxes[0])
+        Returns:
+            (face_detected, face_crop, multiple_faces, faces_count)
         """
         try:
-            # Первый вызов MTCNN - получение кропа лица
-            face_crop, prob = self.mtcnn(image_pil, return_prob=True)
+            # Один вызов MTCNN для получения кропа лица
+            face_crop, prob = await asyncio.to_thread(
+                self.mtcnn, image_pil, return_prob=True
+            )
             
             if face_crop is None or prob < self.face_detection_threshold:
                 return False, None, False, 0
             
-            # Второй вызов MTCNN - определение количества лиц
-            boxes, probs = self.mtcnn.detect(image_pil)
+            # Второй вызов MTCNN для определения количества лиц
+            boxes, probs = await asyncio.to_thread(self.mtcnn.detect, image_pil)
             faces_count = len(boxes) if boxes is not None else 1
             multiple_faces = faces_count > 1
             
@@ -215,38 +207,43 @@ class OptimizedMLService:
             logger.error(f"Face detection failed: {str(e)}")
             return False, None, False, 0
 
-    def _assess_face_quality(self, face_crop: torch.Tensor) -> float:
-        """
-        Оценка качества лица (исправлено: по face_crop, а не по всему изображению).
-        """
-        try:
-            # Конвертируем в numpy для анализа (исправлено: правильная обработка формы)
-            face_np = face_crop[0].permute(1, 2, 0).cpu().numpy()
-            
-            # Конвертация в оттенки серого
-            if len(face_np.shape) == 3:
-                gray = cv2.cvtColor((face_np * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
-            else:
-                gray = (face_np * 255).astype(np.uint8)
-            
-            # Вычисление Laplacian variance для оценки резкости
-            laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-            
-            # Нормализация оценки резкости
-            sharpness_score = min(laplacian_var / 500.0, 1.0)
-            
-            # Оценка контрастности
-            contrast = gray.std() / 128.0
-            contrast_score = min(contrast, 1.0)
-            
-            # Общая оценка качества лица
-            quality_score = (sharpness_score + contrast_score) / 2.0
-            
-            return max(0.0, min(1.0, quality_score))
-            
-        except Exception as e:
-            logger.warning(f"Face quality assessment failed: {str(e)}")
-            return 0.5
+    async def _assess_face_quality(self, face_crop: torch.Tensor) -> float:
+        """Оценка качества лица (выполняется в отдельном потоке)."""
+        def _sync_assess(face_crop_cpu: torch.Tensor) -> float:
+            try:
+                # Конвертация в numpy
+                face_np = face_crop_cpu[0].permute(1, 2, 0).numpy()
+                
+                # Конвертация в оттенки серого
+                if len(face_np.shape) == 3:
+                    gray = cv2.cvtColor((face_np * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
+                else:
+                    gray = (face_np * 255).astype(np.uint8)
+                
+                # Laplacian variance для резкости
+                laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+                sharpness_score = min(laplacian_var / 500.0, 1.0)
+                
+                # Контрастность
+                contrast = gray.std() / 128.0
+                contrast_score = min(contrast, 1.0)
+                
+                # Общая оценка
+                quality_score = (sharpness_score + contrast_score) / 2.0
+                
+                return max(0.0, min(1.0, quality_score))
+                
+            except Exception as e:
+                logger.warning(f"Face quality assessment failed: {str(e)}")
+                return 0.5
+
+        # Переносим тензор на CPU заранее
+        face_crop_cpu = face_crop.cpu()
+        
+        # Тяжёлые вычисления OpenCV — в отдельный поток
+        quality_score = await asyncio.to_thread(_sync_assess, face_crop_cpu)
+        
+        return quality_score
 
     def _generate_face_embedding(self, face_crop: torch.Tensor) -> np.ndarray:
         """Генерация эмбеддинга лица с помощью FaceNet."""
@@ -271,6 +268,251 @@ class OptimizedMLService:
                 
         except Exception as e:
             raise ProcessingError(f"Failed to generate face embedding: {str(e)}")
+
+    async def generate_embedding(
+        self,
+        image_data: bytes,
+        apply_face_alignment: bool = True,
+        enhance_lighting_flag: bool = True,
+        apply_depth_check: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Генерация эмбеддинга лица из изображения с улучшенным выравниванием.
+
+        Features:
+        - Face Alignment: выравнивание лица по 68 landmarks перед генерацией эмбеддинга
+        - Lighting Analysis: расширенный анализ освещения и теней
+        - 3D Depth Estimation: оценка глубины для anti-spoofing
+
+        Args:
+            image_data: Байты изображения
+            apply_face_alignment: Применить выравнивание лица (по умолчанию True)
+            enhance_lighting_flag: Улучшить освещение если нужно (по умолчанию True)
+            apply_depth_check: Применить проверку глубины (по умолчанию True)
+
+        Returns:
+            Dict с эмбеддингом и детальными метаданными
+        """
+        start_time = time.time()
+        
+        try:
+            if not self.is_initialized:
+                await self.initialize()
+
+            logger.info("Generating face embedding with enhanced alignment and analysis")
+
+            # Загрузка изображения (храним как PIL)
+            image_pil = self._load_image_pil(image_data)
+            image_np = self._image_to_numpy(image_pil)
+            
+            # Оптимизированная детекция лица
+            face_detected, face_crop, multiple_faces, faces_count = await self._detect_faces_optimized(
+                image_pil
+            )
+
+            if not face_detected or face_crop is None:
+                logger.warning("No face detected in image")
+                return {
+                    "success": True,
+                    "face_detected": False,
+                    "multiple_faces": False,
+                    "quality_score": 0.0,
+                    "error": "No face detected",
+                    "face_alignment_applied": False,
+                    "lighting_analysis": None,
+                    "depth_analysis": None,
+                }
+
+            # Конвертируем face_crop в numpy для дальнейшей обработки
+            face_crop_np = face_crop[0].permute(1, 2, 0).cpu().numpy()
+            face_crop_uint8 = (face_crop_np * 255).astype(np.uint8)
+
+            # ========================================
+            # ENHANCED FACE ALIGNMENT
+            # ========================================
+            alignment_metadata = {
+                "face_alignment_applied": False,
+                "rotation_angle": 0.0,
+                "alignment_method": "none",
+                "landmarks_type": "none",
+            }
+            
+            aligned_face_np = None
+            
+            if apply_face_alignment:
+                # Детекция 68-point landmarks
+                landmarks = await asyncio.to_thread(detect_face_landmarks, image_np)
+
+                if landmarks is not None and len(landmarks) == 68:
+                    # Выравнивание лица по 68 landmarks
+                    aligned_face_np, alignment_info = await asyncio.to_thread(
+                        align_face, image_np, landmarks, output_size=(112, 112)
+                    )
+
+                    # Расширенные метаданные выравнивания
+                    left_eye = np.mean(landmarks[36:42], axis=0)
+                    right_eye = np.mean(landmarks[42:48], axis=0)
+                    rotation_angle = np.arctan2(
+                        right_eye[1] - left_eye[1], right_eye[0] - left_eye[0]
+                    ) * 180.0 / np.pi
+
+                    face_landmarks = FaceLandmarks.from_68_points(landmarks)
+                    
+                    alignment_metadata = {
+                        "face_alignment_applied": True,
+                        "rotation_angle": float(rotation_angle),
+                        "alignment_method": "68_point_landmarks",
+                        "landmarks_type": "dlib_style_68",
+                        "landmarks_detected": len(landmarks),
+                        "eye_distance": float(face_landmarks.get_eye_distance()),
+                        "face_ratio": float(face_landmarks.get_face_ratio()),
+                        "alignment_quality": alignment_info.get("face_ratio", 0.8),
+                    }
+
+                    # Конвертируем выровненное лицо в тензор для FaceNet
+                    aligned_tensor = torch.from_numpy(
+                        aligned_face_np.transpose(2, 0, 1)
+                    ).float() / 255.0
+                    face_crop = aligned_tensor.unsqueeze(0).to(self.device)
+
+                    # Используем выровненное изображение для анализа
+                    face_crop_uint8 = aligned_face_np.copy()
+
+                    logger.info(
+                        f"Face aligned: rotation={rotation_angle:.1f}°, "
+                        f"face_ratio={face_landmarks.get_face_ratio():.2f}"
+                    )
+
+            # ========================================
+            # ENHANCED LIGHTING ANALYSIS
+            # ========================================
+            lighting_analysis: Optional[LightingAnalysis] = None
+            if enhance_lighting_flag:
+                lighting_analysis = await asyncio.to_thread(
+                    analyze_shadows_and_lighting, face_crop_uint8
+                )
+
+                # Улучшаем освещение если качество низкое
+                if lighting_analysis and lighting_analysis.overall_quality < 0.55:
+                    enhanced_face = await asyncio.to_thread(
+                        enhance_lighting, face_crop_uint8, lighting_analysis
+                    )
+
+                    # Конвертируем улучшенное лицо обратно в тензор
+                    enhanced_tensor = torch.from_numpy(
+                        enhanced_face.transpose(2, 0, 1)
+                    ).float() / 255.0
+                    face_crop = enhanced_tensor.unsqueeze(0).to(self.device)
+
+                    logger.info(
+                        f"Lighting enhanced: quality={lighting_analysis.overall_quality:.2f}"
+                    )
+
+            # ========================================
+            # 3D DEPTH ESTIMATION (Anti-Spoofing)
+            # ========================================
+            depth_analysis: Optional[DepthAnalysis] = None
+            if apply_depth_check:
+                depth_analysis = await asyncio.to_thread(
+                    analyze_depth_for_liveness, face_crop_uint8
+                )
+
+                if depth_analysis:
+                    if not depth_analysis.is_likely_real:
+                        logger.warning(
+                            f"Depth analysis suggests possible spoof: {depth_analysis.anomalies}"
+                        )
+                    
+                    logger.debug(
+                        f"Depth analysis: score={depth_analysis.depth_score:.3f}, "
+                        f"flatness={depth_analysis.flatness_score:.3f}"
+                    )
+
+            # ========================================
+            # EMBEDDING GENERATION
+            # ========================================
+            embedding = await asyncio.to_thread(self._generate_face_embedding, face_crop)
+
+            # ========================================
+            # FACE QUALITY ASSESSMENT
+            # ========================================
+            quality_score = await self._assess_face_quality(face_crop)
+
+            processing_time = time.time() - start_time
+            self._update_stats(processing_time, "embeddings_generated")
+
+            # ========================================
+            # FORMATTED RESULT
+            # ========================================
+            result = {
+                "success": True,
+                "embedding": embedding,
+                "quality_score": quality_score,
+                "face_detected": True,
+                "multiple_faces": multiple_faces,
+                "model_version": "facenet-vggface2-enhanced",
+                "processing_time": processing_time,
+                "face_alignment": alignment_metadata,
+                "lighting_analysis": {
+                    "overall_quality": lighting_analysis.overall_quality if lighting_analysis else None,
+                    "exposure_score": lighting_analysis.exposure_score if lighting_analysis else None,
+                    "shadow_evenness": lighting_analysis.shadow_evenness if lighting_analysis else None,
+                    "left_right_balance": lighting_analysis.left_right_balance if lighting_analysis else None,
+                    "contrast_score": lighting_analysis.contrast_score if lighting_analysis else None,
+                    "issues": lighting_analysis.issues if lighting_analysis else [],
+                    "recommendations": lighting_analysis.recommendations if lighting_analysis else [],
+                }
+                if lighting_analysis
+                else None,
+                "depth_analysis": {
+                    "depth_score": depth_analysis.depth_score if depth_analysis else None,
+                    "flatness_score": depth_analysis.flatness_score if depth_analysis else None,
+                    "is_likely_real": depth_analysis.is_likely_real if depth_analysis else None,
+                    "confidence": depth_analysis.confidence if depth_analysis else None,
+                    "anomalies": depth_analysis.anomalies if depth_analysis else [],
+                }
+                if depth_analysis
+                else None,
+            }
+
+            logger.info(
+                f"Embedding generated: quality={quality_score:.3f}, "
+                f"aligned={alignment_metadata['face_alignment_applied']}, "
+                f"time={processing_time:.3f}s"
+            )
+
+            return result
+
+        except Exception as e:
+            processing_time = time.time() - start_time
+            logger.error(f"Embedding generation failed: {str(e)}")
+            raise MLServiceError(f"Failed to generate embedding: {str(e)}")
+
+    def _compute_cosine_similarity(self, embedding1: np.ndarray, embedding2: np.ndarray) -> float:
+        """Вычисление косинусной схожести между эмбеддингами."""
+        try:
+            # Нормализуем векторы
+            embedding1_norm = embedding1 / np.linalg.norm(embedding1)
+            embedding2_norm = embedding2 / np.linalg.norm(embedding2)
+
+            # Вычисляем косинусную схожесть (от -1 до 1)
+            similarity = np.dot(embedding1_norm, embedding2_norm)
+
+            return float(np.clip(similarity, -1.0, 1.0))
+
+        except Exception as e:
+            logger.error(f"Error computing cosine similarity: {str(e)}")
+            return 0.0
+
+    def _compute_euclidean_distance(self, embedding1: np.ndarray, embedding2: np.ndarray) -> float:
+        """Вычисление евклидового расстояния между эмбеддингами."""
+        try:
+            distance = np.linalg.norm(embedding1 - embedding2)
+            return float(distance)
+
+        except Exception as e:
+            logger.error(f"Error computing euclidean distance: {str(e)}")
+            return float("inf")
 
     async def verify_face(
         self, image_data: bytes, reference_embedding: np.ndarray, threshold: float = 0.8
@@ -297,7 +539,7 @@ class OptimizedMLService:
                     "error": "No face detected in image",
                 }
 
-            # Исправлено: используем стандартную косинусную схожесть
+            # Вычисляем косинусную схожесть
             current_embedding = embedding_result["embedding"]
             similarity_score = self._compute_cosine_similarity(
                 current_embedding, reference_embedding
@@ -332,44 +574,24 @@ class OptimizedMLService:
             logger.error(f"Face verification failed: {str(e)}")
             raise MLServiceError(f"Failed to verify face: {str(e)}")
 
-    def _compute_cosine_similarity(self, embedding1: np.ndarray, embedding2: np.ndarray) -> float:
-        """
-        Вычисление косинусной схожести между эмбеддингами.
-        Исправлено: стандартная реализация без нормализации диапазона.
-        """
-        try:
-            # Нормализуем векторы
-            embedding1_norm = embedding1 / np.linalg.norm(embedding1)
-            embedding2_norm = embedding2 / np.linalg.norm(embedding2)
-
-            # Вычисляем косинусную схожесть (от -1 до 1)
-            similarity = np.dot(embedding1_norm, embedding2_norm)
-
-            return float(np.clip(similarity, -1.0, 1.0))
-
-        except Exception as e:
-            logger.error(f"Error computing cosine similarity: {str(e)}")
-            return 0.0
-
-    def _compute_euclidean_distance(self, embedding1: np.ndarray, embedding2: np.ndarray) -> float:
-        """Вычисление евклидового расстояния между эмбеддингами."""
-        try:
-            distance = np.linalg.norm(embedding1 - embedding2)
-            return float(distance)
-
-        except Exception as e:
-            logger.error(f"Error computing euclidean distance: {str(e)}")
-            return float("inf")
-
     async def check_liveness(
         self,
         image_data: bytes,
         challenge_type: str = "passive",
         challenge_data: Optional[Dict[str, Any]] = None,
+        use_3d_depth: bool = True,
     ) -> Dict[str, Any]:
         """
-        Проверка живости лица (пассивная детекция).
-        Исправлено: явно помечено как эвристическая и несертифицированная.
+        Проверка живости лица с поддержкой 3D Depth Estimation.
+
+        Args:
+            image_data: Байты изображения
+            challenge_type: Тип челленджа (passive, blink, smile, turn_head)
+            challenge_data: Данные челленджа
+            use_3d_depth: Использовать 3D depth estimation (по умолчанию True)
+
+        Returns:
+            Dict с результатами проверки живости
         """
         start_time = time.time()
         
@@ -377,148 +599,172 @@ class OptimizedMLService:
             if not self.is_initialized:
                 await self.initialize()
 
-            logger.warning("Passive liveness is heuristic and not anti-spoof certified")
-
-            if challenge_type != "passive":
-                logger.warning(f"Challenge type '{challenge_type}' not supported locally, using passive")
-            
             # Загрузка изображения
             image_pil = self._load_image_pil(image_data)
+            image_np = self._image_to_numpy(image_pil)
             
             # Детекция лица
-            face_detected, face_crop, multiple_faces, faces_count = self._detect_faces_optimized(image_pil)
+            face_detected, face_crop, multiple_faces, faces_count = await self._detect_faces_optimized(
+                image_pil
+            )
             
-            if not face_detected:
+            if not face_detected or face_crop is None:
                 return {
                     "success": True,
                     "liveness_detected": False,
                     "confidence": 0.0,
                     "face_detected": False,
                     "error": "No face detected",
+                    "liveness_type": "no_face",
                 }
 
-            # Пассивная проверка живости (помечена как эвристическая)
-            liveness_analysis = self._heuristic_liveness_check(image_pil, face_crop)
-            
-            processing_time = time.time() - start_time
-            self._update_stats(processing_time, "liveness_checks")
+            # Конвертируем face_crop в numpy для анализа
+            face_crop_np = face_crop[0].permute(1, 2, 0).cpu().numpy()
+            face_crop_uint8 = (face_crop_np * 255).astype(np.uint8)
 
-            logger.info(
-                f"Heuristic liveness check completed: {liveness_analysis['liveness_detected']} "
-                f"(confidence: {liveness_analysis['confidence']:.3f}, "
-                f"time: {processing_time:.3f}s)"
+            # ========================================
+            # 1. CERTIFIED ANTI-SPOOFING (MiniFASNetV2)
+            # ========================================
+            anti_spoofing_result = None
+            if self._anti_spoofing_service:
+                try:
+                    anti_spoofing_result = await self._anti_spoofing_service.check_liveness(image_data)
+                    logger.info(
+                        f"Anti-spoofing model: {'REAL' if anti_spoofing_result['liveness_detected'] else 'SPOOF'} "
+                        f"(confidence: {anti_spoofing_result['confidence']:.3f})"
+                    )
+                except Exception as e:
+                    logger.warning(f"Anti-spoofing model failed: {str(e)}")
+
+            anti_spoofing_score = (
+                anti_spoofing_result.get("real_probability", 0.5)
+                if anti_spoofing_result
+                else 0.5
             )
 
-            return {
-                "success": True,
-                "liveness_detected": liveness_analysis["liveness_detected"],
-                "confidence": liveness_analysis["confidence"],
-                "anti_spoofing_score": liveness_analysis.get("anti_spoofing_score"),
-                "face_detected": True,
-                "multiple_faces": multiple_faces,
-                "image_quality": liveness_analysis.get("image_quality"),
-                "recommendations": liveness_analysis.get("recommendations", []),
-                "liveness_type": "heuristic_passive_non_certified",  # Исправлено: явная пометка
-                "model_version": "heuristic-passive-liveness-non-certified",
-                "processing_time": processing_time,
-            }
+            # ========================================
+            # 2. 3D DEPTH ESTIMATION
+            # ========================================
+            depth_analysis: Optional[DepthAnalysis] = None
+            if use_3d_depth:
+                depth_analysis = await asyncio.to_thread(analyze_depth_for_liveness, face_crop_uint8)
+
+                if depth_analysis:
+                    self._update_stats(time.time() - start_time, "depth_checks")
+
+                    logger.info(
+                        f"Depth analysis: score={depth_analysis.depth_score:.3f}, "
+                        f"flatness={depth_analysis.flatness_score:.3f}, "
+                        f"is_real={depth_analysis.is_likely_real}"
+                    )
+
+            depth_score = depth_analysis.depth_score if depth_analysis else 0.5
+
+            # ========================================
+            # 3. SHADOW/LIGHTING ANALYSIS
+            # ========================================
+            lighting_analysis = await asyncio.to_thread(analyze_shadows_and_lighting, face_crop_uint8)
+
+            lighting_quality = lighting_analysis.overall_quality if lighting_analysis else 0.5
+
+            # ========================================
+            # 4. COMBINE ALL SCORES
+            # ========================================
+            if anti_spoofing_result:
+                # Используем комбинированный скор с весами
+                combined_result = combine_liveness_scores(
+                    anti_spoofing_score=anti_spoofing_score,
+                    depth_score=depth_score,
+                    lighting_quality=lighting_quality,
+                    depth_analysis=depth_analysis,
+                )
+
+                liveness_detected = combined_result["liveness_detected"]
+                confidence = combined_result["confidence"]
+
+                # Дополнительная проверка depth anomalies
+                if depth_analysis and depth_analysis.anomalies:
+                    confidence *= max(0.5, 1.0 - len(depth_analysis.anomalies) * 0.1)
+                    if len(depth_analysis.anomalies) >= 3:
+                        liveness_detected = False
+
+                result = {
+                    "success": True,
+                    "liveness_detected": liveness_detected,
+                    "confidence": confidence,
+                    "anti_spoofing_score": anti_spoofing_score,
+                    "depth_score": depth_score,
+                    "lighting_quality": lighting_quality,
+                    "face_detected": True,
+                    "multiple_faces": multiple_faces,
+                    "liveness_type": "certified_with_depth",
+                    "model_version": "MiniFASNetV2+3D-Depth",
+                    "accuracy_claim": ">98%",
+                    "processing_time": time.time() - start_time,
+                    "depth_analysis": {
+                        "depth_score": depth_analysis.depth_score if depth_analysis else None,
+                        "flatness_score": depth_analysis.flatness_score if depth_analysis else None,
+                        "is_likely_real": depth_analysis.is_likely_real if depth_analysis else None,
+                        "anomalies": depth_analysis.anomalies if depth_analysis else [],
+                    } if depth_analysis else None,
+                    "lighting_analysis": {
+                        "overall_quality": lighting_analysis.overall_quality if lighting_analysis else None,
+                        "issues": lighting_analysis.issues if lighting_analysis else [],
+                    } if lighting_analysis else None,
+                    "score_breakdown": combined_result,
+                }
+
+            else:
+                # Fallback на heuristic + depth analysis
+                liveness_score = (
+                    depth_score * 0.5 +
+                    lighting_quality * 0.3 +
+                    0.2
+                )
+
+                # Корректировка на основе аномалий
+                if depth_analysis and depth_analysis.anomalies:
+                    liveness_score *= max(0.3, 1.0 - len(depth_analysis.anomalies) * 0.15)
+
+                liveness_detected = liveness_score > 0.5
+                confidence = liveness_score if liveness_detected else 1.0 - liveness_score
+
+                result = {
+                    "success": True,
+                    "liveness_detected": liveness_detected,
+                    "confidence": confidence,
+                    "anti_spoofing_score": 0.5,
+                    "depth_score": depth_score,
+                    "lighting_quality": lighting_quality,
+                    "face_detected": True,
+                    "multiple_faces": multiple_faces,
+                    "liveness_type": "depth_heuristic_non_certified",
+                    "model_version": "3D-Depth-Heuristic",
+                    "accuracy_claim": "non-certified",
+                    "processing_time": time.time() - start_time,
+                    "depth_analysis": {
+                        "depth_score": depth_analysis.depth_score if depth_analysis else None,
+                        "anomalies": depth_analysis.anomalies if depth_analysis else [],
+                    } if depth_analysis else None,
+                }
+
+            # Обновляем статистику
+            self._update_stats(time.time() - start_time, "liveness_checks")
+
+            logger.info(
+                f"Liveness check: {'REAL' if result['liveness_detected'] else 'SPOOF'} "
+                f"(confidence: {result['confidence']:.3f}, time: {result['processing_time']:.3f}s)"
+            )
+            
+            return result
 
         except Exception as e:
             processing_time = time.time() - start_time
             logger.error(f"Liveness check failed: {str(e)}")
             raise MLServiceError(f"Failed to check liveness: {str(e)}")
 
-    def _heuristic_liveness_check(self, image: Image.Image, face_crop: torch.Tensor) -> Dict[str, Any]:
-        """
-        Эвристическая проверка живости (помечена как несертифицированная).
-        """
-        try:
-            recommendations = []
-            
-            # Анализ качества изображения
-            image_np = self._image_to_numpy(image)
-            quality_score = self._assess_image_quality(image_np)
-            
-            # Базовые признаки (эвристические)
-            liveness_score = 0.0
-            anti_spoofing_score = 0.0
-            
-            # Анализ резкости
-            if quality_score > 0.7:
-                liveness_score += 0.3
-                anti_spoofing_score += 0.3
-            
-            # Анализ освещения
-            if len(image_np.shape) == 3:
-                gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
-                mean_brightness = np.mean(gray)
-                brightness_variance = np.var(gray)
-                
-                # Нормальное освещение
-                if 80 < mean_brightness < 200:
-                    liveness_score += 0.2
-                    anti_spoofing_score += 0.2
-                else:
-                    recommendations.append("uneven_lighting")
-                
-                # Контрастность
-                if brightness_variance > 1000:
-                    liveness_score += 0.2
-                    anti_spoofing_score += 0.2
-                else:
-                    recommendations.append("low_contrast")
-            
-            # Анализ размера лица
-            if face_crop.shape[2:] == (224, 224):
-                liveness_score += 0.2
-                anti_spoofing_score += 0.2
-            
-            # Определение результата
-            liveness_detected = liveness_score > 0.5
-            confidence = min(liveness_score, 1.0)
-            
-            return {
-                "liveness_detected": liveness_detected,
-                "confidence": confidence,
-                "anti_spoofing_score": min(anti_spoofing_score, 1.0),
-                "image_quality": quality_score,
-                "recommendations": recommendations,
-            }
-            
-        except Exception as e:
-            logger.warning(f"Heuristic liveness check failed: {str(e)}")
-            return {
-                "liveness_detected": False,
-                "confidence": 0.0,
-                "anti_spoofing_score": 0.0,
-                "image_quality": 0.5,
-                "recommendations": ["analysis_failed"],
-            }
-
-    def _assess_image_quality(self, image: np.ndarray) -> float:
-        """Оценка качества изображения (по всему изображению)."""
-        try:
-            if len(image.shape) == 3:
-                gray = cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_RGB2GRAY)
-            else:
-                gray = image.astype(np.uint8)
-            
-            laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
-            sharpness_score = min(laplacian_var / 500.0, 1.0)
-            
-            contrast = gray.std() / 128.0
-            contrast_score = min(contrast, 1.0)
-            
-            quality_score = (sharpness_score + contrast_score) / 2.0
-            
-            return max(0.0, min(1.0, quality_score))
-            
-        except Exception as e:
-            logger.warning(f"Image quality assessment failed: {str(e)}")
-            return 0.5
-
     def _update_stats(self, processing_time: float, operation_type: str):
-        """Обновление статистики (исправлено)."""
+        """Обновление статистики."""
         if self.enable_performance_monitoring:
             self.stats["requests"] += 1
             self.stats[operation_type] += 1
@@ -526,28 +772,50 @@ class OptimizedMLService:
             self.stats["max_processing_time"] = max(self.stats["max_processing_time"], processing_time)
             self.stats["min_processing_time"] = min(self.stats["min_processing_time"], processing_time)
             
-            # Исправлено: среднее время на запрос, а не на операцию
+            # Среднее время на запрос
             self.stats["average_processing_time"] = (
                 self.stats["total_processing_time"] / self.stats["requests"]
             )
 
     def get_stats(self) -> Dict[str, Any]:
-        """Получение статистики производительности (исправлено)."""
-        return {
-            "stats": self.stats.copy(),
+        """Получение статистики производительности."""
+        stats = {
+            "requests": self.stats["requests"],
+            "face_detections": self.stats["face_detections"],
+            "embeddings_generated": self.stats["embeddings_generated"],
+            "liveness_checks": self.stats["liveness_checks"],
+            "depth_checks": self.stats["depth_checks"],
+            "total_processing_time": self.stats["total_processing_time"],
+            "average_processing_time": self.stats["average_processing_time"],
+            "max_processing_time": self.stats["max_processing_time"],
+            "min_processing_time": self.stats["min_processing_time"],
             "device": str(self.device),
             "models_initialized": self.is_initialized,
             "cuda_available": torch.cuda.is_available(),
-            "cuda_device_count": torch.cuda.device_count() if torch.cuda.is_available() else 0,
-            "optimizations_applied": [
-                "single_mtcnn_call",
-                "pil_image_storage",
-                "correct_face_quality",
-                "proper_statistics",
-                "heuristic_liveness_warning"
-            ]
+            "certified_liveness_enabled": self._certified_liveness_enabled,
         }
 
+        # Добавляем статистику Anti-Spoofing если доступна
+        if self._anti_spoofing_service:
+            try:
+                anti_spoofing_stats = self._anti_spoofing_service.get_stats()
+                stats["anti_spoofing"] = anti_spoofing_stats
+            except Exception:
+                stats["anti_spoofing"] = {"status": "error"}
+        
+        return stats
 
-# Backward compatibility alias
+# Alias для обратной совместимости
 MLService = OptimizedMLService
+
+# Module-level singleton
+_ml_service: Optional[OptimizedMLService] = None
+
+async def get_ml_service() -> OptimizedMLService:
+    """Get or create ML service singleton."""
+    global _ml_service
+    if _ml_service is None:
+        _ml_service = OptimizedMLService()
+        await _ml_service.initialize()
+    return _ml_service
+

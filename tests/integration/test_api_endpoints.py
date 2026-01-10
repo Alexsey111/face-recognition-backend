@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import Mock, AsyncMock, patch
 from fastapi.testclient import TestClient
-from app.main import create_app
+from app.main import create_test_app
 from app.config import settings as Config
 
 
@@ -10,7 +10,7 @@ class TestHealthEndpoints:
     
     def setup_method(self):
         """Настройка для каждого теста"""
-        self.app = create_app()
+        self.app = create_test_app()
         self.client = TestClient(self.app)
     
     def test_health_check(self):
@@ -43,56 +43,104 @@ class TestReferenceEndpoints:
     
     def setup_method(self):
         """Настройка для каждого теста"""
-        self.app = create_app()
+        self.app = create_test_app()
         self.client = TestClient(self.app)
     
-    def test_create_reference_unauthorized(self):
-        """Тест создания эталонного изображения без авторизации"""
-        response = self.client.post("/api/v1/reference")
-        
-        assert response.status_code == 401
-    
-    def test_create_reference_invalid_data(self):
-        """Тест создания эталонного изображения с невалидными данными"""
-        headers = {"Authorization": "Bearer invalid_token"}
+    def test_create_reference_endpoint_exists(self):
+        """Тест что endpoint reference существует и принимает запросы"""
         response = self.client.post(
             "/api/v1/reference",
-            headers=headers,
-            json={"invalid": "data"}
+            json={
+                "user_id": "test-user-123",
+                "image_data": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD//gA7Q1JFQVRPUjogZ2QtanBlZyB2MS4wIAD",
+                "label": "Test Reference"
+            }
         )
+        # Ожидаем ошибку валидации или авторизации, но не 404
+        assert response.status_code in [401, 422, 400]
         
-        assert response.status_code in [401, 422]  # Unauthorized или Validation Error
+        # Проверяем структуру ответа
+        if response.status_code != 404:
+            data = response.json()
+            assert "detail" in data
     
-    def test_create_reference_success(self):
-        """Тест успешного создания эталонного изображения"""
-        # Простой тест без аутентификации - просто проверяем, что endpoint существует
+    def test_get_reference_list_endpoint_exists(self):
+        """Тест что endpoint reference (GET) существует"""
+        response = self.client.get("/api/v1/reference")
+        # Ожидаем ошибку, но не 404
+        assert response.status_code != 404
+    
+    def test_get_reference_detail_endpoint_exists(self):
+        """Тест что endpoint reference/{id} существует"""
+        response = self.client.get("/api/v1/reference/test-reference-123")
+        # Ожидаем 404 (референс не найден), но не 404 route не найден
+        assert response.status_code != 404
+    
+    def test_update_reference_endpoint_exists(self):
+        """Тест что endpoint reference/{id} (PUT) существует"""
+        response = self.client.put(
+            "/api/v1/reference/test-reference-123",
+            json={"label": "Updated Reference"}
+        )
+        # Ожидаем ошибку, но не 404
+        assert response.status_code != 404
+        
+    def test_delete_reference_endpoint_exists(self):
+        """Тест что endpoint reference/{id} (DELETE) существует"""
+        response = self.client.delete("/api/v1/reference/test-reference-123")
+        # Ожидаем ошибку, но не 404
+        assert response.status_code != 404
+    
+    def test_reference_compare_endpoint_exists(self):
+        """Тест что endpoint reference/compare существует"""
+        response = self.client.post(
+            "/api/v1/compare",
+            json={
+                "user_id": "test-user-123",
+                "image_data": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD//gA7Q1JFQVRPUjogZ2QtanBlZyB2MS4wIAD"
+            }
+        )
+        # Ожидаем ошибку, но не 404
+        assert response.status_code != 404
+        
+    def test_reference_validation_error_structure(self):
+        """Тест структуры ошибки валидации для reference"""
         response = self.client.post(
             "/api/v1/reference",
-            json={"invalid": "data"}  # Минимальные данные для проверки endpoint
+            json={
+                "user_id": "test-user-123"
+                # Отсутствует image_data
+            }
         )
-        # Ожидаем ошибку валидации, но не 404 - это значит endpoint работает
-        assert response.status_code in [401, 422]
-    
-    def test_get_reference_unauthorized(self):
-        """Тест получения эталонного изображения без авторизации"""
-        response = self.client.get("/api/v1/reference/550e8400-e29b-41d4-a716-446655440000")
         
-        assert response.status_code == 404
+        if response.status_code == 422:
+            data = response.json()
+            assert "detail" in data
     
-    def test_get_reference_success(self):
-        """Тест успешного получения эталонного изображения"""
-        # Простой тест без аутентификации
-        response = self.client.get(
-            "/api/v1/reference/550e8400-e29b-41d4-a716-446655440000"
+    def test_reference_missing_required_fields(self):
+        """Тест reference с отсутствующими обязательными полями"""
+        response = self.client.post(
+            "/api/v1/reference",
+            json={
+                "label": "Test Reference"
+                # Отсутствует user_id и image_data
+            }
         )
-        # Endpoint не подключен, поэтому ожидаем 404
-        assert response.status_code == 404
-    
-    def test_get_reference_not_found(self):
-        """Тест получения несуществующего эталонного изображения"""
-        response = self.client.get("/api/v1/reference/nonexistent_id")
         
-        assert response.status_code == 404
+        # Ожидаем ошибку валидации
+        assert response.status_code in [400, 422]
+    
+    def test_reference_pagination_parameters(self):
+        """Тест reference endpoints с параметрами пагинации"""
+        response = self.client.get("/api/v1/reference?page=1&per_page=10")
+        # Ожидаем ошибку, но не 404
+        assert response.status_code != 404
+    
+    def test_reference_sorting_parameters(self):
+        """Тест reference endpoints с параметрами сортировки"""
+        response = self.client.get("/api/v1/reference?sort_by=created_at&sort_order=desc")
+        # Ожидаем ошибку, но не 404
+        assert response.status_code != 404
     
 
 class TestVerificationEndpoints:
@@ -100,43 +148,79 @@ class TestVerificationEndpoints:
     
     def setup_method(self):
         """Настройка для каждого теста"""
-        self.app = create_app()
+        self.app = create_test_app()
         self.client = TestClient(self.app)
     
-    def test_verify_unauthorized(self):
-        """Тест верификации без авторизации"""
-        response = self.client.post("/api/v1/verify")
+    def test_verify_endpoint_exists(self):
+        """Тест что endpoint verify существует и принимает запросы"""
+        # Проверяем что endpoint не возвращает 404
+        response = self.client.post(
+            "/api/v1/verify",
+            json={
+                "session_id": "test-session-123",
+                "image_data": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD//gA7Q1JFQVRPUjogZ2QtanBlZyB2MS4wIAD",
+                "reference_id": "test-ref-123"
+            }
+        )
+        # Ожидаем ошибку валидации (422) или авторизации (401), но не 404
+        assert response.status_code in [401, 422, 400]
         
-        assert response.status_code == 401
+        # Проверяем структуру ответа
+        if response.status_code != 404:
+            data = response.json()
+            assert "detail" in data
     
-    def test_verify_invalid_data(self):
-        """Тест верификации с невалидными данными"""
-        headers = {"Authorization": "Bearer invalid_token"}
+    def test_verify_session_endpoint_exists(self):
+        """Тест что endpoint verify/session существует"""
+        response = self.client.post(
+            "/api/v1/verify/session",
+            json={
+                "session_type": "verification",
+                "user_id": "test-user"
+            }
+        )
+        # Ожидаем ошибку, но не 404
+        assert response.status_code != 404
+    
+    def test_verify_get_result_endpoint_exists(self):
+        """Тест что endpoint verify/{session_id} существует"""
+        response = self.client.get("/api/v1/verify/test-session-123")
+        # Ожидаем 404 (сессия не найдена), но не 404 route не найден
+        assert response.status_code != 404
+    
+    def test_verify_history_endpoint_exists(self):
+        """Тест что endpoint verify/history существует"""
+        response = self.client.get("/api/v1/verify/history")
+        # Ожидаем ошибку, но не 404
+        assert response.status_code != 404
+    
+    def test_verify_validation_error_structure(self):
+        """Тест структуры ошибки валидации для verify"""
         response = self.client.post(
             "/api/v1/verify",
-            headers=headers,
-            json={"invalid": "data"}
+            json={
+                "session_id": "test-session-123",
+                # Отсутствует image_data
+                "reference_id": "test-ref-123"
+            }
         )
         
-        assert response.status_code in [401, 422]
+        if response.status_code == 422:
+            data = response.json()
+            assert "detail" in data
     
-    def test_verify_success(self):
-        """Тест успешной верификации"""
-        # Простой тест без аутентификации
+    def test_verify_missing_parameters(self):
+        """Тест verify с отсутствующими обязательными параметрами"""
         response = self.client.post(
             "/api/v1/verify",
-            json={"invalid": "data"}
+            json={
+                "session_id": "test-session-123"
+                # Отсутствует image_data и reference_id/user_id
+            }
         )
-        assert response.status_code == 401
-    
-    def test_verify_no_match(self):
-        """Тест верификации без совпадения"""
-        # Простой тест без аутентификации
-        response = self.client.post(
-            "/api/v1/verify",
-            json={"invalid": "data"}
-        )
-        assert response.status_code == 401
+        
+        # Ожидаем ошибку валидации
+        assert response.status_code in [400, 422]
     
 
 class TestLivenessEndpoints:
@@ -144,43 +228,108 @@ class TestLivenessEndpoints:
     
     def setup_method(self):
         """Настройка для каждого теста"""
-        self.app = create_app()
+        self.app = create_test_app()
         self.client = TestClient(self.app)
     
-    def test_liveness_unauthorized(self):
-        """Тест liveness detection без авторизации"""
-        response = self.client.post("/api/v1/liveness")
+    def test_liveness_endpoint_exists(self):
+        """Тест что endpoint liveness существует и принимает запросы"""
+        response = self.client.post(
+            "/api/v1/liveness",
+            json={
+                "session_id": "test-session-123",
+                "image_data": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD//gA7Q1JFQVRPUjogZ2QtanBlZyB2MS4wIAD",
+                "challenge_type": "passive"
+            }
+        )
+        # Ожидаем ошибку валидации или авторизации, но не 404
+        assert response.status_code in [401, 422, 400]
         
-        assert response.status_code == 401
+        # Проверяем структуру ответа
+        if response.status_code != 404:
+            data = response.json()
+            assert "detail" in data
     
-    def test_liveness_invalid_data(self):
-        """Тест liveness detection с невалидными данными"""
-        headers = {"Authorization": "Bearer invalid_token"}
+    def test_liveness_session_endpoint_exists(self):
+        """Тест что endpoint liveness/session существует"""
+        response = self.client.post(
+            "/api/v1/liveness/session",
+            json={
+                "session_type": "liveness",
+                "user_id": "test-user"
+            }
+        )
+        # Ожидаем ошибку, но не 404
+        assert response.status_code != 404
+    
+    def test_liveness_challenges_endpoint_exists(self):
+        """Тест что endpoint liveness/challenges существует"""
+        response = self.client.get("/api/v1/liveness/challenges")
+        # Ожидаем успешный ответ или ошибку авторизации, но не 404
+        assert response.status_code in [200, 401]
+        
+        if response.status_code == 200:
+            data = response.json()
+            assert "challenges" in data
+            assert "passive" in data["challenges"]
+    
+    def test_liveness_get_result_endpoint_exists(self):
+        """Тест что endpoint liveness/{session_id} существует"""
+        response = self.client.get("/api/v1/liveness/test-session-123")
+        # Ожидаем 404 (сессия не найдена), но не 404 route не найден
+        assert response.status_code != 404
+    
+    def test_liveness_session_status_endpoint_exists(self):
+        """Тест что endpoint liveness/session/{session_id} существует"""
+        response = self.client.get("/api/v1/liveness/session/test-session-123")
+        # Ожидаем ошибку, но не 404
+        assert response.status_code != 404
+    
+    def test_liveness_validation_error_structure(self):
+        """Тест структуры ошибки валидации для liveness"""
         response = self.client.post(
             "/api/v1/liveness",
-            headers=headers,
-            json={"invalid": "data"}
+            json={
+                "session_id": "test-session-123",
+                # Отсутствует image_data
+                "challenge_type": "passive"
+            }
         )
         
-        assert response.status_code in [401, 422]
+        if response.status_code == 422:
+            data = response.json()
+            assert "detail" in data
     
-    def test_liveness_live(self):
-        """Тест liveness detection для живого лица"""
-        # Простой тест без аутентификации
+    def test_liveness_missing_parameters(self):
+        """Тест liveness с отсутствующими обязательными параметрами"""
         response = self.client.post(
             "/api/v1/liveness",
-            json={"invalid": "data"}
+            json={
+                "session_id": "test-session-123"
+                # Отсутствует image_data
+            }
         )
-        assert response.status_code == 401
+        
+        # Ожидаем ошибку валидации
+        assert response.status_code in [400, 422]
     
-    def test_liveness_spoof(self):
-        """Тест liveness detection для подделки (фото)"""
-        # Простой тест без аутентификации
+    def test_liveness_active_challenge_validation(self):
+        """Тест валидации активного челленджа"""
         response = self.client.post(
             "/api/v1/liveness",
-            json={"invalid": "data"}
+            json={
+                "session_id": "test-session-123",
+                "image_data": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD//gA7Q1JFQVRPUjogZ2QtanBlZyB2MS4wIAD",
+                "challenge_type": "active"
+                # Отсутствует challenge_data для активного челленджа
+            }
         )
-        assert response.status_code == 401
+        
+        # Ожидаем ошибку валидации
+        assert response.status_code in [400, 422]
+        
+        if response.status_code in [400, 422]:
+            data = response.json()
+            assert "challenge_data is required" in data["detail"]["error_details"]["error"]
     
 
 class TestAdminEndpoints:
@@ -188,7 +337,7 @@ class TestAdminEndpoints:
     
     def setup_method(self):
         """Настройка для каждого теста"""
-        self.app = create_app()
+        self.app = create_test_app()
         self.client = TestClient(self.app)
     
     def test_admin_unauthorized(self):

@@ -6,11 +6,10 @@ API роуты для загрузки изображений (Phase 5).
 from fastapi import (
     APIRouter, Depends, HTTPException, UploadFile, File, status
 )
-from sqlalchemy.orm import Session
 from datetime import datetime
 from typing import Dict, Any
 
-from ..db.database import get_db
+from ..db.database import get_async_db_manager
 from ..services.storage_service import StorageService
 from ..services.session_service import SessionService
 from ..services.database_service import DatabaseService
@@ -22,9 +21,14 @@ from ..routes.auth import get_current_user
 logger = get_logger(__name__)
 
 router = APIRouter(
-    prefix="/api/v1/upload",
+    prefix="/upload",
     tags=["upload"]
 )
+
+
+def get_storage_service():
+    """Фабричная функция для создания StorageService (для мокирования в тестах)"""
+    return StorageService()
 
 
 # =============================================================================
@@ -33,8 +37,7 @@ router = APIRouter(
 
 @router.post("/", response_model=Dict[str, Any])
 async def create_upload_session(
-    current_user_id: str = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user_id: str = Depends(get_current_user)
 ):
     """
     Создание сессии загрузки
@@ -50,15 +53,16 @@ async def create_upload_session(
         session = SessionService.create_session(current_user_id)
         
         # Логирование действия
-        from app.db.crud import AuditLogCRUD
-        await AuditLogCRUD.log_action(
-            db,
-            action="upload_session_created",
-            resource_type="upload_session",
-            resource_id=session.session_id,
-            user_id=current_user_id,
-            description=f"Создана сессия загрузки: {session.session_id}"
-        )
+        async with get_async_db_manager().get_session() as db:
+            from app.db.crud import AuditLogCRUD
+            await AuditLogCRUD.log_action(
+                db,
+                action="upload_session_created",
+                resource_type="upload_session",
+                resource_id=session.session_id,
+                user_id=current_user_id,
+                description=f"Создана сессия загрузки: {session.session_id}"
+            )
         
         logger.info(f"Сессия загрузки создана: {session.session_id}")
         
@@ -80,8 +84,7 @@ async def create_upload_session(
 async def upload_file_to_session(
     session_id: str,
     file: UploadFile = File(...),
-    current_user_id: str = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user_id: str = Depends(get_current_user)
 ):
     """
     Загрузка файла в сессию
@@ -115,7 +118,7 @@ async def upload_file_to_session(
             file_content,
             file.filename
         )
-        
+
         if not is_valid:
             logger.warning(f"Валидация файла не пройдена: {error_msg}")
             raise HTTPException(
@@ -142,7 +145,7 @@ async def upload_file_to_session(
         file_hash = FileUtils.calculate_file_hash(file_content)
         
         # Загрузка в MinIO
-        storage = StorageService()
+        storage = get_storage_service()
         result = await storage.upload_image(
             image_data=file_content,
             key=file_key,  # Передаем сгенерированный ключ
@@ -166,25 +169,26 @@ async def upload_file_to_session(
             file_size=file_size_mb,
             file_hash=file_hash
         )
-        
+
         # Логирование действия
-        from app.db.crud import AuditLogCRUD
-        await AuditLogCRUD.log_action(
-            db,
-            action="file_uploaded",
-            resource_type="upload_session",
-            resource_id=session_id,
-            user_id=current_user_id,
-            description=f"Файл загружен: {file.filename}",
-            new_values={
-                "file_key": file_key,
-                "file_size_mb": file_size_mb,
-                "file_hash": file_hash
-            }
-        )
+        async with get_async_db_manager().get_session() as db:
+            from app.db.crud import AuditLogCRUD
+            await AuditLogCRUD.log_action(
+                db,
+                action="file_uploaded",
+                resource_type="upload_session",
+                resource_id=session_id,
+                user_id=current_user_id,
+                description=f"Файл загружен: {file.filename}",
+                new_values={
+                    "file_key": file_key,
+                    "file_size_mb": file_size_mb,
+                    "file_hash": file_hash
+                }
+            )
         
         logger.info(f"Файл загружен: {file_key} ({file_size_mb:.1f}МБ)")
-        
+
         return {
             "file_key": file_key,
             "file_url": file_url,
@@ -216,7 +220,7 @@ async def get_upload_status(
 ):
     """
     Получение статуса сессии загрузки
-    
+
     Args:
         session_id: ID сессии
         
@@ -261,8 +265,7 @@ async def get_upload_status(
 @router.delete("/{session_id}")
 async def delete_upload_session(
     session_id: str,
-    current_user_id: str = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    current_user_id: str = Depends(get_current_user)
 ):
     """
     Удаление сессии загрузки и файла
@@ -290,27 +293,28 @@ async def delete_upload_session(
         
         # Удаление файла из MinIO
         if session.file_key:
-            storage = StorageService()
+            storage = get_storage_service()
             await storage.delete_image(session.file_key)
         
         # Удаление сессии
         SessionService.delete_session(session_id)
         
         # Логирование действия
-        from app.db.crud import AuditLogCRUD
-        await AuditLogCRUD.log_action(
-            db,
-            action="upload_session_deleted",
-            resource_type="upload_session",
-            resource_id=session_id,
-            user_id=current_user_id,
-            description=f"Сессия загрузки удалена: {session_id}"
-        )
-        
+        async with get_async_db_manager().get_session() as db:
+            from app.db.crud import AuditLogCRUD
+            await AuditLogCRUD.log_action(
+                db,
+                action="upload_session_deleted",
+                resource_type="upload_session",
+                resource_id=session_id,
+                user_id=current_user_id,
+                description=f"Сессия загрузки удалена: {session_id}"
+            )
+
         logger.info(f"Сессия загрузки удалена: {session_id}")
-        
+
         return {"message": "Сессия загрузки удалена"}
-        
+
     except HTTPException:
         raise
     except Exception as e:

@@ -1,4 +1,6 @@
-"""Инициализация базы данных - создание всех таблиц
+"""
+alembic/versions/001_initial_migration.py 
+Инициализация базы данных - создание всех таблиц
 
 Revision ID: 001_initial_migration
 Revises: 

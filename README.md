@@ -1,3 +1,8 @@
+# Face Recognition Backend
+
+Production-ready FastAPI backend for facial recognition with detection, embedding extraction, liveness detection and verification.
+
+See docs/ for detailed guides: QUICKSTART, DEVELOPMENT, DEPLOYMENT, API, SECURITY.
 # Face Recognition Service
 
 ![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)

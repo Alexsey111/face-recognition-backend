@@ -3,6 +3,7 @@
 JWT токены, refresh tokens, управление сессиями и ролями.
 """
 
+import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
 from uuid import uuid4
@@ -23,15 +24,15 @@ from ..utils.exceptions import (
 from ..services.encryption_service import EncryptionService
 from ..services import DatabaseService
 
-# Phase 5: Redis integration for token revocation
+# Redis integration for token revocation
 try:
     from redis import asyncio as aioredis
     REDIS_AVAILABLE = True
 except ImportError:
     REDIS_AVAILABLE = False
 
+# Добавьте эти строки в начало файла после импортов (строка ~37)
 logger = get_logger(__name__)
-
 
 class AuthService:
     """
@@ -62,10 +63,27 @@ class AuthService:
         else:
             self.redis = None
 
-        # In-memory fallback storage for revoked tokens
+    
+        # Rate limit failure policy
+        self.rate_limit_failure_policy = settings.rate_limit_on_redis_failure.lower()
+        
+        policy_messages = {
+            "block": "BLOCK — all logins will be blocked if Redis is unavailable (highest security)",
+            "allow": "ALLOW — logins permitted if Redis is unavailable (highest availability)",
+            "error": "ERROR — return 503 Service Unavailable if Redis is unavailable",
+        }
+        
+        if self.rate_limit_failure_policy not in policy_messages:
+            logger.warning(f"Invalid rate_limit_on_redis_failure value: {settings.rate_limit_on_redis_failure}...")
+            self.rate_limit_failure_policy = "block"
+        
+        message = policy_messages[self.rate_limit_failure_policy]
+        log_level = logger.warning if self.rate_limit_failure_policy == "allow" else logger.info
+        log_level(f"Rate limit on Redis failure policy: {message}")
+            # In-memory fallback storage for revoked tokens
         self._initialize_memory_storage()
 
-    async def create_access_token(
+    def create_access_token(
         self, 
         user_id: str, 
         role: str = "user",
@@ -119,7 +137,7 @@ class AuthService:
             logger.error(f"Error creating access token: {str(e)}")
             raise AuthenticationError(f"Failed to create access token: {str(e)}")
 
-    async def create_refresh_token(self, user_id: str) -> str:
+    def create_refresh_token(self, user_id: str) -> str:
         """
         Создание refresh токена.
 
@@ -157,7 +175,7 @@ class AuthService:
             logger.error(f"Error creating refresh token: {str(e)}")
             raise AuthenticationError(f"Failed to create refresh token: {str(e)}")
 
-    async def verify_token(self, token: str, token_type: str = "access") -> Dict[str, Any]:
+    def verify_token(self, token: str, token_type: str = "access") -> Dict[str, Any]:
         """
         Верификация токена.
 
@@ -245,22 +263,15 @@ class AuthService:
     async def hash_password(self, password: str) -> str:
         """
         Хеширование пароля с использованием pbkdf2_sha256 через passlib.
-
-        Args:
-            password: Пароль для хеширования
-
-        Returns:
-            str: Хешированный пароль в формате pbkdf2_sha256
-
-        Raises:
-            AuthenticationError: Если хеширование не удалось
+        Тяжёлая операция выполняется в отдельном потоке, чтобы не блокировать event loop.
         """
         try:
-            # Используем passlib с pbkdf2_sha256 для безопасного хеширования
-            hashed_password = self.pwd_context.hash(password)
+            # Переносим тяжёлое хэширование в отдельный поток
+            hashed_password = await asyncio.to_thread(self.pwd_context.hash, password)
+            
             logger.debug("Password hashed successfully using pbkdf2_sha256")
             return hashed_password
-            
+        
         except Exception as e:
             logger.error(f"Error hashing password with pbkdf2_sha256: {str(e)}")
             raise AuthenticationError(f"Failed to hash password: {str(e)}")
@@ -268,35 +279,27 @@ class AuthService:
     async def verify_password(self, password: str, hashed_password: str) -> bool:
         """
         Проверка пароля против хеша с использованием passlib.
-
-        Args:
-            password: Пароль для проверки
-            hashed_password: Хешированный пароль
-
-        Returns:
-            bool: True если пароль корректен
-
-        Note:
-            Поддерживает как новые pbkdf2_sha256 хеши, так и старые PBKDF2 хеши для обратной совместимости
+        Тяжёлые операции выполняются в отдельном потоке.
         """
         try:
-            # Сначала пробуем верифицировать как pbkdf2_sha256 хеш
+            # Основная проверка pbkdf2_sha256 — в отдельном потоке
             try:
-                if self.pwd_context.verify(password, hashed_password):
+                is_valid = await asyncio.to_thread(self.pwd_context.verify, password, hashed_password)
+                if is_valid:
                     logger.debug("Password verified successfully using pbkdf2_sha256")
                     return True
             except Exception:
-                # Если passlib не может определить формат хеша, пробуем старый формат
-                pass
-            
-            # Если pbkdf2_sha256 не сработал, пробуем старый PBKDF2 формат для обратной совместимости
-            if self._verify_legacy_pbkdf2(password, hashed_password):
+                pass  # Если не удалось — пробуем legacy
+
+            # Legacy PBKDF2 — тоже в отдельном потоке (редко, но на всякий случай)
+            is_legacy_valid = await asyncio.to_thread(self._verify_legacy_pbkdf2, password, hashed_password)
+            if is_legacy_valid:
                 logger.debug("Password verified using legacy PBKDF2 hash")
                 return True
-            
+
             logger.debug("Password verification failed")
             return False
-            
+
         except Exception as e:
             logger.error(f"Error verifying password: {str(e)}")
             return False
@@ -335,7 +338,7 @@ class AuthService:
             logger.debug(f"Legacy PBKDF2 verification failed: {str(e)}")
             return False
 
-    async def needs_password_rehash(self, hashed_password: str) -> bool:
+    def needs_password_rehash(self, hashed_password: str) -> bool:
         """
         Проверяет, нужно ли перехешировать пароль с новым алгоритмом.
 
@@ -373,7 +376,7 @@ class AuthService:
             await self.db_service.update_user(user_id, {"password_hash": new_hash})
             logger.info(f"Password rehashed for user {user_id}")
 
-    async def generate_secure_token(self, length: int = 32) -> str:
+    def generate_secure_token(self, length: int = 32) -> str:
         """
         Генерация криптографически безопасного токена.
 
@@ -449,69 +452,68 @@ class AuthService:
 
     async def check_rate_limit(self, user_id: str) -> bool:
         """
-        Rate limiting для попыток входа - блокирует после 5 неудачных попыток за 15 минут.
-        
-        Args:
-            user_id: ID пользователя
-            
-        Returns:
-            bool: True если лимит не превышен
-            
-        Raises:
-            UnauthorizedError: Если превышен лимит попыток
+        Проверка rate limit для попыток входа — только через Redis.
+        Redis обязателен для работы rate limiting.
         """
         try:
-            now = datetime.now(timezone.utc)
-            cutoff = now - timedelta(minutes=15)
+            key = f"login_attempts:{user_id}"
+            attempts = await self.redis.get(key)
+            attempts_count = int(attempts) if attempts is not None else 0
             
-            # Удаляем старые попытки
-            self.login_attempts[user_id] = [
-                attempt_time for attempt_time in self.login_attempts[user_id] 
-                if attempt_time > cutoff
-            ]
-            
-            # Проверяем лимит
-            if len(self.login_attempts[user_id]) >= 5:
-                logger.warning(f"Rate limit exceeded for user {user_id}")
+            if attempts_count >= 5:
+                logger.warning(f"Rate limit exceeded for user {user_id} (attempts: {attempts_count})")
                 raise UnauthorizedError("Too many login attempts. Try again later.")
             
             return True
-            
-        except UnauthorizedError:
-            raise
-        except Exception as e:
-            logger.error(f"Error checking rate limit: {str(e)}")
-            return True  # В случае ошибки разрешаем попытку
-
-    def record_failed_login(self, user_id: str) -> None:
-        """
-        Записывает неудачную попытку входа.
         
-        Args:
-            user_id: ID пользователя
+        except Exception as e:
+            logger.error(f"Error checking rate limit in Redis: {str(e)}")
+            # Здесь твой выбор: блокировка или ошибка
+            raise UnauthorizedError("Login temporarily unavailable due to technical issues. Try again later.")
+
+    async def record_failed_login(self, user_id: str) -> None:
+        """
+        Записывает неудачную попытку входа в Redis.
         """
         try:
-            now = datetime.now(timezone.utc)
-            self.login_attempts[user_id].append(now)
-            logger.debug(f"Failed login attempt recorded for user {user_id}")
+            key = f"login_attempts:{user_id}"
+            if self.redis:
+                # Увеличиваем счётчик на 1
+                attempts = await self.redis.incr(key)
+                # Если это первая попытка — устанавливаем TTL 15 минут
+                if attempts == 1:
+                    await self.redis.expire(key, 900)  # 15 * 60 = 900 секунд
+                logger.debug(f"Failed login attempt recorded for user {user_id} (attempts: {attempts})")
+            else:
+                # Fallback на in-memory, если Redis недоступен
+                self.login_attempts[user_id].append(datetime.now(timezone.utc))
+                logger.debug(f"Failed login attempt recorded in memory for user {user_id}")
         except Exception as e:
             logger.error(f"Error recording failed login: {str(e)}")
+            # Даже если Redis упал — fallback на память
+            self.login_attempts[user_id].append(datetime.now(timezone.utc))
 
-    def reset_login_attempts(self, user_id: str) -> None:
+    async def reset_login_attempts(self, user_id: str) -> None:
         """
         Сбрасывает счётчик попыток входа при успешной аутентификации.
-        
-        Args:
-            user_id: ID пользователя
+        Очищает как in-memory, так и Redis.
         """
         try:
+            key = f"login_attempts:{user_id}"
+            if self.redis:
+                await self.redis.delete(key)
+                logger.debug(f"Login attempts reset in Redis for user {user_id}")
+            # Очищаем in-memory на всякий случай
             if user_id in self.login_attempts:
                 self.login_attempts[user_id].clear()
-                logger.debug(f"Login attempts reset for user {user_id}")
+                logger.debug(f"Login attempts reset in memory for user {user_id}")
         except Exception as e:
             logger.error(f"Error resetting login attempts: {str(e)}")
+            # Fallback: очищаем хотя бы in-memory
+            if user_id in self.login_attempts:
+                self.login_attempts[user_id].clear()
 
-    async def validate_user_permissions(
+    def validate_user_permissions(
         self, 
         user_role: str, 
         required_permissions: List[str],

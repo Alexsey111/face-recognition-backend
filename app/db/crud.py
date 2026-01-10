@@ -1,3 +1,4 @@
+# app/db/crud.py
 from sqlalchemy import select, update, delete, func, desc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
@@ -140,6 +141,7 @@ class ReferenceCRUD:
 
     @staticmethod
     async def get_latest_reference(db: AsyncSession, user_id: str) -> Optional[Reference]:
+        """Get latest reference for user (optimized)"""
         stmt = (
             select(Reference)
             .where(Reference.user_id == user_id)
@@ -148,6 +150,22 @@ class ReferenceCRUD:
         )
         result = await db.execute(stmt)
         return result.scalar_one_or_none()
+
+    @staticmethod
+    async def get_recent_references(
+        db: AsyncSession,
+        user_id: str,
+        limit: int = 10
+    ) -> List[Reference]:
+        """Get recent references for user"""
+        stmt = (
+            select(Reference)
+            .where(Reference.user_id == user_id, Reference.is_active == True)
+            .order_by(desc(Reference.created_at))
+            .limit(limit)
+        )
+        result = await db.execute(stmt)
+        return list(result.scalars().all())
 
     @staticmethod
     async def get_reference_by_version(db: AsyncSession, user_id: str, version: int) -> Optional[Reference]:
@@ -165,21 +183,77 @@ class ReferenceCRUD:
         return result.scalar_one_or_none()
 
     @staticmethod
-    async def get_all_references(db: AsyncSession, user_id: str) -> List[Reference]:
-        """Get all references for user"""
-        stmt = (
-            select(Reference)
-            .where(Reference.user_id == user_id)
-            .order_by(desc(Reference.version))
-        )
-        result = await db.execute(stmt)
+    async def get_all_references(
+        db: AsyncSession,
+        user_id: str,
+        skip: int = 0,
+        limit: int = 100,
+        is_active: bool = None,
+        quality_min: float = None,
+        quality_max: float = None,
+        label_contains: str = None
+    ) -> List[Reference]:
+        """Get references for user with pagination and filtering"""
+        query = select(Reference).where(Reference.user_id == user_id)
+        
+        filters = []
+        
+        if is_active is not None:
+            filters.append(Reference.is_active == is_active)
+        
+        if quality_min is not None:
+            filters.append(Reference.quality_score >= quality_min)
+            
+        if quality_max is not None:
+            filters.append(Reference.quality_score <= quality_max)
+            
+        if label_contains:
+            filters.append(Reference.label.contains(label_contains))
+        
+        if filters:
+            query = query.where(and_(*filters))
+        
+        query = query.order_by(desc(Reference.created_at)).offset(skip).limit(limit)
+        
+        result = await db.execute(query)
         return list(result.scalars().all())
+
+    @staticmethod
+    async def count_references(
+        db: AsyncSession,
+        user_id: str,
+        is_active: bool = None,
+        quality_min: float = None,
+        quality_max: float = None,
+        label_contains: str = None
+    ) -> int:
+        """Count references with same filters"""
+        query = select(func.count()).select_from(Reference).where(Reference.user_id == user_id)
+        
+        filters = []
+        
+        if is_active is not None:
+            filters.append(Reference.is_active == is_active)
+        
+        if quality_min is not None:
+            filters.append(Reference.quality_score >= quality_min)
+            
+        if quality_max is not None:
+            filters.append(Reference.quality_score <= quality_max)
+            
+        if label_contains:
+            filters.append(Reference.label.contains(label_contains))
+        
+        if filters:
+            query = query.where(and_(*filters))
+        
+        result = await db.execute(query)
+        return result.scalar() or 0
 
     @staticmethod
     async def create_reference(
         db: AsyncSession,
         user_id: str,
-        embedding: str,
         embedding_encrypted: bytes,
         embedding_hash: str,
         quality_score: float,
@@ -189,14 +263,35 @@ class ReferenceCRUD:
         file_url: str = None,
         face_landmarks: dict = None
     ) -> Reference:
+        """✅ ИСПРАВЛЕНО: Добавлена валидация и оптимизация"""
         try:
-            # Определяем версию
-            latest = await ReferenceCRUD.get_latest_reference(db, user_id)
-            version = (latest.version + 1) if latest else 1
+            # ✅ ДОБАВЛЕНО: Валидация обязательных полей
+            if not embedding_encrypted:
+                raise ValueError("embedding_encrypted is required and cannot be empty")
+            if not embedding_hash:
+                raise ValueError("embedding_hash is required and cannot be empty")
+            if not image_filename:
+                raise ValueError("image_filename is required")
+                
+            # ✅ ОПТИМИЗИРОВАНО: Получаем максимальную версию одним запросом
+            result = await db.execute(
+                select(func.max(Reference.version))
+                .where(Reference.user_id == user_id)
+            )
+            max_version = result.scalar() or 0
+            version = max_version + 1
+            
+            # Получаем последний reference для previous_reference_id (если нужно)
+            result = await db.execute(
+                select(Reference.id)
+                .where(Reference.user_id == user_id)
+                .order_by(desc(Reference.version))
+                .limit(1)
+            )
+            previous_id = result.scalar_one_or_none()
             
             new_ref = Reference(
                 user_id=user_id,
-                embedding=embedding,
                 embedding_encrypted=embedding_encrypted,
                 embedding_hash=embedding_hash,
                 quality_score=quality_score,
@@ -206,7 +301,7 @@ class ReferenceCRUD:
                 file_url=file_url or f"file://{image_filename}",
                 face_landmarks=face_landmarks,
                 version=version,
-                previous_reference_id=latest.id if latest else None
+                previous_reference_id=previous_id
             )
             
             db.add(new_ref)
@@ -214,6 +309,10 @@ class ReferenceCRUD:
             await db.refresh(new_ref)
             logger.info(f"✅ Reference created: {new_ref.id}, version: {version}")
             return new_ref
+        except ValueError as e:
+            # Валидационные ошибки не требуют rollback
+            logger.error(f"❌ Validation error creating reference: {e}")
+            raise
         except Exception as e:
             await db.rollback()
             logger.error(f"❌ Error creating reference: {e}")
@@ -259,6 +358,15 @@ class ReferenceCRUD:
             await db.rollback()
             logger.error(f"❌ Error deleting reference: {e}")
             raise
+    
+    @staticmethod
+    async def find_duplicate_embedding(db: AsyncSession, embedding_hash: str) -> Optional[Reference]:
+        """✅ ДОБАВЛЕНО: Поиск дубликатов по хешу"""
+        result = await db.execute(
+            select(Reference).where(Reference.embedding_hash == embedding_hash)
+        )
+        return result.scalar_one_or_none()
+
 
 # ============================================================================
 # Verification Session CRUD (Async)
@@ -274,11 +382,15 @@ class VerificationSessionCRUD:
         image_size_mb: float,
         expires_at: datetime = None
     ) -> VerificationSession:
+        """✅ ИСПРАВЛЕНО: Используем timezone-aware datetime"""
         try:
-            from datetime import datetime, timedelta
-            # Устанавливаем expires_at на 30 минут вперед, если не указан
+            # ✅ ИСПРАВЛЕНО: Всегда используем timezone.utc
             if expires_at is None:
                 expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
+            
+            # ✅ ДОБАВЛЕНО: Проверка, что expires_at timezone-aware
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
                 
             session = VerificationSession(
                 user_id=user_id,
@@ -309,16 +421,82 @@ class VerificationSessionCRUD:
         return await VerificationSessionCRUD.get_session_by_sid(db, session_id)
 
     @staticmethod
-    async def get_user_sessions(db: AsyncSession, user_id: str, limit: int = 100) -> List[VerificationSession]:
-        """Get all sessions for user"""
-        stmt = (
-            select(VerificationSession)
-            .where(VerificationSession.user_id == user_id)
-            .order_by(desc(VerificationSession.created_at))
-            .limit(limit)
-        )
-        result = await db.execute(stmt)
+    async def get_user_sessions(
+        db: AsyncSession,
+        user_id: str, 
+        skip: int = 0,
+        limit: int = 100,
+        status: str = None,
+        session_type: str = None,
+        date_from: datetime = None,
+        date_to: datetime = None
+    ) -> List[VerificationSession]:
+        """Get sessions for user with pagination and filtering"""
+        query = select(VerificationSession).where(VerificationSession.user_id == user_id)
+        
+        filters = []
+        
+        if status:
+            filters.append(VerificationSession.status == status)
+            
+        if session_type:
+            filters.append(VerificationSession.session_type == session_type)
+            
+        if date_from:
+            # ✅ ДОБАВЛЕНО: Проверка timezone
+            if date_from.tzinfo is None:
+                date_from = date_from.replace(tzinfo=timezone.utc)
+            filters.append(VerificationSession.created_at >= date_from)
+            
+        if date_to:
+            # ✅ ДОБАВЛЕНО: Проверка timezone
+            if date_to.tzinfo is None:
+                date_to = date_to.replace(tzinfo=timezone.utc)
+            filters.append(VerificationSession.created_at <= date_to)
+        
+        if filters:
+            query = query.where(and_(*filters))
+        
+        query = query.order_by(desc(VerificationSession.created_at)).offset(skip).limit(limit)
+        
+        result = await db.execute(query)
         return list(result.scalars().all())
+
+    @staticmethod
+    async def count_user_sessions(
+        db: AsyncSession,
+        user_id: str,
+        status: str = None,
+        session_type: str = None,
+        date_from: datetime = None,
+        date_to: datetime = None
+    ) -> int:
+        """Count sessions with same filters"""
+        query = select(func.count()).select_from(VerificationSession).where(VerificationSession.user_id == user_id)
+        
+        filters = []
+        
+        if status:
+            filters.append(VerificationSession.status == status)
+            
+        if session_type:
+            filters.append(VerificationSession.session_type == session_type)
+            
+        if date_from:
+            if date_from.tzinfo is None:
+                date_from = date_from.replace(tzinfo=timezone.utc)
+            filters.append(VerificationSession.created_at >= date_from)
+            
+        if date_to:
+            if date_to.tzinfo is None:
+                date_to = date_to.replace(tzinfo=timezone.utc)
+            filters.append(VerificationSession.created_at <= date_to)
+        
+        if filters:
+            query = query.where(and_(*filters))
+        
+        result = await db.execute(query)
+        return result.scalar() or 0
 
     @staticmethod
     async def update_session(db: AsyncSession, session_id: str, **kwargs) -> Optional[VerificationSession]:
@@ -333,7 +511,6 @@ class VerificationSessionCRUD:
             await db.execute(stmt)
             await db.commit()
             
-            # Return updated object
             return await VerificationSessionCRUD.get_session_by_sid(db, session_id)
         except Exception as e:
             await db.rollback()
@@ -349,7 +526,7 @@ class VerificationSessionCRUD:
         confidence: float,
         **kwargs
     ) -> Optional[VerificationSession]:
-        """Complete session with results"""
+        """✅ ИСПРАВЛЕНО: Timezone-aware datetime"""
         try:
             stmt = (
                 update(VerificationSession)
@@ -359,7 +536,7 @@ class VerificationSessionCRUD:
                     is_match=is_match,
                     similarity_score=similarity_score,
                     confidence=confidence,
-                    completed_at=datetime.now(timezone.utc),
+                    completed_at=datetime.now(timezone.utc),  # ✅ timezone-aware
                     **kwargs
                 )
                 .execution_options(synchronize_session="fetch")
@@ -367,7 +544,6 @@ class VerificationSessionCRUD:
             await db.execute(stmt)
             await db.commit()
             
-            # Возвращаем обновленный объект
             return await VerificationSessionCRUD.get_session_by_sid(db, session_id)
         except Exception as e:
             await db.rollback()
@@ -381,7 +557,7 @@ class VerificationSessionCRUD:
         error_code: str = None,
         error_message: str = None
     ) -> Optional[VerificationSession]:
-        """Mark session as failed"""
+        """✅ ИСПРАВЛЕНО: Timezone-aware datetime"""
         try:
             stmt = (
                 update(VerificationSession)
@@ -390,7 +566,7 @@ class VerificationSessionCRUD:
                     status=VerificationStatus.FAILED,
                     error_code=error_code,
                     error_message=error_message,
-                    completed_at=datetime.now(timezone.utc)
+                    completed_at=datetime.now(timezone.utc)  # ✅ timezone-aware
                 )
                 .execution_options(synchronize_session="fetch")
             )
@@ -403,13 +579,33 @@ class VerificationSessionCRUD:
             raise
 
     @staticmethod
+    async def get_active_sessions(db: AsyncSession, user_id: str = None) -> List[VerificationSession]:
+        """Get active/pending sessions"""
+        query = select(VerificationSession).where(
+            VerificationSession.status.in_(['pending', 'processing'])
+        )
+        
+        if user_id:
+            query = query.where(VerificationSession.user_id == user_id)
+        
+        query = query.order_by(desc(VerificationSession.created_at)).limit(50)
+        
+        result = await db.execute(query)
+        return list(result.scalars().all())
+    
+    @staticmethod
     async def cleanup_old_sessions(db: AsyncSession, days: int = 30) -> int:
-        """Delete sessions older than N days"""
+        """✅ ИСПРАВЛЕНО: Timezone-aware datetime"""
         try:
-            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)  # ✅ timezone-aware
+            
             stmt = delete(VerificationSession).where(
-                VerificationSession.created_at < cutoff_date
+                and_(
+                    VerificationSession.created_at < cutoff_date,
+                    VerificationSession.status.in_(['success', 'failed', 'expired'])
+                )
             )
+            
             result = await db.execute(stmt)
             await db.commit()
             
@@ -420,6 +616,33 @@ class VerificationSessionCRUD:
             await db.rollback()
             logger.error(f"❌ Error cleaning up sessions: {e}")
             raise
+    
+    @staticmethod
+    async def bulk_fail_sessions(
+        db: AsyncSession,
+        session_ids: List[str],
+        error_code: str = "BULK_FAIL",
+        error_message: str = "Sessions failed in bulk operation"
+    ) -> int:
+        """✅ ИСПРАВЛЕНО: Timezone-aware datetime"""
+        if not session_ids:
+            return 0
+            
+        stmt = (
+            update(VerificationSession)
+            .where(VerificationSession.session_id.in_(session_ids))
+            .values(
+                status=VerificationStatus.FAILED,
+                error_code=error_code,
+                error_message=error_message,
+                completed_at=datetime.now(timezone.utc)  # ✅ timezone-aware
+            )
+            .execution_options(synchronize_session="fetch")
+        )
+        
+        result = await db.execute(stmt)
+        await db.commit()
+        return result.rowcount
 
 # ============================================================================
 # Audit Log CRUD (Async)
@@ -441,7 +664,7 @@ class AuditLogCRUD:
         success: bool = True,
         error_message: Optional[str] = None
     ) -> Optional[AuditLog]:
-        """Fire-and-forget style logging (safe)"""
+        """Fire-and-forget style logging"""
         try:
             log = AuditLog(
                 action=action,
@@ -461,7 +684,6 @@ class AuditLogCRUD:
             logger.info(f"✅ Audit log created: {action} on {resource_type}")
             return log
         except Exception as e:
-            # Не роняем приложение, если не записался лог
             logger.error(f"❌ Failed to write audit log: {e}")
             await db.rollback()
             return None

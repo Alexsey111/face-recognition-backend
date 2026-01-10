@@ -118,7 +118,6 @@ class VerificationRequest(BaseModel):
     Модель для запроса верификации в рамках сессии.
     """
 
-    session_id: str = Field(..., description="ID сессии верификации")
     image_data: str = Field(
         ..., description="Изображение для верификации в формате base64 или URL"
     )

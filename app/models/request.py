@@ -122,20 +122,23 @@ class LivenessRequest(BaseModel):
     )
     challenge_type: Optional[str] = Field(
         "passive",
-        description="Тип проверки: passive, active, blink, smile, turn_head",
+        description="Тип проверки: passive, active, blink, smile, turn_head, video_blink, video_smile, video_head_turn",
         example="passive",
     )
     challenge_data: Optional[Dict[str, Any]] = Field(
         None,
         description="Данные для активной проверки (движения, повороты головы)",
-        example={"rotation_x": 15, "rotation_y": 10},
+        example={"rotation_x": 15, "rotation_y": 10, "instruction": "Turn head slightly"},
     )
 
     @field_validator("challenge_type")
     @classmethod
     def validate_challenge_type(cls, v):
         """Валидация типа проверки живости."""
-        allowed_types = ["passive", "active", "blink", "smile", "turn_head"]
+        allowed_types = [
+            "passive", "active", "blink", "smile", "turn_head",
+            "video_blink", "video_smile", "video_head_turn"
+        ]
         if v not in allowed_types:
             raise ValueError(f"Challenge type must be one of: {allowed_types}")
         return v
@@ -146,6 +149,172 @@ class LivenessRequest(BaseModel):
         """Валидация формата изображения."""
         if v is not None:
             return validate_image_data_static(v)
+        return v
+
+
+class VideoLivenessRequest(BaseModel):
+    """
+    Модель для запроса проверки живости по видео.
+    """
+
+    session_id: str = Field(
+        ..., description="ID сессии проверки живости"
+    )
+    video_data: str = Field(
+        ..., description="Видео для проверки живости в формате base64 или URL"
+    )
+    challenge_type: str = Field(
+        "video_blink",
+        description="Тип анализа видео: video_blink, video_smile, video_head_turn"
+    )
+    frame_count: int = Field(
+        10,
+        ge=3,
+        le=30,
+        description="Количество кадров для анализа (3-30)"
+    )
+    challenge_data: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Дополнительные данные для анализа видео"
+    )
+
+    @field_validator("challenge_type")
+    @classmethod
+    def validate_challenge_type(cls, v):
+        """Валидация типа анализа видео."""
+        allowed_types = ["video_blink", "video_smile", "video_head_turn"]
+        if v not in allowed_types:
+            raise ValueError(f"Video challenge type must be one of: {allowed_types}")
+        return v
+
+
+class BatchEmbeddingRequest(BaseModel):
+    """
+    Модель для пакетной генерации эмбеддингов.
+    """
+
+    images: List[str] = Field(
+        ...,
+        description="Список изображений в формате base64 или URL",
+        min_items=1,
+        max_items=100
+    )
+    batch_size: int = Field(
+        8,
+        ge=1,
+        le=32,
+        description="Размер батча для обработки (1-32)"
+    )
+    user_id: Optional[str] = Field(
+        None,
+        description="ID пользователя для ассоциации"
+    )
+    metadata: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Метаданные для батча"
+    )
+
+    @field_validator("images")
+    @classmethod
+    def validate_images(cls, v):
+        """Валидация списка изображений."""
+        for i, image_data in enumerate(v):
+            if not image_data or len(image_data.strip()) == 0:
+                raise ValueError(f"Image {i} cannot be empty")
+        return v
+
+
+class BatchVerificationRequest(BaseModel):
+    """
+    Модель для пакетной верификации лиц.
+    """
+
+    images: List[str] = Field(
+        ...,
+        description="Список изображений для верификации",
+        min_items=1,
+        max_items=100
+    )
+    reference_embedding: List[float] = Field(
+        ...,
+        description="Эталонный эмбеддинг для сравнения",
+        min_items=128,
+        max_items=512
+    )
+    threshold: float = Field(
+        0.8,
+        ge=0.0,
+        le=1.0,
+        description="Порог схожести для положительной верификации"
+    )
+    batch_size: int = Field(
+        8,
+        ge=1,
+        le=32,
+        description="Размер батча для обработки"
+    )
+
+    @field_validator("images")
+    @classmethod
+    def validate_images(cls, v):
+        """Валидация списка изображений."""
+        for i, image_data in enumerate(v):
+            if not image_data or len(image_data.strip()) == 0:
+                raise ValueError(f"Image {i} cannot be empty")
+        return v
+
+    @field_validator("reference_embedding")
+    @classmethod
+    def validate_reference_embedding(cls, v):
+        """Валидация эталонного эмбеддинга."""
+        # Проверяем что все значения в разумном диапазоне
+        for i, value in enumerate(v):
+            if not isinstance(value, (int, float)) or abs(value) > 10:
+                raise ValueError(f"Embedding value {i} must be a number with |value| <= 10")
+        return v
+
+
+class AdvancedAntiSpoofingRequest(BaseModel):
+    """
+    Модель для продвинутой проверки anti-spoofing.
+    """
+
+    session_id: str = Field(
+        ..., description="ID сессии проверки"
+    )
+    image_data: str = Field(
+        ..., description="Изображение для анализа"
+    )
+    analysis_type: str = Field(
+        "comprehensive",
+        description="Тип анализа: comprehensive, depth, texture, certified"
+    )
+    certification_level: Optional[str] = Field(
+        None,
+        description="Уровень сертификации: basic, standard, premium"
+    )
+    include_reasoning: bool = Field(
+        True,
+        description="Включить детальное объяснение reasoning"
+    )
+
+    @field_validator("analysis_type")
+    @classmethod
+    def validate_analysis_type(cls, v):
+        """Валидация типа анализа."""
+        allowed_types = ["comprehensive", "depth", "texture", "certified"]
+        if v not in allowed_types:
+            raise ValueError(f"Analysis type must be one of: {allowed_types}")
+        return v
+
+    @field_validator("certification_level")
+    @classmethod
+    def validate_certification_level(cls, v):
+        """Валидация уровня сертификации."""
+        if v is not None:
+            allowed_levels = ["basic", "standard", "premium"]
+            if v not in allowed_levels:
+                raise ValueError(f"Certification level must be one of: {allowed_levels}")
         return v
 
 
@@ -193,6 +362,9 @@ class ReferenceUpdateRequest(BaseModel):
     )
     quality_threshold: Optional[float] = Field(
         None, ge=0.0, le=1.0, description="Новый порог качества"
+    )
+    is_active: Optional[bool] = Field(
+        None, description="Активен ли эталон"
     )
 
     @field_validator("image_data")

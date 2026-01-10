@@ -1,3 +1,4 @@
+# app\__init__.py
 # Face Recognition Service Application Package
 
 """Face Recognition Service Application Package"""
