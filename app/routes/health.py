@@ -24,23 +24,11 @@ logger = get_logger(__name__)
 async def check_database_connection() -> tuple[bool, str]:
     """Проверка подключения к базе данных."""
     try:
-        # В Phase 2 внешние сервисы недоступны
-        # Проверяем, является ли это внешней БД (PostgreSQL)
-        if settings.DATABASE_URL.startswith("postgresql"):
-            # В Phase 2 внешние БД недоступны
-            return False, "not_configured"
-        
-        # Для SQLite (файловая БД) - проверяем доступность
-        if settings.DATABASE_URL.startswith("sqlite"):
-            # Простая проверка файла SQLite
-            import sqlite3
-            db_path = settings.DATABASE_URL.replace("sqlite:///", "")
-            if os.path.exists(db_path):
-                return True, "connected"
-            else:
-                return False, "database file not found"
-        else:
-            return False, "unsupported database type"
+        # Пытаемся подключиться к PostgreSQL
+        conn = await asyncpg.connect(settings.DATABASE_URL)
+        await conn.execute('SELECT 1')
+        await conn.close()
+        return True, "connected"
     except Exception as e:
         logger.error(f"Database health check failed: {str(e)}")
         return False, str(e)
@@ -49,12 +37,7 @@ async def check_database_connection() -> tuple[bool, str]:
 async def check_redis_connection() -> tuple[bool, str]:
     """Проверка подключения к Redis."""
     try:
-        # В Phase 2 Redis недоступен
-        # Проверяем стандартный localhost URL
-        if "localhost" in settings.REDIS_URL or "127.0.0.1" in settings.REDIS_URL:
-            return False, "not_configured"
-        
-        r = redis.from_url(settings.REDIS_URL)
+        r = redis.from_url(settings.redis_url_with_auth, decode_responses=True)
         await r.ping()
         await r.close()
         return True, "connected"
@@ -66,15 +49,22 @@ async def check_redis_connection() -> tuple[bool, str]:
 async def check_storage_connection() -> tuple[bool, str]:
     """Проверка подключения к хранилищу (S3/MinIO)."""
     try:
-        # В Phase 2 хранилище недоступно
-        # Проверяем стандартный localhost URL
-        if "localhost" in settings.S3_ENDPOINT_URL or "127.0.0.1" in settings.S3_ENDPOINT_URL:
-            return False, "not_configured"
+        import aioboto3
+        from botocore.config import Config
         
-        from ..services.storage_service import StorageService
-        storage = StorageService()
-        is_healthy = await storage.health_check()
-        return is_healthy, "connected" if is_healthy else "disconnected"
+        session = aioboto3.Session()
+        async with session.client(
+            's3',
+            endpoint_url=settings.S3_ENDPOINT_URL,
+            aws_access_key_id=settings.S3_ACCESS_KEY,
+            aws_secret_access_key=settings.S3_SECRET_KEY,
+            region_name=settings.S3_REGION,
+            config=Config(signature_version='s3v4'),
+            use_ssl=settings.S3_USE_SSL
+        ) as s3_client:
+            # Проверяем существование бакета
+            await s3_client.head_bucket(Bucket=settings.S3_BUCKET_NAME)
+            return True, "connected"
     except Exception as e:
         logger.error(f"Storage health check failed: {str(e)}")
         return False, str(e)
@@ -83,8 +73,20 @@ async def check_storage_connection() -> tuple[bool, str]:
 async def check_ml_service_connection() -> tuple[bool, str]:
     """Проверка подключения к ML сервису."""
     try:
-        # В Phase 2 ML сервис недоступен
-        return False, "not_configured"
+        if not settings.USE_LOCAL_ML_SERVICE:
+            # Проверка внешнего ML сервиса
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{settings.ML_SERVICE_URL}/health",
+                    timeout=aiohttp.ClientTimeout(total=5)
+                ) as response:
+                    if response.status == 200:
+                        return True, "connected"
+                    return False, f"status_code: {response.status}"
+        else:
+            # Локальный ML сервис - всегда считаем недоступным пока не загружена модель
+            return False, "model_not_loaded"
     except Exception as e:
         logger.error(f"ML service health check failed: {str(e)}")
         return False, str(e)

@@ -160,21 +160,21 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.exception("Failed to prepare test database environment")
 
-    # Phase 5: Запуск cleanup scheduler для автоматической очистки
-    try:
-        from .tasks.scheduler import start_global_scheduler
-        start_global_scheduler()
-        logger.info("✅ Cleanup scheduler started")
-    except Exception as e:
-        logger.warning(f"⚠️ Failed to start cleanup scheduler: {e}")
+        '''# Phase 5: Запуск cleanup scheduler для автоматической очистки
+        try:
+            from .tasks.scheduler import start_global_scheduler
+            start_global_scheduler()
+            logger.info("✅ Cleanup scheduler started")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to start cleanup scheduler: {e}")
 
-    # Phase 8: Запуск webhook scheduler для retry логики
-    try:
-        from .tasks.scheduler import start_webhook_scheduler
-        start_webhook_scheduler()
-        logger.info("✅ Webhook scheduler started")
-    except Exception as e:
-        logger.warning(f"⚠️ Failed to start webhook scheduler: {e}")
+        # Phase 8: Запуск webhook scheduler для retry логики
+        try:
+            from .tasks.scheduler import start_webhook_scheduler
+            start_webhook_scheduler()
+            logger.info("✅ Webhook scheduler started")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to start webhook scheduler: {e}")'''
 
     logger.info("✅ Service started successfully")
     yield
@@ -182,7 +182,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("🛑 Service shutting down...")
     
-    # Phase 5: Остановка cleanup scheduler
+    '''# Phase 5: Остановка cleanup scheduler
     try:
         from .tasks.scheduler import stop_global_scheduler
         stop_global_scheduler()
@@ -196,7 +196,7 @@ async def lifespan(app: FastAPI):
         stop_webhook_scheduler()
         logger.info("✅ Webhook scheduler stopped")
     except Exception as e:
-        logger.warning(f"⚠️ Failed to stop webhook scheduler: {e}")
+        logger.warning(f"⚠️ Failed to stop webhook scheduler: {e}")'''
     
     # Закрытие подключений (если нужно)
     # await close_database()

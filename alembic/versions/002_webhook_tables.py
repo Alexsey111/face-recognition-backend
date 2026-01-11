@@ -61,7 +61,7 @@ def upgrade() -> None:
         'system.alert',
         'webhook.test',
         name='webhook_event_type_enum',
-        create_type=True
+        create_type=False  # ✅ Не создавать явно
     )
     
     webhook_status_enum = sa.Enum(
@@ -72,13 +72,15 @@ def upgrade() -> None:
         'retry',
         'expired',
         name='webhook_status_enum',
-        create_type=True
+        create_type=False  # ✅ Не создавать явно
     )
     
-    webhook_event_type_enum.create(op.get_bind(), checkfirst=True)
-    webhook_status_enum.create(op.get_bind(), checkfirst=True)
+    # ✅ УДАЛЕНО: Явное создание enum типов
+    # webhook_event_type_enum.create(op.get_bind(), checkfirst=True)
+    # webhook_status_enum.create(op.get_bind(), checkfirst=True)
     
-    print("✅ Enum types created")
+    print("✅ Enum types defined (will be created automatically with tables)")
+
     
     # ========================================================================
     # Создание таблицы webhook_configs

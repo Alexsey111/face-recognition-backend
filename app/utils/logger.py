@@ -5,12 +5,8 @@ import time
 import asyncio
 import inspect
 import functools
+from datetime import datetime, timezone 
 from logging.handlers import RotatingFileHandler
-try:
-    from pythonjsonlogger import jsonlogger
-    JsonFormatterBase = jsonlogger.JsonFormatter
-except Exception:
-    JsonFormatterBase = logging.Formatter
 from typing import Optional, Callable, Any, Dict
 
 from ..config import settings
@@ -42,59 +38,58 @@ def _redact(obj: Dict[str, Any]) -> Dict[str, Any]:
     return redacted
 
 
-class StructuredFormatter(JsonFormatterBase):
-    def add_fields(self, log_record, record, message_dict=None):
-        # If the base formatter provides add_fields, try to reuse it.
-        if hasattr(super(), "add_fields"):
-            try:
-                super().add_fields(log_record, record, message_dict or {})
-            except Exception:
-                pass
-
-        # Ensure basic fields exist regardless of underlying formatter
-        if "timestamp" not in log_record:
-            try:
-                log_record["timestamp"] = self.formatTime(record, self.datefmt) if hasattr(self, "formatTime") else time.time()
-            except Exception:
-                log_record["timestamp"] = time.time()
-        if "level" not in log_record:
-            log_record["level"] = record.levelname
-        log_record.setdefault("logger", record.name)
-        if "message" not in log_record:
-            log_record["message"] = record.getMessage()
-
-    def format(self, record):
-        # Build a JSON-serializable record dict and emit as JSON string
-        log_record: Dict[str, Any] = {}
+class EmptyMessageFilter(logging.Filter):
+    """Фильтр для блокировки пустых сообщений."""
+    def filter(self, record):
         try:
-            self.add_fields(log_record, record, {})
-            return json.dumps(log_record, default=str)
+            message = record.getMessage()
+            # Блокируем пустые сообщения
+            if not message or not message.strip():
+                return False
+            return True
         except Exception:
-            # Last-resort fallback to plain text
-            try:
-                return super().format(record)
-            except Exception:
-                return str(record)
+            return False
 
 
-def _make_rotating_handler(path: str, max_bytes: int, backup_count: int):
-    handler = RotatingFileHandler(path, maxBytes=max_bytes, backupCount=backup_count)
-    handler.setLevel(logging.INFO)
-    return handler
+class StructuredFormatter(logging.Formatter):
+    """Простой JSON formatter без зависимости от pythonjsonlogger."""
+    
+    def format(self, record):
+        # Блокируем пустые сообщения
+        try:
+            message = record.getMessage()
+            if not message or not message.strip():
+                return None  # Не выводим пустые логи
+        except Exception:
+            return None
+        
+        # Создаем JSON вручную
+        log_data = {
+            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "level": record.levelname,
+            "name": record.name,
+            "message": message,
+            "logger": record.name
+        }
+        
+        # Добавляем дополнительные поля если есть
+        if hasattr(record, 'extra'):
+            log_data.update(record.extra)
+        
+        try:
+            return json.dumps(log_data, default=str)
+        except Exception:
+            return None
+
 
 
 def setup_logger(name: Optional[str] = None, level: Optional[str] = None, log_file: Optional[str] = None):
-    """Configure and return a structured JSON logger.
-
-    This is idempotent: calling multiple times for the same name won't add duplicate handlers.
-    """
-    # Accept either numeric (e.g. logging.INFO) or string levels (e.g. 'INFO').
+    """Configure and return a structured JSON logger."""
+    
     if isinstance(level, int):
         lvl_value = level
     else:
         raw = (level or getattr(settings, "LOG_LEVEL", "INFO") or "INFO")
-        # Coerce to string and uppercase to match logging names, but fall back
-        # to INT conversion if provided (e.g. '20').
         try:
             lvl_name = str(raw).upper()
             lvl_value = getattr(logging, lvl_name, None)
@@ -104,48 +99,82 @@ def setup_logger(name: Optional[str] = None, level: Optional[str] = None, log_fi
             lvl_value = logging.INFO
 
     logger_name = name or "app"
-
     logger = logging.getLogger(logger_name)
     logger.setLevel(lvl_value)
 
-    # If logger already configured, return it
+    # ✅ Очищаем handlers
     if logger.handlers:
-        return logger
+        logger.handlers.clear()
+
+    # ✅ Отключаем propagation
+    logger.propagate = False
 
     fmt = StructuredFormatter('%(timestamp)s %(level)s %(name)s %(message)s')
+    empty_filter = EmptyMessageFilter()
 
-    # Console handler
-    ch = logging.StreamHandler(sys.stdout)
+    # ✅ Кастомный StreamHandler который не выводит None
+    class FilteredStreamHandler(logging.StreamHandler):
+        def emit(self, record):
+            try:
+                msg = self.format(record)
+                # Не выводим None и пустые строки
+                if msg is None or not msg or not msg.strip():
+                    return
+                stream = self.stream
+                stream.write(msg + self.terminator)
+                self.flush()
+            except Exception:
+                self.handleError(record)
+
+    # Console handler с фильтрацией
+    ch = FilteredStreamHandler(sys.stdout)
     ch.setLevel(lvl_value)
     ch.setFormatter(fmt)
+    ch.addFilter(empty_filter)
     logger.addHandler(ch)
 
     # File handler if configured
     path = log_file or getattr(settings, "LOG_FILE_PATH", None)
     if path:
-        max_size = int(getattr(settings, "LOG_MAX_SIZE", 10 * 1024 * 1024))
-        backup = int(getattr(settings, "LOG_BACKUP_COUNT", 5))
-        fh = _make_rotating_handler(path, max_size, backup)
-        fh.setFormatter(fmt)
-        logger.addHandler(fh)
+        try:
+            max_size = int(getattr(settings, "LOG_MAX_SIZE", 10 * 1024 * 1024))
+            backup = int(getattr(settings, "LOG_BACKUP_COUNT", 5))
+            fh = _make_rotating_handler(path, max_size, backup)
+            fh.setFormatter(fmt)
+            fh.addFilter(empty_filter)
+            logger.addHandler(fh)
+        except Exception:
+            pass
 
     # Configure audit logger
     audit_logger = logging.getLogger("audit")
-    audit_logger.setLevel(logging.INFO)
     if not audit_logger.handlers:
+        audit_logger.setLevel(logging.INFO)
+        audit_logger.propagate = False
+        
         audit_path = f"{path}.audit" if path else "./audit.log"
         try:
-            af = _make_rotating_handler(audit_path, int(getattr(settings, "LOG_MAX_SIZE", 10 * 1024 * 1024)), int(getattr(settings, "LOG_BACKUP_COUNT", 5)))
+            af = _make_rotating_handler(
+                audit_path,
+                int(getattr(settings, "LOG_MAX_SIZE", 10 * 1024 * 1024)),
+                int(getattr(settings, "LOG_BACKUP_COUNT", 5))
+            )
             af.setFormatter(fmt)
+            af.addFilter(empty_filter)
             audit_logger.addHandler(af)
         except Exception:
-            # Fallback: console-only audit logger
-            ach = logging.StreamHandler(sys.stdout)
+            ach = FilteredStreamHandler(sys.stdout)
             ach.setFormatter(fmt)
+            ach.addFilter(empty_filter)
             audit_logger.addHandler(ach)
 
     return logger
 
+
+def _make_rotating_handler(path: str, max_bytes: int, backup_count: int):
+    handler = RotatingFileHandler(path, maxBytes=max_bytes, backupCount=backup_count)
+    handler.setLevel(logging.INFO)
+    return handler
 
 def get_logger(name: Optional[str] = None):
     logger = setup_logger(name)

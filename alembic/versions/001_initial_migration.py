@@ -40,44 +40,46 @@ def upgrade() -> None:
     
     # Создание enum типов только для PostgreSQL
     if is_postgresql:
-        # ✅ UPDATED: Удален user_role_enum (не используется в models.py)
-        session_type_enum = sa.Enum(
+        # ✅ ИСПРАВЛЕНО: SQLAlchemy автоматически создает ENUM при create_table
+        # Просто определяем типы, но НЕ создаем их явно
+        session_type_col = sa.Enum(
             'verification', 
             'liveness', 
             'enrollment', 
             'identification', 
-            name='session_type_enum'
+            name='session_type_enum',
+            create_type=False  # ✅ Не создавать сейчас, создастся автоматически
         )
-        session_status_enum = sa.Enum(
+        status_type = sa.Enum(
             'pending', 
             'processing', 
             'completed', 
             'failed', 
             'expired', 
             'cancelled', 
-            name='session_status_enum'
+            name='session_status_enum',
+            create_type=False  # ✅ Не создавать сейчас
         )
-        config_type_enum = sa.Enum(
+        config_type_col = sa.Enum(
             'string', 
             'integer', 
             'float', 
             'boolean', 
             'json', 
-            name='config_type_enum'
+            name='config_type_enum',
+            create_type=False  # ✅ Не создавать сейчас
         )
         
-        session_type_enum.create(bind)
-        session_status_enum.create(bind)
-        config_type_enum.create(bind)
-        
-        session_type_col = session_type_enum
-        status_type = session_status_enum
-        config_type_col = config_type_enum
+        # ✅ УДАЛЕНО: Явное создание типов (SQLAlchemy сделает это автоматически)
+        # session_type_enum.create(bind, checkfirst=True)
+        # session_status_enum.create(bind, checkfirst=True)
+        # config_type_enum.create(bind, checkfirst=True)
     else:
         # Для SQLite используем String
         session_type_col = sa.String(20)
         status_type = sa.String(20)
         config_type_col = sa.String(20)
+
     
     # ========================================================================
     # Создание таблицы users

@@ -31,7 +31,7 @@ try:
 except ImportError:
     REDIS_AVAILABLE = False
 
-# Добавьте эти строки в начало файла после импортов (строка ~37)
+# Добавьте эти строки в начало файла после импортов 
 logger = get_logger(__name__)
 
 class AuthService:
