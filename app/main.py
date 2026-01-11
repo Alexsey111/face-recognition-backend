@@ -126,8 +126,6 @@ async def lifespan(app: FastAPI):
             await db_mod.db_manager.create_tables()
 
             # Seed minimal test data if missing
-            # Use a synchronous sqlite3 insert to avoid async session complexities
-            # and guarantee the seed is present for integration tests.
             try:
                 import sqlite3
                 db_path = test_db_path
@@ -138,7 +136,7 @@ async def lifespan(app: FastAPI):
                     "INSERT OR IGNORE INTO users (id, email, full_name, is_active, created_at) VALUES (?, ?, ?, ?, datetime('now'))",
                     ("test-user-123", "test@example.com", "Test User", 1),
                 )
-                # Insert reference if missing — provide minimal required fields
+                # Insert reference if missing
                 cur.execute(
                     "INSERT OR IGNORE INTO references (id, user_id, label, file_url, embedding, embedding_encrypted, embedding_hash, image_filename, image_size_mb, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
                     (
@@ -160,48 +158,34 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.exception("Failed to prepare test database environment")
 
-        '''# Phase 5: Запуск cleanup scheduler для автоматической очистки
-        try:
-            from .tasks.scheduler import start_global_scheduler
-            start_global_scheduler()
-            logger.info("✅ Cleanup scheduler started")
-        except Exception as e:
-            logger.warning(f"⚠️ Failed to start cleanup scheduler: {e}")
-
-        # Phase 8: Запуск webhook scheduler для retry логики
-        try:
-            from .tasks.scheduler import start_webhook_scheduler
-            start_webhook_scheduler()
-            logger.info("✅ Webhook scheduler started")
-        except Exception as e:
-            logger.warning(f"⚠️ Failed to start webhook scheduler: {e}")'''
+    # ✅ ИСПРАВЛЕНО: Этот блок должен быть СНАРУЖИ if is_test_env
+    # Phase 5+8: Запуск всех scheduler'ов
+    try:
+        from .tasks.scheduler import start_schedulers
+        logger.info("Importing schedulers...")
+        start_schedulers()
+        logger.info("✅ All schedulers started")
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to start schedulers: {e}", exc_info=True)
 
     logger.info("✅ Service started successfully")
+    
+    # ✅ ОБЯЗАТЕЛЬНО: yield должен быть здесь
     yield
 
     # Shutdown
     logger.info("🛑 Service shutting down...")
     
-    '''# Phase 5: Остановка cleanup scheduler
+    # Phase 5+8: Остановка всех scheduler'ов
     try:
-        from .tasks.scheduler import stop_global_scheduler
-        stop_global_scheduler()
-        logger.info("✅ Cleanup scheduler stopped")
+        from .tasks.scheduler import stop_schedulers
+        await stop_schedulers()
+        logger.info("✅ All schedulers stopped")
     except Exception as e:
-        logger.warning(f"⚠️ Failed to stop cleanup scheduler: {e}")
+        logger.warning(f"⚠️ Failed to stop schedulers: {e}", exc_info=True)
     
-    # Phase 8: Остановка webhook scheduler
-    try:
-        from .tasks.scheduler import stop_webhook_scheduler
-        stop_webhook_scheduler()
-        logger.info("✅ Webhook scheduler stopped")
-    except Exception as e:
-        logger.warning(f"⚠️ Failed to stop webhook scheduler: {e}")'''
-    
-    # Закрытие подключений (если нужно)
-    # await close_database()
-    # await close_redis()
     logger.info("✅ Shutdown completed")
+
 
 
 def create_app() -> FastAPI:

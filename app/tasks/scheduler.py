@@ -10,6 +10,7 @@ from apscheduler.triggers.cron import CronTrigger
 from ..utils.logger import get_logger
 from ..db.database import get_async_db_manager
 
+
 logger = get_logger(__name__)
 
 

@@ -11,7 +11,7 @@ from ..services.storage_service import StorageService
 from ..services.session_service import SessionService
 from ..services.database_service import DatabaseService
 from ..utils.logger import get_logger
-from ..db.database import AsyncSessionLocal
+from ..db.database import get_async_db_manager  # ✅ ИСПРАВЛЕНО
 
 logger = get_logger(__name__)
 
@@ -22,21 +22,18 @@ UTC_NOW = lambda: datetime.now(timezone.utc)
 class CleanupTasks:
     """Асинхронные фоновые задачи очистки"""
 
-    """
-    Удаляет старые сессии верификации из БД.
-
-    Удаляются записи старше UPLOAD_EXPIRATION_DAYS дней.
-
-    Returns:
-        int: Количество удалённых записей
-    """
-  
     # ------------------------------------------------------------------
     # Verification sessions (DB)
     # ------------------------------------------------------------------
     @staticmethod
     async def cleanup_old_verification_sessions() -> int:
-        async with AsyncSessionLocal() as db:
+        """
+        Удаляет старые сессии верификации из БД.
+        Удаляются записи старше UPLOAD_EXPIRATION_DAYS дней.
+        Returns:
+            int: Количество удалённых записей
+        """
+        async with get_async_db_manager().get_session() as db:  # ✅ ИСПРАВЛЕНО
             try:
                 db_service = DatabaseService(db)
                 deleted = await db_service.verification_crud.cleanup_old_sessions(
@@ -62,7 +59,7 @@ class CleanupTasks:
     # ------------------------------------------------------------------
     @staticmethod
     async def cleanup_old_logs() -> int:
-        async with AsyncSessionLocal() as db:
+        async with get_async_db_manager().get_session() as db:  # ✅ ИСПРАВЛЕНО
             try:
                 db_service = DatabaseService(db)
                 deleted = await db_service.audit_crud.cleanup_old_logs(
@@ -80,8 +77,6 @@ class CleanupTasks:
                 await db.rollback()
                 logger.exception("cleanup_old_logs failed")
                 return 0
-
-
 
     # ------------------------------------------------------------------
     # Stats
@@ -104,7 +99,6 @@ class CleanupTasks:
         results = {
             "verification_sessions": await CleanupTasks.cleanup_old_verification_sessions(),
             "old_logs": await CleanupTasks.cleanup_old_logs(),
-            
         }
 
         total = sum(results.values())
