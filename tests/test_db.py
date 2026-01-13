@@ -280,6 +280,62 @@ class TestReferenceCRUD:
         success = await ReferenceCRUD.delete_reference(db_session, "non-existent-ref-id")
         assert success == False
 
+    # ============================================================================
+    # Concurrent and Cascade Tests for ReferenceCRUD
+    # ============================================================================
+    
+    @pytest.mark.asyncio
+    async def test_concurrent_reference_creation(self, db_session: AsyncSession, test_user: User):
+        """Test that concurrent reference creation doesn't break versioning"""
+        import asyncio
+
+        async def create_ref():
+            return await ReferenceCRUD.create_reference(
+                db_session,
+                user_id=test_user.id,
+                embedding=f"mock_embedding_{uuid.uuid4().hex[:8]}",
+                embedding_encrypted=b"encrypted_data",
+                embedding_hash=f"hash_{uuid.uuid4().hex[:8]}",
+                quality_score=0.95,
+                image_filename="photo.jpg",
+                image_size_mb=2.5,
+                image_format="JPG"
+            )
+
+        # Create 5 references concurrently
+        refs = await asyncio.gather(*[create_ref() for _ in range(5)])
+
+        # All references should have unique versions (1-5)
+        versions = sorted([r.version for r in refs])
+        assert versions == [1, 2, 3, 4, 5]
+
+    @pytest.mark.asyncio
+    async def test_user_cascade_delete(self, db_session: AsyncSession, test_user: User):
+        """Test that deleting user also deletes references"""
+        # Create a reference
+        ref = await ReferenceCRUD.create_reference(
+            db_session,
+            user_id=test_user.id,
+            embedding="mock_embedding",
+            embedding_encrypted=b"encrypted_data",
+            embedding_hash="hash123",
+            quality_score=0.95,
+            image_filename="photo.jpg",
+            image_size_mb=2.5,
+            image_format="JPG"
+        )
+        
+        # Verify reference exists
+        assert ref is not None
+        assert await ReferenceCRUD.get_reference_by_id(db_session, ref.id) is not None
+
+        # Delete user (cascade should delete references)
+        await UserCRUD.delete_user(db_session, test_user.id)
+
+        # Reference should be deleted
+        deleted_ref = await ReferenceCRUD.get_reference_by_id(db_session, ref.id)
+        assert deleted_ref is None
+
 # ============================================================================
 # Verification Session Tests
 # ============================================================================

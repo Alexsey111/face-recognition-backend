@@ -13,9 +13,9 @@ from sqlalchemy.orm import relationship, Mapped, mapped_column
 # Импортируем Base из database модуля
 from .database import Base
 
-# ============================================================================
+# ====================================================================
 # Enums
-# ============================================================================
+# ====================================================================
 
 class VerificationStatus(str, enum.Enum):
     PENDING = "pending"
@@ -36,9 +36,9 @@ class ActionType(str, enum.Enum):
     AUTH_SUCCESS = "auth_success"
     AUTH_FAILED = "auth_failed"
 
-# ============================================================================
+# ====================================================================
 # User Model
-# ============================================================================
+# ====================================================================
 
 class User(Base):
     __tablename__ = "users"
@@ -77,12 +77,13 @@ class User(Base):
     def __repr__(self):
         return f"<User(id={self.id}, email={self.email})>"
 
-# ============================================================================
+# ====================================================================
 # Reference Model (Face Embedding Storage)
-# ============================================================================
+# ====================================================================
 
 class Reference(Base):
     __tablename__ = "references"
+    __comment__ = "Face embedding storage with encrypted and fast-access variants"
     __table_args__ = (
         #  Все индексы создаются только в миграциях
     )
@@ -91,46 +92,15 @@ class Reference(Base):
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     
     # Embedding data
-    embedding = Column(JSON, nullable=False)
+    # embedding_encrypted - для безопасного хранения (bytes)
+    # embedding - для быстрого доступа (JSON, может быть null)
+    embedding_encrypted = Column(LargeBinary, nullable=False)
+    embedding = Column(JSON, nullable=True)  # ← nullable=True если не всегда нужно
     embedding_version = Column(String(20), nullable=True)
     
-    # Image information
-    image_url = Column(String(512), nullable=True)
-    image_hash = Column(String(64), nullable=True)
-    thumbnail_url = Column(String(512), nullable=True)
-    
-    # Metadata
-    label = Column(String(255), nullable=True)
-    description = Column(Text, nullable=True)
-    metadata_info = Column(JSON, nullable=True)
-    
-    # Quality metrics
-    face_quality_score = Column(Float, nullable=True)
-    face_confidence = Column(Float, nullable=True)
-    
-    # Status
-    is_active = Column(Boolean, default=True, nullable=False)
-    is_primary = Column(Boolean, default=False, nullable=False)
-    
-    # Timestamps
-    created_at = Column(DateTime, server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-    last_used_at = Column(DateTime, nullable=True)
-    
-    # Usage statistics
-    usage_count = Column(Integer, default=0, nullable=False)
-    successful_matches = Column(Integer, default=0, nullable=False)
-    
-    # Relationships
-    user = relationship("User", back_populates="references")
-    verification_sessions = relationship("VerificationSession", back_populates="reference")
-    
-    def __repr__(self):
-        return f"<Reference(id={self.id}, user_id={self.user_id}, label={self.label})>"
-
-# ============================================================================
+# ====================================================================
 # Verification Session Model
-# ============================================================================
+# ====================================================================
 
 class VerificationSession(Base):
     __tablename__ = "verification_sessions"
@@ -195,9 +165,9 @@ class VerificationSession(Base):
     def __repr__(self):
         return f"<VerificationSession(id={self.id}, status={self.status})>"
 
-# ============================================================================
+# ====================================================================
 # Audit Log Model
-# ============================================================================
+# ====================================================================
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
@@ -237,9 +207,9 @@ class AuditLog(Base):
     def __repr__(self):
         return f"<AuditLog(action={self.action}, user_id={self.user_id})>"
 
-# ============================================================================
+# ====================================================================
 # System Configuration Model
-# ============================================================================
+# ====================================================================
 
 class SystemConfig(Base):
     __tablename__ = "system_config"
@@ -265,9 +235,9 @@ class SystemConfig(Base):
     def __repr__(self):
         return f"<SystemConfig(key={self.key}, value={self.value})>"
 
-# ============================================================================
+# ====================================================================
 # API Keys Model
-# ============================================================================
+# ====================================================================
 
 class ApiKey(Base):
     __tablename__ = "api_keys"
@@ -297,9 +267,9 @@ class ApiKey(Base):
     def __repr__(self):
         return f"<ApiKey(user_id={self.user_id}, name={self.name})>"
 
-# ============================================================================
+# ====================================================================
 # Webhook Models
-# ============================================================================
+# ====================================================================
 
 class WebhookEventType(str, enum.Enum):
     """Типы событий для webhook"""

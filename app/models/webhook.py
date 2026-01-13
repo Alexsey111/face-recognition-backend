@@ -3,7 +3,7 @@ Pydantic модели для webhook системы.
 """
 
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field, validator, ConfigDict
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from datetime import datetime
 from enum import Enum
 
@@ -42,7 +42,8 @@ class WebhookConfigBase(BaseModel):
     max_retries: int = Field(default=3, ge=0, le=10, description="Максимальное количество попыток")
     retry_delay: int = Field(default=1, ge=1, le=60, description="Базовая задержка retry в секундах")
     
-    @validator('webhook_url')
+    @field_validator('webhook_url')
+    @classmethod
     def validate_webhook_url(cls, v):
         if not v.startswith(('http://', 'https://')):
             raise ValueError('Webhook URL must start with http:// or https://')
@@ -71,8 +72,7 @@ class WebhookConfig(WebhookConfigBase):
     created_at: datetime = Field(..., description="Дата создания")
     updated_at: datetime = Field(..., description="Дата обновления")
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class WebhookLogBase(BaseModel):
@@ -112,8 +112,7 @@ class WebhookLog(WebhookLogBase):
     id: str = Field(..., description="Уникальный ID записи")
     created_at: datetime = Field(..., description="Дата создания")
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class WebhookPayload(BaseModel):

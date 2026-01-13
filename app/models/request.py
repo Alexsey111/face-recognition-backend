@@ -41,15 +41,15 @@ class UploadRequest(BaseModel):
     image_data: str = Field(
         ...,
         description="Изображение в формате base64 или URL",
-        example="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ...",
+        json_schema_extra={"example": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ..."}
     )
     user_id: Optional[str] = Field(
-        None, description="Идентификатор пользователя", example="user_123"
+        None, description="Идентификатор пользователя", json_schema_extra={"example": "user_123"}
     )
     metadata: Optional[Dict[str, Any]] = Field(
         None,
         description="Дополнительные метаданные",
-        example={"source": "mobile_app", "device_id": "device_456"},
+        json_schema_extra={"example": {"source": "mobile_app", "device_id": "device_456"}}
     )
     reference_id: Optional[str] = Field(
         None, description="ID эталонного изображения для сравнения"
@@ -83,7 +83,7 @@ class VerifyRequest(BaseModel):
     """
 
     session_id: str = Field(
-        ..., description="ID сессии верификации", example="verify_session_123"
+        ..., description="ID сессии верификации", json_schema_extra={"example": "verify_session_123"}
     )
     image_data: str = Field(
         ..., description="Изображение для верификации в формате base64 или URL"
@@ -115,7 +115,7 @@ class LivenessRequest(BaseModel):
     """
 
     session_id: str = Field(
-        ..., description="ID сессии проверки живости", example="liveness_session_456"
+        ..., description="ID сессии проверки живости", json_schema_extra={"example": "liveness_session_456"}
     )
     image_data: str = Field(
         ..., description="Изображение для проверки живости в формате base64 или URL"
@@ -123,12 +123,12 @@ class LivenessRequest(BaseModel):
     challenge_type: Optional[str] = Field(
         "passive",
         description="Тип проверки: passive, active, blink, smile, turn_head, video_blink, video_smile, video_head_turn",
-        example="passive",
+        json_schema_extra={"example": "passive"}
     )
     challenge_data: Optional[Dict[str, Any]] = Field(
         None,
         description="Данные для активной проверки (движения, повороты головы)",
-        example={"rotation_x": 15, "rotation_y": 10, "instruction": "Turn head slightly"},
+        json_schema_extra={"example": {"rotation_x": 15, "rotation_y": 10, "instruction": "Turn head slightly"}}
     )
 
     @field_validator("challenge_type")
@@ -196,8 +196,8 @@ class BatchEmbeddingRequest(BaseModel):
     images: List[str] = Field(
         ...,
         description="Список изображений в формате base64 или URL",
-        min_items=1,
-        max_items=100
+        min_length=1,
+        max_length=100
     )
     batch_size: int = Field(
         8,
@@ -232,14 +232,14 @@ class BatchVerificationRequest(BaseModel):
     images: List[str] = Field(
         ...,
         description="Список изображений для верификации",
-        min_items=1,
-        max_items=100
+        min_length=1,
+        max_length=100
     )
     reference_embedding: List[float] = Field(
         ...,
         description="Эталонный эмбеддинг для сравнения",
-        min_items=128,
-        max_items=512
+        min_length=128,
+        max_length=512
     )
     threshold: float = Field(
         0.8,
@@ -327,10 +327,10 @@ class ReferenceCreateRequest(BaseModel):
         ..., description="Изображение для создания эталона в формате base64 или URL"
     )
     user_id: str = Field(
-        ..., description="Идентификатор пользователя", example="user_123"
+        ..., description="Идентификатор пользователя", json_schema_extra={"example": "user_123"}
     )
     label: Optional[str] = Field(
-        None, description="Метка для эталона", example="reference_photo_1"
+        None, description="Метка для эталона", json_schema_extra={"example": "reference_photo_1"}
     )
     metadata: Optional[Dict[str, Any]] = Field(
         None, description="Дополнительные метаданные"
@@ -382,10 +382,10 @@ class AdminStatsRequest(BaseModel):
     """
 
     date_from: Optional[str] = Field(
-        None, description="Начальная дата в формате YYYY-MM-DD", example="2024-01-01"
+        None, description="Начальная дата в формате YYYY-MM-DD", json_schema_extra={"example": "2024-01-01"}
     )
     date_to: Optional[str] = Field(
-        None, description="Конечная дата в формате YYYY-MM-DD", example="2024-01-31"
+        None, description="Конечная дата в формате YYYY-MM-DD", json_schema_extra={"example": "2024-01-31"}
     )
     include_user_stats: bool = Field(
         False, description="Включить статистику по пользователям"

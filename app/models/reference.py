@@ -271,10 +271,10 @@ class ReferenceStats(BaseModel):
     quality_distribution: Dict[str, int] = Field(
         ...,
         description="Распределение по качеству",
-        example={"excellent": 45, "good": 30, "fair": 20, "poor": 5},
+        json_schema_extra={"example": {"excellent": 45, "good": 30, "fair": 20, "poor": 5}}
     )
     user_distribution: Dict[str, int] = Field(
         ...,
         description="Распределение по пользователям",
-        example={"user_123": 15, "user_456": 8, "user_789": 3},
+        json_schema_extra={"example": {"user_123": 15, "user_456": 8, "user_789": 3}}
     )

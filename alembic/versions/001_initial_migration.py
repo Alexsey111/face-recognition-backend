@@ -356,7 +356,7 @@ def downgrade() -> None:
     
     # Удаление enum типов только для PostgreSQL
     if is_postgresql:
-        op.execute('DROP TYPE IF EXISTS config_type_enum')
-        op.execute('DROP TYPE IF EXISTS session_status_enum')
-        op.execute('DROP TYPE IF EXISTS session_type_enum')
+        op.execute('DROP TYPE IF EXISTS config_type_enum CASCADE')
+        op.execute('DROP TYPE IF EXISTS session_status_enum CASCADE')
+        op.execute('DROP TYPE IF EXISTS session_type_enum CASCADE')
         # ✅ REMOVED: user_role_enum (was deleted)

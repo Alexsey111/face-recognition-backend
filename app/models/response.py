@@ -4,7 +4,7 @@ Pydantic модели для ответов API.
 """
 
 from typing import Optional, List, Dict, Any, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime, timezone
 import uuid
 
@@ -13,20 +13,17 @@ class BaseResponse(BaseModel):
     """
     Базовый класс для всех ответов API.
     """
+    model_config = ConfigDict(populate_by_name=True)
 
     success: bool = Field(..., description="Статус выполнения операции")
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),  # ✅ timezone-aware
+        default_factory=lambda: datetime.now(timezone.utc),
         description="Время выполнения",
     )
     message: Optional[str] = Field(None, description="Сообщение о результате")
     request_id: str = Field(
         default_factory=lambda: str(uuid.uuid4()), description="Уникальный ID запроса"
     )
-
-    class Config:
-        json_encoders = {datetime: lambda v: v.isoformat()}  # ✅ Для JSON сериализации
-
 
 class ErrorResponse(BaseResponse):
     """
@@ -48,7 +45,7 @@ class UploadResponse(BaseResponse):
     file_size: Optional[int] = Field(None, description="Размер файла в байтах")
     image_format: Optional[str] = Field(None, description="Формат изображения")
     image_dimensions: Optional[Dict[str, int]] = Field(
-        None, description="Размеры изображения", example={"width": 1920, "height": 1080}
+        None, description="Размеры изображения", json_schema_extra={"example": {"width": 1920, "height": 1080}}
     )
     processing_time: Optional[float] = Field(
         None, description="Время обработки в секундах"

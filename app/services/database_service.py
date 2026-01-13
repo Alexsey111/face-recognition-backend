@@ -31,9 +31,8 @@ class BiometricService:
     """
 
     def __init__(self, db: Optional[AsyncSession] = None):
-        # Support optional db for backwards compatibility during imports/tests.
-        # If db is None, methods that require a session should obtain one
-        # from the application's DatabaseManager or be mocked in tests.
+        if db is None:
+            raise ValueError("Database session is required")
         self.db = db
 
     # =========================================================================

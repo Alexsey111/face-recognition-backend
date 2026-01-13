@@ -196,8 +196,8 @@ def downgrade() -> None:
     op.drop_table('webhook_configs')
     
     # Удаление enum типов
-    op.execute('DROP TYPE IF EXISTS webhook_status_enum')
-    op.execute('DROP TYPE IF EXISTS webhook_event_type_enum')
+    op.execute('DROP TYPE IF EXISTS webhook_status_enum CASCADE')
+    op.execute('DROP TYPE IF EXISTS webhook_event_type_enum CASCADE')
     
     # ⚠️ Восстановление plaintext embedding (НЕ РЕКОМЕНДУЕТСЯ)
     print("\n⚠️  WARNING: Restoring plaintext 'embedding' field")
