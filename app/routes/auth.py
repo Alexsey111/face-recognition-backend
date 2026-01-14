@@ -4,143 +4,100 @@ Login, logout, refresh tokens и управление сессиями.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
-from fastapi.security import HTTPBearer
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, Field
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, AsyncGenerator
 
 from ..services.auth_service import AuthService
-from ..services.database_service import DatabaseService
+from ..services.database_service import BiometricService
 from ..utils.validators import validate_email, validate_password
 from ..utils.logger import get_logger
 from ..utils.exceptions import ValidationError, UnauthorizedError, NotFoundError
-from ..middleware.auth import RequireAuth, RequireRole
+from ..db.database import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = get_logger(__name__)
 
 # Схема безопасности для Bearer токенов
 security = HTTPBearer(auto_error=False)
 
-
-# =============================================================================
-# Зависимости FastAPI
-# =============================================================================
-
-async def get_current_user_with_token(request: Request) -> tuple[str, str]:
-    """
-    Зависимость FastAPI для получения ID пользователя и токена.
-    
-    Returns:
-        tuple: (user_id, token)
-        
-    Raises:
-        HTTPException: Если токен недействителен или отсутствует
-    """
-    try:
-        # Получаем токен из заголовка Authorization
-        auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authorization header missing or invalid"
-            )
-        
-        token = auth_header.split(" ", 1)[1]
-        
-        # Верифицируем токен и получаем информацию о пользователе
-        user_info = await auth_service.get_user_info_from_token(token)
-        
-        if not user_info or "user_id" not in user_info:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token"
-            )
-        
-        # Проверяем, что пользователь существует и активен
-        user = await db_service.get_user(user_info["user_id"])
-        if not user or not user.get("is_active", True):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User not found or inactive"
-            )
-        
-        return user_info["user_id"], token
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting current user: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication failed"
-        )
-
-
-async def get_current_user_id(request: Request) -> str:
-    """
-    Зависимость FastAPI для получения ID текущего пользователя из JWT токена.
-    
-    Используется как Depends(get_current_user_id) в endpoints.
-    
-    Returns:
-        str: ID пользователя
-        
-    Raises:
-        HTTPException: Если токен недействителен или отсутствует
-    """
-    try:
-        # Получаем токен из заголовка Authorization
-        auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authorization header missing or invalid"
-            )
-        
-        token = auth_header.split(" ", 1)[1]
-        
-        # Верифицируем токен и получаем информацию о пользователе
-        user_info = await auth_service.get_user_info_from_token(token)
-        
-        if not user_info or "user_id" not in user_info:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token"
-            )
-        
-        # Проверяем, что пользователь существует и активен
-        user = await db_service.get_user(user_info["user_id"])
-        if not user or not user.get("is_active", True):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User not found or inactive"
-            )
-        
-        return user_info["user_id"]
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting current user: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication failed"
-        )
-
-
-async def get_current_user(request: Request) -> str:
-    """
-    Алиас для get_current_user_id для обратной совместимости.
-    """
-    return await get_current_user_id(request)
-
-# Инициализация сервисов
-auth_service = AuthService()
-db_service = DatabaseService()
-
 # Создание роутера
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
+
+# =============================================================================
+# Dependency Functions
+# =============================================================================
+
+async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
+    """
+    Dependency для получения БД сессии.
+    """
+    from ..db.database import db_manager
+    async with db_manager.get_session() as session:
+        yield session
+
+
+def get_auth_service(db: AsyncSession = Depends(get_db_session)) -> AuthService:
+    """
+    Dependency для получения AuthService с DB session.
+    """
+    return AuthService(db=db)
+
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: AsyncSession = Depends(get_db_session)
+) -> str:
+    """
+    Dependency to extract current user from JWT token.
+    Returns user_id.
+    """
+    # Создаём auth_service БЕЗ db (не нужен для verify_token)
+    auth_service = AuthService()
+    token = credentials.credentials
+    
+    try:
+        user_info = await auth_service.get_user_info_from_token(token)
+        user_id = user_info.get("user_id")
+        
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token"
+            )
+        
+        # Verify user exists
+        db_service = BiometricService(db)
+        user = await db_service.get_user(user_id)
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found"
+            )
+        
+        if not user.get("is_active", True):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User account is inactive"
+            )
+        
+        return user_id
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting current user: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token"
+        )
+
+
+# =============================================================================
 # Pydantic модели для запросов и ответов
+# =============================================================================
 
 
 class LoginRequest(BaseModel):
@@ -152,9 +109,9 @@ class LoginRequest(BaseModel):
 class RegisterRequest(BaseModel):
     """Запрос на регистрацию."""
     email: EmailStr = Field(..., description="Email пользователя")
-    username: str = Field(..., min_length=3, max_length=50, description="Имя пользователя")
     password: str = Field(..., min_length=8, description="Пароль пользователя")
     full_name: Optional[str] = Field(None, max_length=100, description="Полное имя")
+    phone: Optional[str] = Field(None, description="Номер телефона")
 
 
 class TokenResponse(BaseModel):
@@ -174,7 +131,7 @@ class UserInfo(BaseModel):
     """Информация о пользователе."""
     user_id: str = Field(..., description="ID пользователя")
     email: str = Field(..., description="Email пользователя")
-    username: str = Field(..., description="Имя пользователя")
+    full_name: Optional[str] = Field(None, description="Полное имя")
     role: str = Field(..., description="Роль пользователя")
     permissions: List[str] = Field(default_factory=list, description="Разрешения пользователя")
     is_active: bool = Field(..., description="Активен ли пользователь")
@@ -215,7 +172,9 @@ class ErrorResponse(BaseModel):
     details: Optional[Dict[str, Any]] = Field(None, description="Дополнительные детали")
 
 
+# =============================================================================
 # Эндпоинты
+# =============================================================================
 
 
 @router.post(
@@ -228,13 +187,20 @@ class ErrorResponse(BaseModel):
         422: {"model": ErrorResponse, "description": "Ошибка валидации"}
     }
 )
-async def login(request: LoginRequest, http_request: Request):
+async def login(
+    request: LoginRequest,
+    http_request: Request,
+    auth_service: AuthService = Depends(get_auth_service),
+    db: AsyncSession = Depends(get_db_session)
+):
     """
     Вход в систему с email и паролем.
     
     - **email**: Email пользователя
     - **password**: Пароль пользователя
     """
+    db_service = BiometricService(db)
+    
     try:
         logger.info(f"Login attempt for email: {request.email}")
         
@@ -252,7 +218,7 @@ async def login(request: LoginRequest, http_request: Request):
             )
         
         # Проверка активности пользователя
-        if not user.get("is_active", True):
+        if not user.is_active:
             logger.warning(f"Login failed - user inactive: {request.email}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -260,7 +226,7 @@ async def login(request: LoginRequest, http_request: Request):
             )
         
         # Проверка пароля
-        stored_password_hash = user.get("password_hash")
+        stored_password_hash = user.password_hash
         if not stored_password_hash:
             logger.error(f"Login failed - no password hash for user: {request.email}")
             raise HTTPException(
@@ -286,24 +252,24 @@ async def login(request: LoginRequest, http_request: Request):
         client_ip = http_request.client.host
         
         # Создаем сессию с токенами
-        session_tokens = await auth_service.create_user_session(
-            user_id=user["id"],
+        session_tokens = auth_service.create_user_session(  # ❌ БЕЗ await
+            user_id=user.id,
             user_agent=user_agent,
             ip_address=client_ip
         )
         
         # Формируем информацию о пользователе
         user_info = UserInfo(
-            user_id=user["id"],
-            email=user["email"],
-            username=user["username"],
-            role=user.get("role", "user"),
-            permissions=user.get("permissions", []),
-            is_active=user.get("is_active", True),
-            created_at=user.get("created_at", "")
+            user_id=user.id,
+            email=user.email,
+            full_name=user.full_name,
+            role="user",
+            permissions=["read_own_data"],
+            is_active=user.is_active,
+            created_at=user.created_at.isoformat()
         )
         
-        logger.info(f"Login successful for user: {user['id']}")
+        logger.info(f"Login successful for user: {user.id}")
         
         return LoginResponse(
             user=user_info,
@@ -336,15 +302,24 @@ async def login(request: LoginRequest, http_request: Request):
         422: {"model": ErrorResponse, "description": "Ошибка валидации"}
     }
 )
-async def register(request: RegisterRequest):
+async def register(
+    request: RegisterRequest,
+    http_request: Request,
+    auth_service: AuthService = Depends(get_auth_service),
+    db: AsyncSession = Depends(get_db_session)
+):
     """
     Регистрация нового пользователя.
     
     - **email**: Email пользователя
-    - **username**: Имя пользователя
     - **password**: Пароль пользователя
     - **full_name**: Полное имя (опционально)
+    - **phone**: Номер телефона (опционально)
     """
+    from ..models.user import UserCreate
+    
+    db_service = BiometricService(db)
+    
     try:
         logger.info(f"Registration attempt for email: {request.email}")
         
@@ -361,48 +336,47 @@ async def register(request: RegisterRequest):
                 detail="User with this email already exists"
             )
         
-        # Проверяем username
-        existing_username = await db_service.get_user_by_username(request.username)
-        if existing_username:
-            logger.warning(f"Registration failed - username taken: {request.username}")
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Username is already taken"
-            )
-        
         # Хешируем пароль
         password_hash = await auth_service.hash_password(request.password)
         
-        # Создаем пользователя
-        user_data = {
-            "email": request.email,
-            "username": request.username,
-            "password_hash": password_hash,
-            "full_name": request.full_name,
-            "role": "user",
-            "permissions": ["read_own_data"],
-            "is_active": True
-        }
+        # Создаём объект UserCreate
+        user_create = UserCreate(
+            email=request.email,
+            password_hash=password_hash,
+            full_name=request.full_name,
+            phone=request.phone,
+        )
         
-        new_user = await db_service.create_user(user_data)
+        # Получаем IP и User-Agent для аудита
+        user_agent = http_request.headers.get("user-agent")
+        client_ip = http_request.client.host
+        
+        # Создаём пользователя с аудитом
+        new_user = await db_service.create_user_with_audit(
+            user=user_create,
+            ip_address=client_ip,
+            user_agent=user_agent
+        )
         
         # Создаем сессию с токенами
-        session_tokens = await auth_service.create_user_session(
-            user_id=new_user["id"]
+        session_tokens = auth_service.create_user_session(  # ❌ БЕЗ await
+            user_id=new_user.id,
+            user_agent=user_agent,
+            ip_address=client_ip
         )
         
         # Формируем информацию о пользователе
         user_info = UserInfo(
-            user_id=new_user["id"],
-            email=new_user["email"],
-            username=new_user["username"],
-            role=new_user.get("role", "user"),
-            permissions=new_user.get("permissions", []),
-            is_active=new_user.get("is_active", True),
-            created_at=new_user.get("created_at", "")
+            user_id=new_user.id,
+            email=new_user.email,
+            full_name=new_user.full_name,
+            role="user",
+            permissions=["read_own_data"],
+            is_active=new_user.is_active,
+            created_at=new_user.created_at.isoformat()
         )
         
-        logger.info(f"Registration successful for user: {new_user['id']}")
+        logger.info(f"Registration successful for user: {new_user.id}")
         
         return LoginResponse(
             user=user_info,
@@ -429,17 +403,25 @@ async def register(request: RegisterRequest):
     "/logout",
     response_model=LogoutResponse,
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(get_current_user_with_token)],
     responses={
         401: {"model": ErrorResponse, "description": "Требуется аутентификация"}
     }
 )
-async def logout(user_data: tuple[str, str] = Depends(get_current_user_with_token)):
+async def logout(
+    request: Request,
+    current_user_id: str = Depends(get_current_user),
+    auth_service: AuthService = Depends(get_auth_service)
+):
     """
     Выход из системы и отзыв токенов.
     """
     try:
-        user_id, token = user_data
+        # Получаем токен из заголовка Authorization
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return LogoutResponse()
+        
+        token = auth_header.split(" ", 1)[1]
         
         # Проверяем, является ли токен валидным JWT (содержит точки)
         if token and "." in token and len(token.split(".")) == 3:
@@ -448,10 +430,9 @@ async def logout(user_data: tuple[str, str] = Depends(get_current_user_with_toke
                 await auth_service.revoke_token(token)
             except Exception as e:
                 # Логируем ошибку, но не прерываем процесс logout
-                logger.warning(f"Error revoking token for user {user_id}: {str(e)}")
+                logger.warning(f"Error revoking token: {str(e)}")
         
-        logger.info(f"Logout successful for user: {user_id}")
-        
+        logger.info(f"Logout successful for user: {current_user_id}")
         return LogoutResponse()
         
     except Exception as e:
@@ -469,7 +450,10 @@ async def logout(user_data: tuple[str, str] = Depends(get_current_user_with_toke
         422: {"model": ErrorResponse, "description": "Ошибка валидации"}
     }
 )
-async def refresh_token(request: RefreshTokenRequest):
+async def refresh_token(
+    request: RefreshTokenRequest,
+    auth_service: AuthService = Depends(get_auth_service)
+):
     """
     Обновление access токена с помощью refresh токена.
     
@@ -485,10 +469,10 @@ async def refresh_token(request: RefreshTokenRequest):
                 detail="Refresh token is required"
             )
         
-        # ✅ Используем token rotation (возвращает новые access И refresh)
+        # Используем token rotation (возвращает новые access И refresh)
         tokens = await auth_service.refresh_access_token(request.refresh_token)
-        logger.info(f"Token rotation successful")
-        return TokenResponse(**tokens)  # ✅ Оба токена новые
+        logger.info("Token rotation successful")
+        return TokenResponse(**tokens)
         
     except HTTPException:
         raise
@@ -504,20 +488,23 @@ async def refresh_token(request: RefreshTokenRequest):
     "/me",
     response_model=UserInfo,
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(get_current_user_id)],
     responses={
         401: {"model": ErrorResponse, "description": "Требуется аутентификация"},
         404: {"model": ErrorResponse, "description": "Пользователь не найден"}
     }
 )
-async def get_current_user_info(user_id: str = Depends(get_current_user_id)) -> UserInfo:
+async def get_current_user_info(
+    current_user_id: str = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session)
+) -> UserInfo:
     """
     Получение информации о текущем аутентифицированном пользователе.
     """
+    db_service = BiometricService(db)
+    
     try:
-        
         # Получаем пользователя из базы данных
-        user = await db_service.get_user(user_id)
+        user = await db_service.get_user(current_user_id)
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -525,25 +512,25 @@ async def get_current_user_info(user_id: str = Depends(get_current_user_id)) -> 
             )
         
         # Проверяем активность пользователя
-        if not user.get("is_active", True):
+        if not user.is_active:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Account is deactivated"
             )
         
-        user_info = UserInfo(
-            user_id=user["id"],
-            email=user["email"],
-            username=user["username"],
-            role=user.get("role", "user"),
-            permissions=user.get("permissions", []),
-            is_active=user.get("is_active", True),
-            created_at=user.get("created_at", "")
+        user_response = UserInfo(
+            user_id=user.id,
+            email=user.email,
+            full_name=user.full_name,
+            role="user",
+            permissions=["read_own_data"],
+            is_active=user.is_active,
+            created_at=user.created_at.isoformat()
         )
         
-        logger.debug(f"User info retrieved for: {user_id}")
+        logger.debug(f"User info retrieved for: {current_user_id}")
         
-        return user_info
+        return user_response
         
     except HTTPException:
         raise
@@ -563,10 +550,16 @@ async def get_current_user_info(user_id: str = Depends(get_current_user_id)) -> 
         401: {"model": ErrorResponse, "description": "Неверный токен"}
     }
 )
-async def verify_token(request: Request):
+async def verify_token(
+    request: Request,
+    db: AsyncSession = Depends(get_db_session)
+):
     """
     Верификация JWT токена и получение информации о пользователе.
     """
+    auth_service = AuthService()
+    db_service = BiometricService(db)
+    
     try:
         # Получаем токен из заголовка Authorization
         auth_header = request.headers.get("Authorization")
@@ -590,13 +583,13 @@ async def verify_token(request: Request):
                 return VerifyTokenResponse(valid=False)
             
             user_response = UserInfo(
-                user_id=user["id"],
-                email=user["email"],
-                username=user["username"],
-                role=user.get("role", "user"),
-                permissions=user.get("permissions", []),
-                is_active=user.get("is_active", True),
-                created_at=user.get("created_at", "")
+                user_id=user.id,
+                email=user.email,
+                full_name=user.full_name,
+                role="user",
+                permissions=["read_own_data"],
+                is_active=user.is_active,
+                created_at=user.created_at.isoformat()
             )
         
             return VerifyTokenResponse(
@@ -617,23 +610,30 @@ async def verify_token(request: Request):
 @router.post(
     "/change-password",
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(get_current_user_id)],
     responses={
         400: {"model": ErrorResponse, "description": "Неверный текущий пароль"},
         422: {"model": ErrorResponse, "description": "Ошибка валидации"}
     }
 )
-async def change_password(request: ChangePasswordRequest, user_id: str = Depends(get_current_user_id)):
+async def change_password(
+    request: ChangePasswordRequest,
+    current_user_id: str = Depends(get_current_user),
+    auth_service: AuthService = Depends(get_auth_service),
+    db: AsyncSession = Depends(get_db_session)
+):
     """
     Смена пароля аутентифицированного пользователя.
     
     - **current_password**: Текущий пароль
     - **new_password**: Новый пароль
     """
+    from ..models.user import UserUpdate
+    
+    db_service = BiometricService(db)
+    
     try:
-        
         # Получаем пользователя
-        user = await db_service.get_user(user_id)
+        user = await db_service.get_user(current_user_id)
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -641,7 +641,7 @@ async def change_password(request: ChangePasswordRequest, user_id: str = Depends
             )
         
         # Проверяем текущий пароль
-        stored_password_hash = user.get("password_hash")
+        stored_password_hash = user.password_hash
         if not stored_password_hash:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -665,10 +665,13 @@ async def change_password(request: ChangePasswordRequest, user_id: str = Depends
         # Хешируем новый пароль
         new_password_hash = await auth_service.hash_password(request.new_password)
         
-        # Обновляем пароль в базе данных
-        await db_service.update_user(user_id, {"password_hash": new_password_hash})
+        # Обновляем пароль в базе данных (нужно добавить метод update_user_with_audit)
+        # Пока используем прямое обновление
+        user.password_hash = new_password_hash
+        db.add(user)
+        await db.commit()
         
-        logger.info(f"Password changed successfully for user: {user_id}")
+        logger.info(f"Password changed successfully for user: {current_user_id}")
         
         return {"success": True, "message": "Password changed successfully"}
         

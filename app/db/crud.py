@@ -54,6 +54,7 @@ class UserCRUD:
         try:
             new_user = User(
                 email=user.email,
+                password_hash=user.password_hash,  # ← ДОБАВИТЬ
                 phone=user.phone,
                 full_name=user.full_name
             )
@@ -145,7 +146,7 @@ class ReferenceCRUD:
         stmt = (
             select(Reference)
             .where(Reference.user_id == user_id)
-            .order_by(desc(Reference.version))
+            .order_by(desc(Reference.embedding_version))
             .limit(1)
         )
         result = await db.execute(stmt)
@@ -168,14 +169,14 @@ class ReferenceCRUD:
         return list(result.scalars().all())
 
     @staticmethod
-    async def get_reference_by_version(db: AsyncSession, user_id: str, version: int) -> Optional[Reference]:
+    async def get_reference_by_version(db: AsyncSession, user_id: str, version: str) -> Optional[Reference]:
         """Get reference by specific version"""
         stmt = (
             select(Reference)
             .where(
                 and_(
                     Reference.user_id == user_id,
-                    Reference.version == version
+                    Reference.embedding_version == version
                 )
             )
         )
@@ -256,36 +257,35 @@ class ReferenceCRUD:
         user_id: str,
         embedding_encrypted: bytes,
         embedding_hash: str,
-        quality_score: float,
         image_filename: str,
         image_size_mb: float,
         image_format: str,
         file_url: str = None,
         face_landmarks: dict = None
     ) -> Reference:
-        """✅ ИСПРАВЛЕНО: Добавлена валидация и оптимизация"""
+        """Create reference for user"""
         try:
-            # ✅ ДОБАВЛЕНО: Валидация обязательных полей
             if not embedding_encrypted:
-                raise ValueError("embedding_encrypted is required and cannot be empty")
+                raise ValueError("embedding_encrypted is required")
             if not embedding_hash:
-                raise ValueError("embedding_hash is required and cannot be empty")
+                raise ValueError("embedding_hash is required")
             if not image_filename:
                 raise ValueError("image_filename is required")
                 
-            # ✅ ОПТИМИЗИРОВАНО: Получаем максимальную версию одним запросом
+            # Получаем максимальную версию
             result = await db.execute(
-                select(func.max(Reference.version))
+                select(func.max(Reference.embedding_version))
                 .where(Reference.user_id == user_id)
             )
-            max_version = result.scalar() or 0
-            version = max_version + 1
+            max_version = result.scalar() or "0"
+            version_num = int(max_version) + 1 if max_version != "0" else 1
+            new_version = str(version_num)
             
-            # Получаем последний reference для previous_reference_id (если нужно)
+            # Получаем последний reference
             result = await db.execute(
                 select(Reference.id)
                 .where(Reference.user_id == user_id)
-                .order_by(desc(Reference.version))
+                .order_by(desc(Reference.embedding_version))
                 .limit(1)
             )
             previous_id = result.scalar_one_or_none()
@@ -294,28 +294,25 @@ class ReferenceCRUD:
                 user_id=user_id,
                 embedding_encrypted=embedding_encrypted,
                 embedding_hash=embedding_hash,
-                quality_score=quality_score,
                 image_filename=image_filename,
                 image_size_mb=image_size_mb,
                 image_format=image_format,
                 file_url=file_url or f"file://{image_filename}",
                 face_landmarks=face_landmarks,
-                version=version,
+                embedding_version=new_version,
                 previous_reference_id=previous_id
             )
             
             db.add(new_ref)
             await db.commit()
             await db.refresh(new_ref)
-            logger.info(f"✅ Reference created: {new_ref.id}, version: {version}")
+            logger.info(f"Reference created: {new_ref.id}, version: {new_version}")
             return new_ref
         except ValueError as e:
-            # Валидационные ошибки не требуют rollback
-            logger.error(f"❌ Validation error creating reference: {e}")
+            logger.error(f"Validation error: {e}")
             raise
         except Exception as e:
-            await db.rollback()
-            logger.error(f"❌ Error creating reference: {e}")
+            logger.error(f"Error creating reference: {e}")
             raise
 
     @staticmethod

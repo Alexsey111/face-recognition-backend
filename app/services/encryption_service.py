@@ -112,20 +112,13 @@ class EncryptionService:
             return False
 
     # =========================================================================
-    # Core encryption
+    # Payload packing (no encryption here)
     # =========================================================================
 
-    def _pack_payload(
-        self,
-        data: bytes,
-        metadata: Optional[Dict[str, Any]],
-        version: str,
-    ) -> Tuple[bytes, bytes]:
+    def _pack_payload(self, data: bytes, metadata: Optional[Dict[str, Any]], version: str) -> bytes:
         """
-        Pack data into payload format and generate nonce.
-        Returns (nonce, packed_payload).
+        Pack data into JSON payload (WITHOUT nonce).
         """
-        nonce = secrets.token_bytes(self.NONCE_LENGTH)
         payload = {
             "v": version,
             "alg": self.ALGORITHM,
@@ -133,17 +126,16 @@ class EncryptionService:
             "meta": metadata or {},
             "data": base64.b64encode(data).decode("ascii"),
         }
-        return nonce, json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        return json.dumps(payload, separators=(",", ":")).encode("utf-8")
 
-    def _unpack_payload(self, nonce: bytes, raw: bytes) -> Tuple[bytes, Dict[str, Any]]:
+    def _unpack_payload(self, decrypted_bytes: bytes) -> Tuple[bytes, Dict[str, Any]]:
         """
-        Unpack and decrypt payload.
+        Unpack decrypted JSON payload.
         """
         try:
-            decrypted = self._aesgcm.decrypt(nonce, raw, None)
-            payload = json.loads(decrypted.decode("utf-8"))
+            payload = json.loads(decrypted_bytes.decode("utf-8"))
         except Exception as exc:
-            raise EncryptionError("Invalid encrypted payload format") from exc
+            raise EncryptionError("Invalid decrypted payload format") from exc
 
         if payload.get("alg") != self.ALGORITHM:
             raise EncryptionError("Unsupported encryption algorithm")
@@ -162,6 +154,32 @@ class EncryptionService:
     # Public API
     # =========================================================================
 
+    async def encrypt(self, data: bytes, metadata: Optional[Dict[str, Any]] = None, version: str = SUPPORTED_VERSION) -> bytes:
+        """
+        Encrypt data using AES-256-GCM.
+        
+        Returns: nonce (12 bytes) + encrypted_payload
+        """
+        if data is None:
+            raise EncryptionError("No data to encrypt")
+
+        try:
+            # 1. Pack data into JSON payload
+            payload_bytes = self._pack_payload(data, metadata or {}, version)
+
+            # 2. Generate nonce
+            nonce = secrets.token_bytes(self.NONCE_LENGTH)
+
+            # 3. Encrypt payload
+            encrypted = await asyncio.to_thread(
+                self._aesgcm.encrypt, nonce, payload_bytes, None
+            )
+            
+            # 4. Return: nonce + encrypted_payload
+            return nonce + encrypted
+        except Exception as exc:
+            raise EncryptionError(f"Encryption failed: {exc}") from exc
+
     async def decrypt(self, token: bytes) -> Tuple[bytes, Dict[str, Any]]:
         """
         Decrypt data using AES-256-GCM.
@@ -175,43 +193,21 @@ class EncryptionService:
             raise EncryptionError("Invalid token format: too short")
 
         try:
+            # 1. Extract nonce and encrypted data
             nonce = token[:self.NONCE_LENGTH]
             encrypted_data = token[self.NONCE_LENGTH:]
 
-            # Тяжёлое расшифрование — в отдельный поток
-            decrypted = await asyncio.to_thread(
+            # 2. Decrypt payload
+            decrypted_bytes = await asyncio.to_thread(
                 self._aesgcm.decrypt, nonce, encrypted_data, None
             )
+
+            # 3. Unpack payload
+            data, payload = self._unpack_payload(decrypted_bytes)
+
+            return data, payload
         except Exception as exc:
             raise EncryptionError("Invalid or tampered encrypted data") from exc
-
-        return self._unpack_payload(nonce, decrypted)
-
-    async def encrypt(self, data: bytes, metadata: Optional[Dict[str, Any]] = None, version: str = SUPPORTED_VERSION) -> bytes:
-        """
-        Encrypt data using AES-256-GCM.
-        
-        Returns: nonce (12 bytes) + encrypted_data
-        """
-        if data is None:
-            raise EncryptionError("No data to encrypt")
-
-        try:
-            nonce, payload = self._pack_payload(data, metadata or {}, version)
-            
-            # Шифрование в отдельном потоке
-            encrypted = await asyncio.to_thread(
-                self._aesgcm.encrypt, nonce, payload, None
-            )
-            
-            # Prepend nonce to encrypted data
-            return nonce + encrypted
-        except Exception as exc:
-            raise EncryptionError(f"Encryption failed: {exc}") from exc
-
-    # =========================================================================
-    # Embeddings API (thin wrappers)
-    # =========================================================================
 
     async def encrypt_embedding(self, embedding: bytes) -> bytes:
         return await self.encrypt(
@@ -230,10 +226,6 @@ class EncryptionService:
     async def decrypt_data(self, token: bytes) -> Tuple[bytes, Dict[str, Any]]:
         """Compatibility wrapper returning (data, payload)."""
         return await self.decrypt(token)
-
-    # =========================================================================
-    # File encryption (safe, blocking by design)
-    # =========================================================================
 
     async def decrypt_file(
         self,
@@ -262,10 +254,6 @@ class EncryptionService:
         
         logger.info("File decrypted: %s -> %s", encrypted_path, output_path)
         return output_path
-
-    # =========================================================================
-    # Capabilities & introspection
-    # =========================================================================
 
     def get_encryption_info(self) -> Dict[str, Any]:
         return {

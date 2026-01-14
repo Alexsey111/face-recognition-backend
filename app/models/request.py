@@ -410,20 +410,46 @@ class AdminStatsRequest(BaseModel):
         return v
 
 
-class AuthRequest(BaseModel):
-    """
-    Модель для запроса аутентификации.
-    """
-
-    username: str = Field(
-        ..., description="Имя пользователя или email", example="admin@example.com"
-    )
-    password: str = Field(..., description="Пароль", min_length=8)
-
-
 class TokenRefreshRequest(BaseModel):
     """
     Модель для обновления токена.
     """
 
     refresh_token: str = Field(..., description="Refresh токен")
+
+
+class UserCreate(BaseModel):
+    """Schema для создания пользователя."""
+
+    email: str = Field(..., description="Email пользователя")
+    password: str = Field(..., min_length=8, description="Пароль пользователя")
+    full_name: Optional[str] = Field(None, description="Полное имя")
+    phone: Optional[str] = Field(None, description="Телефон")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "email": "user@example.com",
+                "password": "SecurePass123!",
+                "full_name": "John Doe",
+                "phone": "+1234567890"
+            }
+        }
+    }
+
+
+class UserLogin(BaseModel):
+    """Schema для логина."""
+
+    email: str = Field(..., description="Email пользователя")
+    password: str = Field(..., description="Пароль")
+    phone: Optional[str] = Field(None, description="Телефон (альтернатива email)")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "email": "user@example.com",
+                "password": "SecurePass123!"
+            }
+        }
+    }

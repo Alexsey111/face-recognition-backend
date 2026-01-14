@@ -31,9 +31,21 @@ class BiometricService:
     """
 
     def __init__(self, db: Optional[AsyncSession] = None):
-        if db is None:
-            raise ValueError("Database session is required")
-        self.db = db
+        self._db = db
+
+    @property
+    def db(self) -> AsyncSession:
+        """Lazy initialization of database session."""
+        if self._db is None:
+            raise RuntimeError(
+                "Database session is required. Use context manager: "
+                "async with get_db() as db: ..."
+            )
+        return self._db
+
+    def set_session(self, db: AsyncSession):
+        """Set database session."""
+        self._db = db
 
     # =========================================================================
     # User operations
@@ -42,102 +54,96 @@ class BiometricService:
     async def create_user_with_audit(
         self,
         user: UserCreate,
-        operator_id: Optional[str] = None,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
     ) -> User:
-        async with self.db.begin():
-            new_user = await UserCRUD.create_user(self.db, user)
+        # Используем существующую транзакцию, не создаём новую
+        new_user = await UserCRUD.create_user(self.db, user)
 
-            await AuditLogCRUD.log_action(
-                self.db,
-                action="user_created",
-                resource_type="user",
-                resource_id=new_user.id,
-                user_id=new_user.id,
-                operator_id=operator_id,
-                description=f"User created: {new_user.email}",
-                new_values=user.model_dump(exclude_none=True),
-                ip_address=ip_address,
-                user_agent=user_agent,
-            )
+        await AuditLogCRUD.log_action(
+            self.db,
+            action="user_created",
+            resource_type="user",
+            resource_id=new_user.id,
+            user_id=new_user.id,
+            description=f"User created: {new_user.email}",
+            new_values=user.model_dump(exclude_none=True),
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
 
-            return new_user
+        return new_user
 
     async def update_user_with_audit(
         self,
         user_id: str,
         user_update: UserUpdate,
-        operator_id: Optional[str] = None,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
     ) -> Optional[User]:
-        async with self.db.begin():
-            user = await UserCRUD.get_user(self.db, user_id)
-            if not user:
-                return None
+        # Используем существующую транзакцию, не создаём новую
+        user = await UserCRUD.get_user(self.db, user_id)
+        if not user:
+            return None
 
-            old_values = {
-                "email": user.email,
-                "phone": user.phone,
-                "full_name": user.full_name,
-            }
+        old_values = {
+            "email": user.email,
+            "phone": user.phone,
+            "full_name": user.full_name,
+        }
 
-            updated_user = await UserCRUD.update_user(
-                self.db,
-                user_id,
-                user_update,
-            )
+        updated_user = await UserCRUD.update_user(
+            self.db,
+            user_id,
+            user_update,
+        )
 
-            await AuditLogCRUD.log_action(
-                self.db,
-                action="user_updated",
-                resource_type="user",
-                resource_id=user_id,
-                user_id=user_id,
-                operator_id=operator_id,
-                description="User updated",
-                old_values=old_values,
-                new_values=user_update.model_dump(exclude_unset=True),
-                ip_address=ip_address,
-                user_agent=user_agent,
-            )
+        await AuditLogCRUD.log_action(
+            self.db,
+            action="user_updated",
+            resource_type="user",
+            resource_id=user_id,
+            user_id=user_id,
+            description="User updated",
+            old_values=old_values,
+            new_values=user_update.model_dump(exclude_unset=True),
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
 
-            return updated_user
+        return updated_user
 
     async def delete_user_with_audit(
         self,
         user_id: str,
-        operator_id: Optional[str] = None,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
     ) -> bool:
-        async with self.db.begin():
-            user = await UserCRUD.get_user(self.db, user_id)
-            if not user:
-                return False
+        # Используем существующую транзакцию, не создаём новую
+        user = await UserCRUD.get_user(self.db, user_id)
+        if not user:
+            return False
 
-            old_values = {
-                "email": user.email,
-                "is_active": user.is_active,
-            }
+        old_values = {
+            "email": user.email,
+            "is_active": user.is_active,
+        }
 
-            success = await UserCRUD.delete_user(self.db, user_id)
+        success = await UserCRUD.delete_user(self.db, user_id)
 
-            if success:
-                await AuditLogCRUD.log_action(
-                    self.db,
-                    action="user_deleted",
-                    resource_type="user",
-                    resource_id=user_id,
-                    operator_id=operator_id,
-                    description="User deleted",
-                    old_values=old_values,
-                    ip_address=ip_address,
-                    user_agent=user_agent,
-                )
+        if success:
+            await AuditLogCRUD.log_action(
+                self.db,
+                action="user_deleted",
+                resource_type="user",
+                resource_id=user_id,
+                description="User deleted",
+                old_values=old_values,
+                ip_address=ip_address,
+                user_agent=user_agent,
+            )
 
-            return success
+        return success
 
     # =========================================================================
     # Reference operations
@@ -153,54 +159,52 @@ class BiometricService:
         image_size_mb: float,
         image_format: str,
         face_landmarks: Optional[dict] = None,
-        operator_id: Optional[str] = None,
     ) -> Reference:
-        async with self.db.begin():
-            ref = await ReferenceCRUD.create_reference(
-                self.db,
-                user_id=user_id,
-                embedding_encrypted=embedding_encrypted,
-                embedding_hash=embedding_hash,
-                quality_score=quality_score,
-                image_filename=image_filename,
-                image_size_mb=image_size_mb,
-                image_format=image_format,
-                face_landmarks=face_landmarks,
-            )
+        # Используем существующую транзакцию, не создаём новую
+        ref = await ReferenceCRUD.create_reference(
+            self.db,
+            user_id=user_id,
+            embedding_encrypted=embedding_encrypted,
+            embedding_hash=embedding_hash,
+            quality_score=quality_score,
+            image_filename=image_filename,
+            image_size_mb=image_size_mb,
+            image_format=image_format,
+            face_landmarks=face_landmarks,
+        )
 
-            await AuditLogCRUD.log_action(
-                self.db,
-                action="reference_created",
-                resource_type="reference",
-                resource_id=ref.id,
-                user_id=user_id,
-                operator_id=operator_id,
-                description="Reference created",
-                new_values={
+        await AuditLogCRUD.log_action(
+            self.db,
+            action="reference_created",
+            resource_type="reference",
+            resource_id=ref.id,
+            user_id=user_id,
+            description="Reference created",
+            new_values={
+                "version": ref.version,
+                "quality_score": ref.quality_score,
+                "image_format": image_format,
+            },
+        )
+
+        # Cache latest reference metadata for faster retrieval
+        try:
+            cache = CacheService()
+            await cache.set(
+                f"{settings.CACHE_KEY_PREFIX}user:{user_id}:reference:latest",
+                {
+                    "id": ref.id,
                     "version": ref.version,
                     "quality_score": ref.quality_score,
-                    "image_format": image_format,
+                    "image_filename": ref.image_filename,
+                    "image_format": ref.image_format,
                 },
+                expire_seconds=3600,
             )
+        except Exception:
+            logger.warning("Failed to cache latest reference")
 
-            # Cache latest reference metadata for faster retrieval
-            try:
-                cache = CacheService()
-                await cache.set(
-                    f"{settings.CACHE_KEY_PREFIX}user:{user_id}:reference:latest",
-                    {
-                        "id": ref.id,
-                        "version": ref.version,
-                        "quality_score": ref.quality_score,
-                        "image_filename": ref.image_filename,
-                        "image_format": ref.image_format,
-                    },
-                    expire_seconds=3600,
-                )
-            except Exception:
-                logger.warning("Failed to cache latest reference")
-
-            return ref
+        return ref
 
     async def get_latest_reference_cached(self, user_id: str) -> Optional[Reference]:
         """Try to get latest reference from Redis cache, fallback to DB and populate cache."""
@@ -244,28 +248,26 @@ class BiometricService:
         session_id: str,
         image_filename: str,
         image_size_mb: float,
-        operator_id: Optional[str] = None,
     ) -> VerificationSession:
-        async with self.db.begin():
-            session = await VerificationSessionCRUD.create_session(
-                self.db,
-                user_id=user_id,
-                session_id=session_id,
-                image_filename=image_filename,
-                image_size_mb=image_size_mb,
-            )
+        # Используем существующую транзакцию, не создаём новую
+        session = await VerificationSessionCRUD.create_session(
+            self.db,
+            user_id=user_id,
+            session_id=session_id,
+            image_filename=image_filename,
+            image_size_mb=image_size_mb,
+        )
 
-            await AuditLogCRUD.log_action(
-                self.db,
-                action="verification_started",
-                resource_type="verification_session",
-                resource_id=session.id,
-                user_id=user_id,
-                operator_id=operator_id,
-                description="Verification started",
-            )
+        await AuditLogCRUD.log_action(
+            self.db,
+            action="verification_started",
+            resource_type="verification_session",
+            resource_id=session.id,
+            user_id=user_id,
+            description="Verification started",
+        )
 
-            return session
+        return session
 
     async def complete_verification_with_audit(
         self,
@@ -277,42 +279,42 @@ class BiometricService:
         liveness_score: Optional[float] = None,
         processing_time_ms: Optional[int] = None,
     ) -> Optional[VerificationSession]:
-        async with self.db.begin():
-            session = await VerificationSessionCRUD.complete_session(
-                self.db,
-                session_id=session_id,
-                is_match=is_match,
-                similarity_score=similarity_score,
-                confidence=confidence,
-                is_liveness_passed=is_liveness_passed,
-                liveness_score=liveness_score,
-                processing_time_ms=processing_time_ms,
-            )
+        # Используем существующую транзакцию, не создаём новую
+        session = await VerificationSessionCRUD.complete_session(
+            self.db,
+            session_id=session_id,
+            is_match=is_match,
+            similarity_score=similarity_score,
+            confidence=confidence,
+            is_liveness_passed=is_liveness_passed,
+            liveness_score=liveness_score,
+            processing_time_ms=processing_time_ms,
+        )
 
-            if not session:
-                return None
+        if not session:
+            return None
 
-            await AuditLogCRUD.log_action(
-                self.db,
-                action="verification_completed",
-                resource_type="verification_session",
-                resource_id=session.id,
-                user_id=session.user_id,
-                description="Verification completed",
-                new_values={
-                    "is_match": is_match,
-                    "similarity_score": similarity_score,
-                    "confidence": confidence,
-                    "is_liveness_passed": is_liveness_passed,
-                },
-            )
+        await AuditLogCRUD.log_action(
+            self.db,
+            action="verification_completed",
+            resource_type="verification_session",
+            resource_id=session.id,
+            user_id=session.user_id,
+            description="Verification completed",
+            new_values={
+                "is_match": is_match,
+                "similarity_score": similarity_score,
+                "confidence": confidence,
+                "is_liveness_passed": is_liveness_passed,
+            },
+        )
 
-            user = await UserCRUD.get_user(self.db, session.user_id)
-            if user:
-                user.last_verified_at = datetime.now(timezone.utc)
-                self.db.add(user)
+        user = await UserCRUD.get_user(self.db, session.user_id)
+        if user:
+            user.last_verified_at = datetime.now(timezone.utc)
+            self.db.add(user)
 
-            return session
+        return session
 
     # =========================================================================
     # Analytics
@@ -402,4 +404,3 @@ class BiometricService:
 
 # Backward compatibility alias
 DatabaseService = BiometricService
-

@@ -5,9 +5,10 @@ from datetime import datetime
 from typing import Optional, List
 
 from sqlalchemy import (
-    Column, String, Integer, Float, Boolean, DateTime, 
+    Column, String, Integer, Float, Boolean, 
     ForeignKey, Index, LargeBinary, JSON, Text, func
 )
+from sqlalchemy.types import DateTime
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 
 # Импортируем Base из database модуля
@@ -48,6 +49,8 @@ class User(Base):
     
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     email = Column(String(255), unique=True, nullable=False)
+    username = Column(String(50), unique=True, nullable=True)
+    password_hash = Column(String(255), nullable=True)  # ← ДОБАВИТЬ
     phone = Column(String(20), unique=True, nullable=True)
     full_name = Column(String(255), nullable=True)
     is_active = Column(Boolean, default=True)
@@ -92,11 +95,34 @@ class Reference(Base):
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     
     # Embedding data
-    # embedding_encrypted - для безопасного хранения (bytes)
-    # embedding - для быстрого доступа (JSON, может быть null)
     embedding_encrypted = Column(LargeBinary, nullable=False)
-    embedding = Column(JSON, nullable=True)  # ← nullable=True если не всегда нужно
+    embedding = Column(JSON, nullable=True)
     embedding_version = Column(String(20), nullable=True)
+    embedding_hash = Column(String(64), nullable=True)
+    
+    # Metadata
+    label = Column(String(255), nullable=True)
+    file_url = Column(Text, nullable=True)
+    image_filename = Column(String(255), nullable=True)
+    image_size_mb = Column(Float, nullable=True)
+    image_format = Column(String(10), nullable=True)
+    face_landmarks = Column(JSON, nullable=True)
+    previous_reference_id = Column(String(36), ForeignKey("references.id", ondelete="SET NULL"), nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    
+    # Relationships
+    user = relationship("User", back_populates="references")
+    verification_sessions = relationship(
+        "VerificationSession",
+        back_populates="reference",
+        cascade="all, delete-orphan"
+    )
+    
+    def __repr__(self):
+        return f"<Reference(id={self.id}, user_id={self.user_id}, label={self.label})>"
     
 # ====================================================================
 # Verification Session Model
@@ -122,10 +148,10 @@ class VerificationSession(Base):
     response_data = Column(JSON, nullable=True)
     
     # Timestamps
-    created_at = Column(DateTime, server_default=func.now(), nullable=False)
-    started_at = Column(DateTime, nullable=True)
-    completed_at = Column(DateTime, nullable=True)
-    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
     
     # Technical information
     ip_address = Column(String(45), nullable=True)
@@ -346,7 +372,9 @@ class WebhookLog(Base):
     signature = Column(String(128), nullable=True)
     
     # Timestamps
-    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_attempt_at = Column(DateTime(timezone=True), nullable=True)
+    next_retry_at = Column(DateTime(timezone=True), nullable=True)
     
     # Additional metadata
     processing_time = Column(Float, nullable=True)

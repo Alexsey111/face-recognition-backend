@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, Response, JSONResponse
 import uvicorn
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -40,7 +40,7 @@ async def http_exception_handler(request, exc):
         "success": False,
         "error_code": getattr(exc, "status_code", 500),
         "error_details": {"error": str(exc.detail)} if hasattr(exc, "detail") else {"error": str(exc)},
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     return JSONResponse(content=error_content, status_code=exc.status_code)
 
@@ -55,7 +55,7 @@ async def general_exception_handler(request, exc):
             "success": False,
             "error_code": "VALIDATION_ERROR",
             "error_details": {"error": str(exc)},
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         return JSONResponse(content=error_content, status_code=400)
     elif isinstance(exc, ProcessingError):
@@ -63,7 +63,7 @@ async def general_exception_handler(request, exc):
             "success": False,
             "error_code": "PROCESSING_ERROR",
             "error_details": {"error": str(exc)},
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         return JSONResponse(content=error_content, status_code=422)
     elif isinstance(exc, NotFoundError):
@@ -71,7 +71,7 @@ async def general_exception_handler(request, exc):
             "success": False,
             "error_code": "NOT_FOUND",
             "error_details": {"error": str(exc)},
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         return JSONResponse(content=error_content, status_code=404)
     else:
@@ -79,7 +79,7 @@ async def general_exception_handler(request, exc):
             "success": False,
             "error_code": "INTERNAL_ERROR",
             "error_details": {"error": str(exc)},
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         return JSONResponse(content=error_content, status_code=500)
 
@@ -102,9 +102,10 @@ async def lifespan(app: FastAPI):
     app.state.logger = logger
     logger.info("🚀 Face Recognition Service starting up...")
 
-    # Инициализация подключений (если нужно)
-    # await init_database()
-    # await init_redis()
+    # ✅ Initialize shared resources
+    from .services.auth_service import AuthService
+    AuthService.init_redis()
+    logger.info("✅ Shared resources initialized")
 
     # If running tests, ensure DB uses local sqlite and tables + seed exist before handling requests
     try:
@@ -158,7 +159,6 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.exception("Failed to prepare test database environment")
 
-    # ✅ ИСПРАВЛЕНО: Этот блок должен быть СНАРУЖИ if is_test_env
     # Phase 5+8: Запуск всех scheduler'ов
     try:
         from .tasks.scheduler import start_schedulers
@@ -170,7 +170,6 @@ async def lifespan(app: FastAPI):
 
     logger.info("✅ Service started successfully")
     
-    # ✅ ОБЯЗАТЕЛЬНО: yield должен быть здесь
     yield
 
     # Shutdown
@@ -183,6 +182,10 @@ async def lifespan(app: FastAPI):
         logger.info("✅ All schedulers stopped")
     except Exception as e:
         logger.warning(f"⚠️ Failed to stop schedulers: {e}", exc_info=True)
+    
+    # ✅ Close shared resources
+    await AuthService.close_redis()
+    logger.info("✅ Shared resources closed")
     
     logger.info("✅ Shutdown completed")
 

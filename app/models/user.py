@@ -52,6 +52,7 @@ class UserCreate(BaseModel):
     Модель для создания пользователя.
     """
     email: EmailStr = Field(..., description="Email адрес")
+    password_hash: str = Field(..., description="Хеш пароля")  # ← ДОБАВИТЬ
     phone: Optional[str] = Field(None, description="Телефон")
     full_name: Optional[str] = Field(None, max_length=255, description="Полное имя")
 
