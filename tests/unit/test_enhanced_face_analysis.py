@@ -375,7 +375,7 @@ class TestCombineLivenessScores:
             anomalies=[],
             estimation_confidence=0.8,
             is_3d_consistent=True,
-            focus_varation=0.3,
+            focus_variation=0.3,
             natural_shadows_count=2,
             texture_diversity=0.5,
         )
@@ -429,7 +429,7 @@ class TestIntegration:
         
         # Добавляем градиент для имитации освещения
         x = np.linspace(0, 255, w)
-        face = np.clip(face.astype(np.int16) + x.astype(np.int16), 0, 255).astype(np.uint8)
+        face = np.clip(face.astype(np.int16) + x.astype(np.int16)[np.newaxis, :, np.newaxis], 0, 255).astype(np.uint8)
         
         # 1. Анализ освещения
         lighting_result = analyze_shadows_and_lighting(face)

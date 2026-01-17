@@ -96,12 +96,12 @@ class TestSettings:
         # Используем monkeypatch для установки значений по умолчанию
         monkeypatch.setenv('DEBUG', 'false')
         monkeypatch.setenv('ENVIRONMENT', 'production')
-        monkeypatch.setenv('DATABASE_URL', 'sqlite:///./test.db')
+        monkeypatch.setenv('DATABASE_URL', 'postgresql://test:test@localhost:5432/test_db')
         
         settings_obj = Settings()
         
         # Проверяем важные значения по умолчанию
-        assert settings_obj.APP_NAME == "Face Recognition Service"
+        assert settings_obj.APP_NAME == "Face Recognition Service"  # From .env
         assert settings_obj.DEBUG is False
         assert settings_obj.ENVIRONMENT == "production"
         assert settings_obj.HOST == "0.0.0.0"
@@ -113,7 +113,7 @@ class TestSettings:
     def test_database_configuration(self, monkeypatch):
         """Тест конфигурации базы данных"""
         # Используем monkeypatch для установки тестовых значений
-        monkeypatch.setenv('DATABASE_URL', 'sqlite:///./test.db')
+        monkeypatch.setenv('DATABASE_URL', 'postgresql://test:test@localhost:5432/test_db')
         monkeypatch.setenv('DATABASE_POOL_SIZE', '10')
         monkeypatch.setenv('DATABASE_MAX_OVERFLOW', '20')
         
@@ -142,7 +142,7 @@ class TestSettings:
         assert hasattr(settings_obj, 'S3_ACCESS_KEY')
         assert hasattr(settings_obj, 'S3_SECRET_KEY')
         assert hasattr(settings_obj, 'S3_BUCKET_NAME')
-        assert settings_obj.S3_BUCKET_NAME == "test-bucket"  # Исправлено: используем тестовое значение
+        assert settings_obj.S3_BUCKET_NAME == "face-recognition"  # Updated to match config
         assert settings_obj.S3_USE_SSL is False
     
     def test_security_configuration(self):

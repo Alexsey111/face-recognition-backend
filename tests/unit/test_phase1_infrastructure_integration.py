@@ -34,8 +34,8 @@ class TestInfrastructureIntegration:
         """Тест: DATABASE_URL настроен в config."""
         assert "DATABASE_URL" in config_content, \
             "Должна быть конфигурация DATABASE_URL"
-        assert "postgresql" in config_content or "sqlite" in config_content, \
-            "DATABASE_URL должен содержать postgresql или sqlite"
+        assert "postgresql" in config_content, \
+            "DATABASE_URL должен содержать postgresql"
 
     def test_database_pool_config(self, config_content):
         """Тест: Database pool настроен правильно."""
@@ -78,7 +78,7 @@ class TestInfrastructureIntegration:
             "CacheService должен иметь метод set"
         assert "async def delete" in content or "def delete" in content, \
             "CacheService должен иметь метод delete"
-        assert "health_check" in content, \
+        assert "async def health_check" in content, \
             "CacheService должен иметь метод health_check"
 
     # =============================================================================
@@ -119,13 +119,13 @@ class TestInfrastructureIntegration:
         content = storage_service_path.read_text(encoding='utf-8')
         
         # Проверяем наличие ключевых методов
-        assert "upload_image" in content, \
+        assert "async def upload_image" in content, \
             "StorageService должен иметь метод upload_image"
-        assert "download_image" in content, \
+        assert "async def download_image" in content, \
             "StorageService должен иметь метод download_image"
-        assert "delete_image" in content, \
+        assert "async def delete_image" in content, \
             "StorageService должен иметь метод delete_image"
-        assert "_create_bucket" in content or "create_bucket" in content, \
+        assert "async def _create_bucket" in content, \
             "StorageService должен иметь метод create_bucket"
 
     # =============================================================================
@@ -137,7 +137,7 @@ class TestInfrastructureIntegration:
         assert 'APP_NAME' in config_content, \
             "Должна быть конфигурация APP_NAME"
         # Проверяем, что APP_NAME содержит "Face Recognition"
-        assert "Face Recognition" in config_content, \
+        assert "Face Recognition" in config_content.lower(), \
             "APP_NAME должен содержать 'Face Recognition'"
 
     def test_config_environment(self, config_content):

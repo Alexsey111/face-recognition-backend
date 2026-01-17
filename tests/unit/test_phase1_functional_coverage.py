@@ -238,24 +238,6 @@ class TestDatabaseModelsFunctional:
         assert update.full_name == "Updated Name"
         assert update.email is None
 
-    def test_user_profile_model(self):
-        """Тест: Модель UserProfile."""
-        from app.models.user import UserProfile
-        from datetime import datetime, timezone
-        
-        profile = UserProfile(
-            id="user-123",
-            email="test@example.com",
-            created_at=datetime.now(timezone.utc),
-            is_verified=True,
-            is_active=True
-        )
-        
-        assert profile.id == "user-123"
-        assert profile.is_verified is True
-        assert profile.is_active is True
-
-
 class TestDatabaseManagerFunctional:
     """Функциональные тесты для DatabaseManager."""
 

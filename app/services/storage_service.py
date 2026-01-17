@@ -18,7 +18,7 @@ import functools
 import json
 import socket
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List, Tuple
 
 import boto3
@@ -209,16 +209,12 @@ class StorageService:
         if not image_data:
             raise ValidationError("Empty image data")
 
-        if len(image_data) > MAX_IMAGE_SIZE_BYTES:
-            raise ValidationError("Image size exceeds limit")
-
         mime_type, width, height = self._detect_image_mime(image_data)
 
         if width > settings.MAX_IMAGE_WIDTH or height > settings.MAX_IMAGE_HEIGHT:
             raise ValidationError(
                 f"Image dimensions {width}x{height} exceed maximum allowed "
-                f"{settings.MAX_IMAGE_WIDTH}x{settings.MAX_IMAGE_HEIGHT}. "
-                "Please resize to 4096x4096 or smaller."
+                f"{settings.MAX_IMAGE_WIDTH}x{settings.MAX_IMAGE_HEIGHT}"
             )
 
         if mime_type not in ALLOWED_IMAGE_MIME_TYPES:
@@ -284,6 +280,50 @@ class StorageService:
 
     # ---------------------------------------------------------------------
 
+    async def list_files(
+        self,
+        prefix: str = "",
+        limit: int = 1000,
+    ) -> List[Dict[str, Any]]:
+        """
+        Список файлов в хранилище.
+        
+        Args:
+            prefix: Префикс для фильтрации (например, "uploads/")
+            limit: Максимальное количество файлов
+            
+        Returns:
+            Список словарей с информацией о файлах
+        """
+        try:
+            def _list():
+                response = self.s3_client.list_objects_v2(
+                    Bucket=self.bucket_name,
+                    Prefix=prefix,
+                    MaxKeys=limit,
+                )
+                return response.get("Contents", [])
+            
+            files = await self._run(_list)
+            
+            result = []
+            for f in files:
+                result.append({
+                    "key": f["Key"],
+                    "size": f["Size"],
+                    "last_modified": f["LastModified"],
+                    "etag": f.get("ETag", ""),
+                })
+            
+            return result
+
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchBucket":
+                return []
+            raise StorageError(f"List files failed: {e}")
+
+    # ---------------------------------------------------------------------
+
     async def generate_presigned_url(
         self,
         file_key: str,
@@ -312,12 +352,17 @@ class StorageService:
 
     def _detect_image_mime(self, data: bytes) -> Tuple[str, int, int]:
         try:
-            with Image.open(io.BytesIO(data)) as img:
-                img.verify()
-                mime_type = Image.MIME.get(img.format, "application/octet-stream")
-                return mime_type, img.width, img.height
+            # Первое открытие для получения формата
+            img = Image.open(io.BytesIO(data))
+            width, height = img.size
+            img_format = img.format  # Сохраняем формат ДО verify()
+            img.verify()
+            mime_type = Image.MIME.get(img_format, "application/octet-stream")
+            return mime_type, width, height
         except UnidentifiedImageError:
             raise ValidationError("Invalid image data")
+        except Exception as e:
+            raise ValidationError(f"Image processing failed: {str(e)}")
 
     def _generate_object_key(self, mime_type: str) -> str:
         ext = {
@@ -327,7 +372,7 @@ class StorageService:
             "image/gif": ".gif",
         }.get(mime_type, ".img")
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         return (
             f"images/{now.year}/{now.month:02d}/{now.day:02d}/"
             f"{uuid.uuid4().hex}{ext}"

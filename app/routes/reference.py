@@ -14,6 +14,14 @@ from ..models.response import (
     BaseResponse,
 )
 from ..models.reference import ReferenceCompare
+
+# Опционально: модели для face analysis (используются в enhanced endpoints)
+# from ..models.face import (
+#     FaceEmbedding,
+#     FaceEmbeddingComparison,
+#     FaceQualityAssessment,
+#     ComprehensiveFaceAnalysis,
+# )
 from ..services.storage_service import StorageService
 from ..services.ml_service import MLService
 from ..services.encryption_service import EncryptionService

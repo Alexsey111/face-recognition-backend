@@ -27,6 +27,7 @@ async def check_database_connection() -> tuple[bool, str]:
         # Пытаемся подключиться к PostgreSQL
         conn = await asyncpg.connect(settings.DATABASE_URL)
         await conn.execute('SELECT 1')
+        # Для asyncpg используется close(), не aclose()
         await conn.close()
         return True, "connected"
     except Exception as e:
@@ -39,7 +40,8 @@ async def check_redis_connection() -> tuple[bool, str]:
     try:
         r = redis.from_url(settings.redis_url_with_auth, decode_responses=True)
         await r.ping()
-        await r.close()
+        # ✅ ИСПРАВЛЕНО: close() → aclose()
+        await r.aclose()
         return True, "connected"
     except Exception as e:
         logger.error(f"Redis health check failed: {str(e)}")

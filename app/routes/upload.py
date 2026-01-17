@@ -7,12 +7,11 @@ from fastapi import (
     APIRouter, Depends, HTTPException, UploadFile, File, status
 )
 from datetime import datetime
-from typing import Dict, Any
-
-from ..db.database import get_async_db_manager
+from typing import Dict, Any, List
+from ..db.database import get_async_db_manager 
 from ..services.storage_service import StorageService
 from ..services.session_service import SessionService
-from ..services.database_service import DatabaseService
+from ..tasks.cleanup import CleanupTasks
 from ..utils.file_utils import FileUtils, ImageValidator
 from ..utils.validators import Validators, ValidationError
 from ..utils.logger import get_logger
@@ -50,7 +49,7 @@ async def create_upload_session(
         }
     """
     try:
-        session = SessionService.create_session(current_user_id)
+        session = await SessionService.create_session(current_user_id)
         
         # Логирование действия
         async with get_async_db_manager().get_session() as db:
@@ -104,21 +103,29 @@ async def upload_file_to_session(
     """
     try:
         # Валидация сессии
-        if not SessionService.validate_session(session_id, current_user_id):
+        if not await SessionService.validate_session(session_id, current_user_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Недействительная или истекшая сессия загрузки"
             )
         
+        # ✅ Проверяем размер ДО чтения содержимого
+        if file.size and file.size > FileUtils.MAX_FILE_SIZE_MB * 1024 * 1024:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"Файл слишком большой. Максимум: {FileUtils.MAX_FILE_SIZE_MB}MB"
+            )
+        
         # Чтение содержимого файла
         file_content = await file.read()
+        original_filename = file.filename  # ✅ Сохраняем оригинальное имя
         
         # Валидация файла
         is_valid, error_msg = ImageValidator.validate_image(
             file_content,
-            file.filename
+            original_filename
         )
-
+        
         if not is_valid:
             logger.warning(f"Валидация файла не пройдена: {error_msg}")
             raise HTTPException(
@@ -127,66 +134,49 @@ async def upload_file_to_session(
             )
         
         # Конвертация в JPG если необходимо
-        if FileUtils.get_file_extension(file.filename) != 'jpg':
-            file_content, file.filename = FileUtils.convert_image_to_jpg(
+        processed_content = file_content
+        processed_filename = original_filename
+        if FileUtils.get_file_extension(original_filename) != 'jpg':
+            processed_content, processed_filename = FileUtils.convert_to_jpeg(
                 file_content,
-                file.filename
+                original_filename
             )
         
         # Изменение размера если необходимо
         max_width, max_height = 1024, 1024
-        dimensions = FileUtils.get_image_dimensions(file_content)
+        dimensions = FileUtils.get_image_dimensions(processed_content)
         if dimensions[0] > max_width or dimensions[1] > max_height:
-            file_content = FileUtils.resize_image(file_content, max_width, max_height)
+            processed_content = FileUtils.resize_if_needed(processed_content, max_width, max_height)
         
-        # Генерация ключа файла
-        file_key = FileUtils.generate_file_key(current_user_id, file.filename)
-        file_size_mb = FileUtils.get_file_size_mb(file_content)
-        file_hash = FileUtils.calculate_file_hash(file_content)
-        
-        # Загрузка в MinIO
+        # ✅ StorageService генерирует ключ внутри
         storage = get_storage_service()
         result = await storage.upload_image(
-            image_data=file_content,
-            key=file_key,  # Передаем сгенерированный ключ
+            image_data=processed_content,
+            key=None,  # Пусть StorageService генерирует сам
             metadata={
                 'user_id': current_user_id,
                 'session_id': session_id,
-                'original_name': file.filename,
-                'file_hash': file_hash,
+                'original_name': original_filename,  # ✅ Сохраняем оригинальное имя
+                'processed_name': processed_filename,
+                'file_hash': FileUtils.calculate_file_hash(processed_content),
                 'upload_timestamp': datetime.utcnow().isoformat()
             }
         )
-        
-        # Ключ уже сгенерирован в роуте, используем его
-        # file_key = result["key"]  # больше не нужно
+
+        file_key = result["key"]
         file_url = result["file_url"]
-        
-        # Обновление сессии
-        SessionService.update_session(
+        file_size_mb = FileUtils.get_file_size_mb(processed_content)
+        file_hash = result["metadata"]["file_hash"]
+
+        # Обновление сессии (аудит внутри SessionService)
+        await SessionService.attach_file_to_session(
             session_id,
+            user_id=current_user_id,
             file_key=file_key,
             file_size=file_size_mb,
             file_hash=file_hash
         )
 
-        # Логирование действия
-        async with get_async_db_manager().get_session() as db:
-            from app.db.crud import AuditLogCRUD
-            await AuditLogCRUD.log_action(
-                db,
-                action="file_uploaded",
-                resource_type="upload_session",
-                resource_id=session_id,
-                user_id=current_user_id,
-                description=f"Файл загружен: {file.filename}",
-                new_values={
-                    "file_key": file_key,
-                    "file_size_mb": file_size_mb,
-                    "file_hash": file_hash
-                }
-            )
-        
         logger.info(f"Файл загружен: {file_key} ({file_size_mb:.1f}МБ)")
 
         return {
@@ -194,7 +184,8 @@ async def upload_file_to_session(
             "file_url": file_url,
             "file_size_mb": file_size_mb,
             "file_hash": file_hash,
-            "session_id": session_id
+            "session_id": session_id,
+            "original_filename": original_filename  # ✅ Возвращаем оригинальное имя
         }
         
     except HTTPException:
@@ -228,7 +219,7 @@ async def get_upload_status(
         Dict[str, Any]: Информация о сессии
     """
     try:
-        session = SessionService.get_session(session_id)
+        session = await SessionService.get_session(session_id)
         
         if not session:
             raise HTTPException(
@@ -277,7 +268,7 @@ async def delete_upload_session(
         Dict[str, str]: {"message": "Сессия загрузки удалена"}
     """
     try:
-        session = SessionService.get_session(session_id)
+        session = await SessionService.get_session(session_id)
         
         if not session:
             raise HTTPException(
@@ -297,7 +288,7 @@ async def delete_upload_session(
             await storage.delete_image(session.file_key)
         
         # Удаление сессии
-        SessionService.delete_session(session_id)
+        await SessionService.delete_session(session_id)
         
         # Логирование действия
         async with get_async_db_manager().get_session() as db:
@@ -340,7 +331,7 @@ async def get_active_sessions(
         Dict[str, Any]: Список активных сессий
     """
     try:
-        user_sessions = SessionService.get_user_sessions(current_user_id)
+        user_sessions = await SessionService.get_user_sessions(current_user_id)
         
         sessions_data = []
         for session in user_sessions:
@@ -378,7 +369,7 @@ async def cleanup_expired_sessions(
     """
     try:
         
-        deleted_count = SessionService.cleanup_expired_sessions()
+        deleted_count = await CleanupTasks.cleanup_expired_upload_sessions()
         
         logger.info(f"Принудительная очистка: удалено {deleted_count} истекших сессий")
         

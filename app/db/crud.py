@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 import logging
+import uuid
 
 # Импортируем модели из правильного места (как мы определили в прошлом шаге)
 from app.db.models import (
@@ -50,13 +51,31 @@ class UserCRUD:
         return result.scalar_one()
 
     @staticmethod
-    async def create_user(db: AsyncSession, user: UserCreate) -> User:
+    async def create_user(db: AsyncSession, user_data: UserCreate) -> User:
+        """
+        Create a new user with hashed password.
+        
+        Args:
+            db: Database session
+            user_data: User creation data
+            
+        Returns:
+            Created User instance
+        """
         try:
+            # ✅ ИСПРАВЛЕНО: Используем async метод hash_password
+            from app.services.auth_service import AuthService
+            auth_service = AuthService()
+            password_hash = await auth_service.hash_password(user_data.password)
+            
             new_user = User(
-                email=user.email,
-                password_hash=user.password_hash,  # ← ДОБАВИТЬ
-                phone=user.phone,
-                full_name=user.full_name
+                id=str(uuid.uuid4()),
+                email=user_data.email,
+                password_hash=password_hash,
+                phone=user_data.phone,
+                full_name=user_data.full_name,
+                is_active=True,
+                created_at=datetime.now(timezone.utc)
             )
             db.add(new_user)
             await db.commit()
@@ -65,7 +84,7 @@ class UserCRUD:
             return new_user
         except IntegrityError:
             await db.rollback()
-            logger.error(f"❌ User creation failed: Email/Phone already exists")
+            logger.error("❌ User creation failed: Email already exists")
             raise
         except Exception as e:
             await db.rollback()
@@ -197,22 +216,17 @@ class ReferenceCRUD:
         """Get references for user with pagination and filtering"""
         query = select(Reference).where(Reference.user_id == user_id)
         
-        filters = []
-        
         if is_active is not None:
-            filters.append(Reference.is_active == is_active)
+            query = query.where(Reference.is_active == is_active)
         
         if quality_min is not None:
-            filters.append(Reference.quality_score >= quality_min)
+            query = query.where(Reference.quality_score >= quality_min)
             
         if quality_max is not None:
-            filters.append(Reference.quality_score <= quality_max)
+            query = query.where(Reference.quality_score <= quality_max)
             
         if label_contains:
-            filters.append(Reference.label.contains(label_contains))
-        
-        if filters:
-            query = query.where(and_(*filters))
+            query = query.where(Reference.label.contains(label_contains))
         
         query = query.order_by(desc(Reference.created_at)).offset(skip).limit(limit)
         
@@ -231,22 +245,17 @@ class ReferenceCRUD:
         """Count references with same filters"""
         query = select(func.count()).select_from(Reference).where(Reference.user_id == user_id)
         
-        filters = []
-        
         if is_active is not None:
-            filters.append(Reference.is_active == is_active)
+            query = query.where(Reference.is_active == is_active)
         
         if quality_min is not None:
-            filters.append(Reference.quality_score >= quality_min)
+            query = query.where(Reference.quality_score >= quality_min)
             
         if quality_max is not None:
-            filters.append(Reference.quality_score <= quality_max)
+            query = query.where(Reference.quality_score <= quality_max)
             
         if label_contains:
-            filters.append(Reference.label.contains(label_contains))
-        
-        if filters:
-            query = query.where(and_(*filters))
+            query = query.where(Reference.label.contains(label_contains))
         
         result = await db.execute(query)
         return result.scalar() or 0
@@ -257,6 +266,7 @@ class ReferenceCRUD:
         user_id: str,
         embedding_encrypted: bytes,
         embedding_hash: str,
+        quality_score: float,  # ✅ ДОБАВИТЬ
         image_filename: str,
         image_size_mb: float,
         image_format: str,
@@ -271,6 +281,9 @@ class ReferenceCRUD:
                 raise ValueError("embedding_hash is required")
             if not image_filename:
                 raise ValueError("image_filename is required")
+            # ✅ ДОБАВИТЬ валидацию quality_score
+            if quality_score is not None and not (0.0 <= quality_score <= 1.0):
+                raise ValueError("quality_score must be between 0.0 and 1.0")
                 
             # Получаем максимальную версию
             result = await db.execute(
@@ -294,6 +307,7 @@ class ReferenceCRUD:
                 user_id=user_id,
                 embedding_encrypted=embedding_encrypted,
                 embedding_hash=embedding_hash,
+                quality_score=quality_score,  # ✅ ДОБАВИТЬ
                 image_filename=image_filename,
                 image_size_mb=image_size_mb,
                 image_format=image_format,
@@ -431,28 +445,23 @@ class VerificationSessionCRUD:
         """Get sessions for user with pagination and filtering"""
         query = select(VerificationSession).where(VerificationSession.user_id == user_id)
         
-        filters = []
-        
         if status:
-            filters.append(VerificationSession.status == status)
+            query = query.where(VerificationSession.status == status)
             
         if session_type:
-            filters.append(VerificationSession.session_type == session_type)
+            query = query.where(VerificationSession.session_type == session_type)
             
         if date_from:
             # ✅ ДОБАВЛЕНО: Проверка timezone
             if date_from.tzinfo is None:
                 date_from = date_from.replace(tzinfo=timezone.utc)
-            filters.append(VerificationSession.created_at >= date_from)
+            query = query.where(VerificationSession.created_at >= date_from)
             
         if date_to:
             # ✅ ДОБАВЛЕНО: Проверка timezone
             if date_to.tzinfo is None:
                 date_to = date_to.replace(tzinfo=timezone.utc)
-            filters.append(VerificationSession.created_at <= date_to)
-        
-        if filters:
-            query = query.where(and_(*filters))
+            query = query.where(VerificationSession.created_at <= date_to)
         
         query = query.order_by(desc(VerificationSession.created_at)).offset(skip).limit(limit)
         
@@ -471,26 +480,21 @@ class VerificationSessionCRUD:
         """Count sessions with same filters"""
         query = select(func.count()).select_from(VerificationSession).where(VerificationSession.user_id == user_id)
         
-        filters = []
-        
         if status:
-            filters.append(VerificationSession.status == status)
+            query = query.where(VerificationSession.status == status)
             
         if session_type:
-            filters.append(VerificationSession.session_type == session_type)
+            query = query.where(VerificationSession.session_type == session_type)
             
         if date_from:
             if date_from.tzinfo is None:
                 date_from = date_from.replace(tzinfo=timezone.utc)
-            filters.append(VerificationSession.created_at >= date_from)
+            query = query.where(VerificationSession.created_at >= date_from)
             
         if date_to:
             if date_to.tzinfo is None:
                 date_to = date_to.replace(tzinfo=timezone.utc)
-            filters.append(VerificationSession.created_at <= date_to)
-        
-        if filters:
-            query = query.where(and_(*filters))
+            query = query.where(VerificationSession.created_at <= date_to)
         
         result = await db.execute(query)
         return result.scalar() or 0

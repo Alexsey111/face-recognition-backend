@@ -157,21 +157,32 @@ class TestEncryptionService:
         assert info["key_length_bits"] == 256  # AES-256
         assert info["authenticated_encryption"] is True
         assert info["mode"] == "GCM"
+        # Новые поля
+        assert info["version"] == "2.0"
+        assert info["key_valid"] is True
+        assert info["supports_embeddings"] is True
+        assert info["supports_files"] is True
+        assert info["supports_versioning"] is True
+        assert info["key_rotation_ready"] is True
 
     @pytest.mark.asyncio
     async def test_decrypt_file_success(self, encryption_service, tmp_path):
         """Тест успешного дешифрования файла."""
-        # Создаем тестовый файл
-        test_content = b"test content"
+        # Создаем тестовый файл с контентом
+        test_content = b"test content for file encryption"
+        input_file = tmp_path / "encrypted_file.bin"
+        output_file = tmp_path / "decrypted_file.txt"
         
-        # Записываем и сразу шифруем в памяти
+        # Шифруем контент и записываем в файл
         encrypted = await encryption_service.encrypt(test_content, metadata={"filename": "test.txt"})
+        input_file.write_bytes(encrypted)
         
-        # Дешифруем файл из памяти (имитация чтения из файла)
-        decrypted, payload = await encryption_service.decrypt(encrypted)
+        # Дешифруем файл
+        result_path = await encryption_service.decrypt_file(str(input_file), str(output_file))
         
-        # Проверяем содержимое
-        assert decrypted == test_content
+        # Проверяем результат
+        assert result_path == str(output_file)
+        assert output_file.read_bytes() == test_content
 
 
 class TestEncryptionSecurity:

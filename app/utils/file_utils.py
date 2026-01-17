@@ -6,7 +6,7 @@
 import os
 import hashlib
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from io import BytesIO
 from typing import Tuple, Dict, Any
 
@@ -41,6 +41,12 @@ class FileUtils:
         return Path(filename).suffix.lower().lstrip(".")
 
     @staticmethod
+    def is_valid_image_format(filename: str) -> bool:
+        """Check if file has valid image format"""
+        ext = FileUtils.get_file_extension(filename)
+        return ext in FileUtils.ALLOWED_FORMATS
+
+    @staticmethod
     def get_file_size_mb(content: bytes) -> float:
         return len(content) / (1024 * 1024)
 
@@ -54,9 +60,14 @@ class FileUtils:
 
     @staticmethod
     def generate_upload_key(user_id: str, filename: str) -> str:
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         safe_name = os.path.basename(filename)
         return f"uploads/{user_id}/{timestamp}_{safe_name}"
+
+    @staticmethod
+    def generate_file_key(user_id: str, filename: str) -> str:
+        """Generate file key for uploads (alias for generate_upload_key)"""
+        return FileUtils.generate_upload_key(user_id, filename)
 
     @staticmethod
     def generate_reference_key(user_id: str, version: int) -> str:
@@ -70,8 +81,9 @@ class FileUtils:
     def open_image(content: bytes) -> Image.Image:
         try:
             img = Image.open(BytesIO(content))
+            # Сохраняем размеры до verify() - после verify() объект "ломается"
+            _ = img.size
             img.verify()
-            img = Image.open(BytesIO(content))
             return img
         except Exception as e:
             logger.warning("Invalid image file")
@@ -79,6 +91,12 @@ class FileUtils:
                 message="Invalid image file",
                 details={"error": str(e)},
             )
+
+    @staticmethod
+    def get_image_dimensions(content: bytes) -> Tuple[int, int]:
+        """Get image width and height"""
+        img = FileUtils.open_image(content)
+        return img.size
 
     @staticmethod
     def ensure_rgb(img: Image.Image) -> Image.Image:
@@ -193,6 +211,18 @@ class ImageValidator:
                 "size_mb": round(size_mb, 2),
             },
         )
+
+    @staticmethod
+    def validate_image(content: bytes, filename: str) -> Tuple[bool, str]:
+        """
+        Validates image and returns (is_valid, error_message).
+        Compatible with old API.
+        """
+        try:
+            ImageValidator.validate(content, filename)
+            return True, ""
+        except ValidationError as e:
+            return False, str(e)
 
     @staticmethod
     def get_info(content: bytes, filename: str) -> Dict[str, Any]:

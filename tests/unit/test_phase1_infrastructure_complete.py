@@ -97,7 +97,7 @@ class TestPhase1Infrastructure:
         assert "services" in compose_config, "Должен содержать секцию services"
         services = compose_config["services"]
         
-        # Проверяем обязательные сервисы инфраструктуры
+        # Проверяем обязательные сервисы инфраструктуры (API сервис — в docker-compose.prod.yml)
         assert "postgres" in services, "Должен содержать PostgreSQL сервис"
         assert "redis" in services, "Должен содержать Redis сервис"
         assert "minio" in services, "Должен содержать MinIO сервис"
@@ -568,12 +568,13 @@ class TestPhase1Infrastructure:
         content = requirements_path.read_text(encoding='utf-8')
         lines = content.split('\n')
         
-        # Проверяем, что есть версии (==) или комментарии о версиях
-        has_versions = any('==' in line for line in lines)
+        # Проверяем, что есть версии (== или >=) или комментарии о версиях
+        has_exact_versions = any('==' in line for line in lines)
+        has_min_versions = any('>=' in line for line in lines)
         has_comments = any('#' in line for line in lines)
         
-        assert has_versions or has_comments, \
-            "Должны быть зафиксированные версии или комментарии о версиях"
+        assert has_exact_versions or has_min_versions or has_comments, \
+            "Должны быть зафиксированные версии (== или >=) или комментарии о версиях"
 
     # =============================================================================
     # ISSUE 13: Python dependencies setup

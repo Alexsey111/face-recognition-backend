@@ -1,7 +1,8 @@
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 import logging
-from ..config import settings
+
+from app.config import settings
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -21,7 +22,7 @@ from app.db.models import (
 from app.models.user import UserCreate, UserUpdate
 
 logger = logging.getLogger(__name__)
-from .cache_service import CacheService
+from app.services.cache_service import CacheService
 
 
 class BiometricService:
@@ -212,8 +213,10 @@ class BiometricService:
             cache = CacheService()
             cached = await cache.get(f"{settings.CACHE_KEY_PREFIX}user:{user_id}:reference:latest")
             if cached:
-                # minimal object-like dict
-                return cached
+                # ✅ Кешируем только ID, загружаем полный объект из DB
+                ref_id = cached.get("id")
+                if ref_id:
+                    return await ReferenceCRUD.get_reference_by_id(self.db, ref_id)
         except Exception:
             logger.debug("Cache unavailable or error while reading latest reference")
 
@@ -222,15 +225,10 @@ class BiometricService:
         if ref:
             try:
                 cache = CacheService()
+                # ✅ Кешируем только ID для быстрого доступа
                 await cache.set(
                     f"{settings.CACHE_KEY_PREFIX}user:{user_id}:reference:latest",
-                    {
-                        "id": ref.id,
-                        "version": ref.version,
-                        "quality_score": ref.quality_score,
-                        "image_filename": ref.image_filename,
-                        "image_format": ref.image_format,
-                    },
+                    {"id": ref.id},
                     expire_seconds=3600,
                 )
             except Exception:
@@ -394,9 +392,6 @@ class BiometricService:
 
     async def get_user_by_email(self, email: str) -> Optional[User]:
         return await UserCRUD.get_user_by_email(self.db, email)
-
-    async def get_user_by_username(self, username: str) -> Optional[User]:
-        return await UserCRUD.get_user_by_username(self.db, username)
 
     async def get_user(self, user_id: str) -> Optional[User]:
         return await UserCRUD.get_user(self.db, user_id)

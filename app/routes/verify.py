@@ -115,10 +115,13 @@ async def _verify_face_internal(
 
     # --- 2. ML Верификация ---
     try:
-        # Прямой вызов ML движка (сравнение двух изображений)
-        raw_ml_result = await ml_service.verify(
-            reference_image=reference.image,
-            probe_image=request.image_data,
+        # Расшифровываем reference embedding
+        crypto = EncryptionService()
+        reference_embedding = await crypto.decrypt_embedding(reference.embedding_encrypted)
+        raw_ml_result = await ml_service.verify_face(
+            image_data=request.image_data,
+            reference_embedding=reference_embedding,
+            threshold=request.threshold or 0.8
         )
     except Exception as exc:
         logger.exception("ML Service Error", extra={"request_id": request_id})

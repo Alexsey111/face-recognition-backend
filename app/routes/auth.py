@@ -251,8 +251,8 @@ async def login(
         user_agent = http_request.headers.get("user-agent")
         client_ip = http_request.client.host
         
-        # Создаем сессию с токенами
-        session_tokens = auth_service.create_user_session(  # ❌ БЕЗ await
+        # Создаем сессию с токенами (sync - fast CPU)
+        session_tokens = auth_service.create_user_session(
             user_id=user.id,
             user_agent=user_agent,
             ip_address=client_ip
@@ -268,9 +268,9 @@ async def login(
             is_active=user.is_active,
             created_at=user.created_at.isoformat()
         )
-        
+
         logger.info(f"Login successful for user: {user.id}")
-        
+
         return LoginResponse(
             user=user_info,
             tokens=TokenResponse(**session_tokens)
@@ -336,13 +336,13 @@ async def register(
                 detail="User with this email already exists"
             )
         
-        # Хешируем пароль
+        # Хешируем пароль (async для production)
         password_hash = await auth_service.hash_password(request.password)
         
         # Создаём объект UserCreate
         user_create = UserCreate(
             email=request.email,
-            password_hash=password_hash,
+            password=request.password,  # UserCreate.password - открытый пароль
             full_name=request.full_name,
             phone=request.phone,
         )
@@ -358,8 +358,8 @@ async def register(
             user_agent=user_agent
         )
         
-        # Создаем сессию с токенами
-        session_tokens = auth_service.create_user_session(  # ❌ БЕЗ await
+        # Создаем сессию с токенами (sync - fast CPU)
+        session_tokens = auth_service.create_user_session(
             user_id=new_user.id,
             user_agent=user_agent,
             ip_address=client_ip
@@ -662,7 +662,7 @@ async def change_password(
         # Валидируем новый пароль
         validate_password(request.new_password)
         
-        # Хешируем новый пароль
+        # Хешируем новый пароль (async для production)
         new_password_hash = await auth_service.hash_password(request.new_password)
         
         # Обновляем пароль в базе данных (нужно добавить метод update_user_with_audit)

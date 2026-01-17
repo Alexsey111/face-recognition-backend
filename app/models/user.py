@@ -50,9 +50,10 @@ class UserModel(BaseModel):
 class UserCreate(BaseModel):
     """
     Модель для создания пользователя.
+    Принимает открытый пароль, который хешируется сервисом.
     """
     email: EmailStr = Field(..., description="Email адрес")
-    password_hash: str = Field(..., description="Хеш пароля")  # ← ДОБАВИТЬ
+    password: str = Field(..., min_length=8, description="Пароль (будет хеширован)")
     phone: Optional[str] = Field(None, description="Телефон")
     full_name: Optional[str] = Field(None, max_length=255, description="Полное имя")
 

@@ -804,6 +804,245 @@ class OptimizedMLService:
                 stats["anti_spoofing"] = {"status": "error"}
         
         return stats
+    async def verify(self, reference_image: bytes, probe_image: bytes, threshold: float = 0.8):
+        """
+        Верификация двух изображений (alias для совместимости).
+        """
+        # Генерируем эмбеддинг для reference
+        ref_result = await self.generate_embedding(reference_image)
+        if not ref_result.get("face_detected"):
+            return {
+                "success": False,
+                "error": "No face detected in reference image"
+            }
+        
+        # Верифицируем probe относительно reference
+        verify_result = await self.verify_face(
+            image_data=probe_image,
+            reference_embedding=ref_result["embedding"],
+            threshold=threshold
+        )
+        
+        return verify_result
+
+    async def analyze_video_liveness(self, video_data: bytes, challenge_type: str, frame_count: int = 10):
+        """Video liveness analysis - STUB for Phase 6."""
+        logger.warning("analyze_video_liveness called but not fully implemented yet")
+        # TODO: Implement proper video frame extraction
+        return {
+            "success": True,
+            "liveness_detected": False,
+            "confidence": 0.5,
+            "frames_processed": 0,
+            "error": "Video liveness not yet implemented"
+        }
+
+    async def check_active_liveness(self, image_data: bytes, challenge_type: str, challenge_data: dict):
+        """Active liveness - delegates to check_liveness."""
+        return await self.check_liveness(image_data, challenge_type, challenge_data)
+
+    async def batch_generate_embeddings(
+        self,
+        image_data_list: list,
+        batch_size: int = 10,
+        max_concurrent: int = 5,
+        progress_callback: Optional[callable] = None,
+        fail_on_error: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Batch generation of face embeddings with production-grade features.
+
+        Features:
+        - Parallel processing with semaphore-controlled concurrency
+        - Automatic retries with exponential backoff
+        - Progress tracking via callback
+        - Graceful error handling with detailed reporting
+        - Memory management between batches
+        - Comprehensive metrics and logging
+
+        Args:
+            image_data_list: List of image bytes
+            batch_size: Number of images per batch (for memory management)
+            max_concurrent: Maximum concurrent tasks (default: 5)
+            progress_callback: Optional callback(current, total, result)
+            fail_on_error: Raise exception on first error (default: False)
+
+        Returns:
+            Dict with 'results', 'metrics', and 'errors'
+        """
+        total_count = len(image_data_list)
+        if total_count == 0:
+            return {"results": [], "metrics": {"total": 0, "success": 0, "failed": 0}, "errors": []}
+
+        start_time = time.monotonic()
+        results: List[Dict[str, Any]] = []
+        errors: List[Dict[str, Any]] = []
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        # Track per-batch metrics
+        batch_metrics = {"total": total_count, "success": 0, "failed": 0, "retries": 0}
+
+        async def process_with_retry(img_data: bytes, index: int) -> Dict[str, Any]:
+            """Process single image with retry logic."""
+            max_retries = 3
+            base_delay = 0.5
+
+            for attempt in range(max_retries):
+                try:
+                    async with semaphore:
+                        result = await self.generate_embedding(img_data)
+                        return {
+                            "index": index,
+                            "success": True,
+                            "data": result,
+                        }
+                except Exception as e:
+                    batch_metrics["retries"] += 1
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)  # Exponential backoff
+                        await asyncio.sleep(delay)
+                    else:
+                        # Final attempt failed
+                        return {
+                            "index": index,
+                            "success": False,
+                            "error": str(e),
+                            "attempts": attempt + 1,
+                        }
+
+        # Process in batches for memory management
+        batch_results: List[Dict[str, Any]] = []
+        for batch_start in range(0, total_count, batch_size):
+            batch_end = min(batch_start + batch_size, total_count)
+            batch = image_data_list[batch_start:batch_end]
+
+            logger.info(
+                f"Processing batch {batch_start // batch_size + 1}: "
+                f"images {batch_start + 1}-{batch_end} of {total_count}"
+            )
+
+            # Process batch concurrently
+            batch_tasks = [
+                process_with_retry(img_data, batch_start + i)
+                for i, img_data in enumerate(batch)
+            ]
+            batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+
+            # Collect results and handle errors
+            for i, result in enumerate(batch_results):
+                actual_index = batch_start + i
+
+                if isinstance(result, Exception):
+                    error_entry = {
+                        "index": actual_index,
+                        "error": str(result),
+                        "type": type(result).__name__,
+                    }
+                    errors.append(error_entry)
+                    batch_metrics["failed"] += 1
+
+                    if fail_on_error:
+                        raise result
+
+                    # Add placeholder for failed result
+                    results.append({
+                        "index": actual_index,
+                        "success": False,
+                        "error": str(result),
+                    })
+                elif not result.get("success", False):
+                    error_entry = {
+                        "index": actual_index,
+                        "error": result.get("error", "Unknown error"),
+                        "attempts": result.get("attempts", 1),
+                    }
+                    errors.append(error_entry)
+                    batch_metrics["failed"] += 1
+
+                    if fail_on_error:
+                        raise ProcessingError(error_entry["error"])
+
+                    results.append({
+                        "index": actual_index,
+                        "success": False,
+                        "error": result.get("error"),
+                    })
+                else:
+                    results.append({
+                        "index": actual_index,
+                        "success": True,
+                        "embedding": result["data"].get("embedding"),
+                        "quality_score": result["data"].get("quality_score"),
+                        "face_detected": result["data"].get("face_detected", False),
+                        "metadata": {
+                            "processing_time": result["data"].get("processing_time"),
+                            "model_version": result["data"].get("model_version"),
+                        },
+                    })
+                    batch_metrics["success"] += 1
+
+            # Progress callback
+            processed = batch_end
+            if progress_callback:
+                try:
+                    progress_callback(processed, total_count, results[-len(batch):])
+                except Exception as cb_err:
+                    logger.warning(f"Progress callback failed: {cb_err}")
+
+            # Memory cleanup between batches
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        # Sort results by original index
+        results.sort(key=lambda x: x["index"])
+
+        total_time = time.monotonic() - start_time
+        metrics = {
+            **batch_metrics,
+            "total_time_seconds": round(total_time, 3),
+            "avg_time_per_image": round(total_time / total_count, 3) if total_count > 0 else 0,
+            "throughput_per_second": round(total_count / total_time, 2) if total_time > 0 else 0,
+            "error_rate": round(batch_metrics["failed"] / total_count, 3) if total_count > 0 else 0,
+        }
+
+        logger.info(
+            f"Batch embedding generation completed: "
+            f"{batch_metrics['success']}/{total_count} successful, "
+            f"{batch_metrics['failed']} failed, "
+            f"{total_time:.2f}s total"
+        )
+        
+        return {
+            "results": results,
+            "metrics": metrics,
+            "errors": errors,
+        }
+
+    async def advanced_anti_spoofing_check(self, image_data: bytes, analysis_type: str):
+        """Advanced anti-spoofing analysis."""
+        result = await self.check_liveness(
+            image_data, 
+            challenge_type="passive",
+            use_3d_depth=True
+        )
+        
+        # Добавляем analysis_results для совместимости с response model
+        result["analysis_results"] = {
+            "depth_analysis": result.get("depth_analysis"),
+            "lighting_analysis": result.get("lighting_analysis"),
+            "certified_analysis": {
+                "is_certified_passed": result.get("liveness_detected", False),
+                "certification_level": "MiniFASNetV2" if self._certified_liveness_enabled else "heuristic"
+            }
+        }
+        result["component_scores"] = {
+            "anti_spoofing": result.get("anti_spoofing_score", 0.5),
+            "depth": result.get("depth_score", 0.5),
+            "lighting": result.get("lighting_quality", 0.5)
+        }
+        
+        return result
+
 
 # Alias для обратной совместимости
 MLService = OptimizedMLService

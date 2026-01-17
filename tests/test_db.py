@@ -20,9 +20,9 @@ from app.models.user import UserCreate, UserUpdate
 # Удаляем локальные определения, которые конфликтуют с импортами
 
 # Делаем класс тестовых методов асинхронным
-# ============================================================================
+# ====================================================================
 # User Tests
-# ============================================================================
+# ====================================================================
 
 class TestUserCRUD:
     # 1. Все тесты становятся async def
@@ -163,13 +163,14 @@ class TestUserCRUD:
 
 class TestReferenceCRUD:
     @pytest.mark.asyncio
-    async def test_create_reference(self, db_session: AsyncSession, test_user: User):
+    async def test_create_reference(self, db_session: AsyncSession, test_user: str):
         """Test reference creation (Async)"""
         ref = await ReferenceCRUD.create_reference(
             db_session,
-            user_id=test_user.id,
+            user_id=test_user,
             embedding_encrypted=b"encrypted_data",
             embedding_hash="hash123",
+            quality_score=0.85,
             image_filename="photo.jpg",
             image_size_mb=2.5,
             image_format="JPG"
@@ -180,20 +181,22 @@ class TestReferenceCRUD:
         assert ref.embedding_hash == "hash123"
         
     @pytest.mark.asyncio
-    async def test_reference_versioning(self, db_session: AsyncSession, test_user: User):
+    async def test_reference_versioning(self, db_session: AsyncSession, test_user: str):
         """Test reference versioning (Async)"""
         ref1 = await ReferenceCRUD.create_reference(
-            db_session, user_id=test_user.id, 
+            db_session, user_id=test_user, 
             embedding_encrypted=b"data1",
             embedding_hash="hash1",
+            quality_score=0.85,
             image_filename="photo1.jpg", image_size_mb=2.5,
             image_format="JPG"
         )
         
         ref2 = await ReferenceCRUD.create_reference(
-            db_session, user_id=test_user.id, 
+            db_session, user_id=test_user, 
             embedding_encrypted=b"data2",
             embedding_hash="hash2",
+            quality_score=0.90,
             image_filename="photo2.jpg", image_size_mb=2.5,
             image_format="JPG"
         )
@@ -203,35 +206,38 @@ class TestReferenceCRUD:
         assert ref2.previous_reference_id == ref1.id
         
     @pytest.mark.asyncio
-    async def test_get_latest_reference(self, db_session: AsyncSession, test_user: User):
+    async def test_get_latest_reference(self, db_session: AsyncSession, test_user: str):
         """Test getting latest reference (Async)"""
         await ReferenceCRUD.create_reference(
-            db_session, user_id=test_user.id, 
+            db_session, user_id=test_user, 
             embedding_encrypted=b"data1",
             embedding_hash="hash1",
+            quality_score=0.80,
             image_filename="photo1.jpg", image_size_mb=2.5,
             image_format="JPG"
         )
         
         ref2 = await ReferenceCRUD.create_reference(
-            db_session, user_id=test_user.id, 
+            db_session, user_id=test_user, 
             embedding_encrypted=b"data2",
             embedding_hash="hash2",
+            quality_score=0.95,
             image_filename="photo2.jpg", image_size_mb=2.5,
             image_format="JPG"
         )
         
-        latest = await ReferenceCRUD.get_latest_reference(db_session, test_user.id)
+        latest = await ReferenceCRUD.get_latest_reference(db_session, test_user)
         assert latest.id == ref2.id
         assert latest.embedding_version == "2"
         
     @pytest.mark.asyncio
-    async def test_delete_reference(self, db_session: AsyncSession, test_user: User):
+    async def test_delete_reference(self, db_session: AsyncSession, test_user: str):
         """Test reference deletion (Async)"""
         ref = await ReferenceCRUD.create_reference(
-            db_session, user_id=test_user.id, 
+            db_session, user_id=test_user, 
             embedding_encrypted=b"data",
             embedding_hash="hash",
+            quality_score=0.75,
             image_filename="photo.jpg", image_size_mb=2.5,
             image_format="JPG"
         )
@@ -278,16 +284,17 @@ class TestReferenceCRUD:
     # ====================================================================
     
     @pytest.mark.asyncio
-    async def test_concurrent_reference_creation(self, async_engine, test_user: User):
+    async def test_concurrent_reference_creation(self, async_engine, test_user: str):
         """Test that concurrent reference creation doesn't break versioning"""
         import asyncio
 
         async def create_ref(session: AsyncSession):
             return await ReferenceCRUD.create_reference(
                 session,
-                user_id=test_user.id,
+                user_id=test_user,
                 embedding_encrypted=f"encrypted_data_{uuid.uuid4().hex[:8]}".encode(),
                 embedding_hash=f"hash_{uuid.uuid4().hex[:8]}",
+                quality_score=0.85,
                 image_filename="photo.jpg",
                 image_size_mb=2.5,
                 image_format="JPG"
@@ -320,14 +327,15 @@ class TestReferenceCRUD:
                 await sess.close()
     
     @pytest.mark.asyncio
-    async def test_user_cascade_delete(self, db_session: AsyncSession, test_user: User, async_engine):
+    async def test_user_cascade_delete(self, db_session: AsyncSession, test_user: str, async_engine):
         """Test that deleting user also deletes references"""
         # Create a reference
         ref = await ReferenceCRUD.create_reference(
             db_session,
-            user_id=test_user.id,
+            user_id=test_user,
             embedding_encrypted=b"encrypted_data",
             embedding_hash="hash123",
+            quality_score=0.90,
             image_filename="photo.jpg",
             image_size_mb=2.5,
             image_format="JPG"
@@ -341,7 +349,7 @@ class TestReferenceCRUD:
         await db_session.commit()
 
         # Delete user (cascade should delete references)
-        await UserCRUD.delete_user(db_session, test_user.id)
+        await UserCRUD.delete_user(db_session, test_user)
         await db_session.commit()
 
         # Use a new session to verify cascade delete (avoids stale session state)
@@ -354,17 +362,17 @@ class TestReferenceCRUD:
             deleted_ref = await ReferenceCRUD.get_reference_by_id(verify_session, ref.id)
             assert deleted_ref is None
 
-# ====================================================================
-# Verification Session Tests
-# ====================================================================
+    # ====================================================================
+    # Verification Session Tests
+    # ====================================================================
 
 class TestVerificationSessionCRUD:
     @pytest.mark.asyncio
-    async def test_create_session(self, db_session: AsyncSession, test_user: User):
+    async def test_create_session(self, db_session: AsyncSession, test_user: str):
         """Test session creation (Async)"""
         session = await VerificationSessionCRUD.create_session(
             db_session,
-            user_id=test_user.id,
+            user_id=test_user,
             session_id=str(uuid.uuid4()),
             image_filename="verify.jpg",
             image_size_mb=1.5
@@ -374,12 +382,12 @@ class TestVerificationSessionCRUD:
         assert session.status == "pending"
         
     @pytest.mark.asyncio
-    async def test_get_session(self, db_session: AsyncSession, test_user: User):
+    async def test_get_session(self, db_session: AsyncSession, test_user: str):
         """Test get session (Async)"""
         session_id = str(uuid.uuid4())
         created = await VerificationSessionCRUD.create_session(
             db_session,
-            user_id=test_user.id,
+            user_id=test_user,
             session_id=session_id,
             image_filename="verify.jpg",
             image_size_mb=1.5
@@ -389,12 +397,12 @@ class TestVerificationSessionCRUD:
         assert session.id == created.id
         
     @pytest.mark.asyncio
-    async def test_complete_session(self, db_session: AsyncSession, test_user: User):
+    async def test_complete_session(self, db_session: AsyncSession, test_user: str):
         """Test completing session (Async)"""
         session_id = str(uuid.uuid4())
         await VerificationSessionCRUD.create_session(
             db_session,
-            user_id=test_user.id,
+            user_id=test_user,
             session_id=session_id,
             image_filename="verify.jpg",
             image_size_mb=1.5
@@ -412,12 +420,12 @@ class TestVerificationSessionCRUD:
         assert completed.is_match == True
         
     @pytest.mark.asyncio
-    async def test_fail_session(self, db_session: AsyncSession, test_user: User):
+    async def test_fail_session(self, db_session: AsyncSession, test_user: str):
         """Test failing session (Async)"""
         session_id = str(uuid.uuid4())
         await VerificationSessionCRUD.create_session(
             db_session,
-            user_id=test_user.id,
+            user_id=test_user,
             session_id=session_id,
             image_filename="verify.jpg",
             image_size_mb=1.5
@@ -479,14 +487,14 @@ class TestVerificationSessionCRUD:
 
 class TestAuditLogCRUD:
     @pytest.mark.asyncio
-    async def test_log_action(self, db_session: AsyncSession, test_user: User):
+    async def test_log_action(self, db_session: AsyncSession, test_user: str):
         """Test logging action (Async)"""
         log = await AuditLogCRUD.log_action(
             db_session,
             action="user_created",
             resource_type="user",
-            resource_id=test_user.id,
-            user_id=test_user.id,
+            resource_id=test_user,
+            user_id=test_user,
             description="Test user created",
             old_values={"v1": 1},
             new_values={"v2": 2},
@@ -497,31 +505,31 @@ class TestAuditLogCRUD:
         assert log.action == "user_created"
         
     @pytest.mark.asyncio
-    async def test_get_logs(self, db_session: AsyncSession, test_user: User):
+    async def test_get_logs(self, db_session: AsyncSession, test_user: str):
         """Test getting logs (Async)"""
         await AuditLogCRUD.log_action(
             db_session,
             action="user_created",
             resource_type="user",
-            resource_id=test_user.id,
-            user_id=test_user.id
+            resource_id=test_user,
+            user_id=test_user
         )
         
-        logs = await AuditLogCRUD.get_logs(db_session, user_id=test_user.id)
+        logs = await AuditLogCRUD.get_logs(db_session, user_id=test_user)
         assert len(logs) >= 1
 
     @pytest.mark.asyncio
-    async def test_get_resource_logs(self, db_session: AsyncSession, test_user: User):
+    async def test_get_resource_logs(self, db_session: AsyncSession, test_user: str):
         """Test getting resource logs (Async)"""
         await AuditLogCRUD.log_action(
             db_session,
             action="user_updated",
             resource_type="user",
-            resource_id=test_user.id,
-            user_id=test_user.id
+            resource_id=test_user,
+            user_id=test_user
         )
         
-        logs = await AuditLogCRUD.get_resource_logs(db_session, "user", test_user.id)
+        logs = await AuditLogCRUD.get_resource_logs(db_session, "user", test_user)
         assert len(logs) >= 1
 
     # ====================================================================

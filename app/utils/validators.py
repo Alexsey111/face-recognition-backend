@@ -146,7 +146,7 @@ def validate_image_size(
 
     if size > max_size:
         raise ValidationError(
-            f"Image too large: {size / 1024 / 1024:.2f}MB "
+            f"Image is too large: {size / 1024 / 1024:.2f}MB "
             f"(max {max_size / 1024 / 1024:.2f}MB)"
         )
 
@@ -178,7 +178,7 @@ def validate_file_hash(
     hash_obj.update(data)
 
     if hash_obj.hexdigest().lower() != expected_hash.lower():
-        raise ValidationError("File hash mismatch")
+        raise ValidationError("Hash mismatch")
 
     return True
 
@@ -288,6 +288,39 @@ def validate_sql_safe(text: str) -> bool:
 
 
 # =============================================================================
+# JSON SCHEMA VALIDATION
+# =============================================================================
+
+def validate_json_schema(data: Dict[str, Any], schema: Dict[str, Any]) -> bool:
+    """
+    Простая валидация JSON схемы для декораторов.
+    Упрощенная версия для базовых случаев.
+    """
+    # Базовые проверки типов
+    for key, expected_type in schema.items():
+        if key not in data:
+            raise ValidationError(f"Missing required field: {key}")
+    
+        actual_value = data[key]
+        
+        # Обработка Union типов
+        if isinstance(expected_type, list):
+            if not any(isinstance(actual_value, t) for t in expected_type):
+                raise ValidationError(f"Field {key} has invalid type")
+            continue
+        
+        # Обработка Optional типов (Union с None)
+        if isinstance(expected_type, type) and expected_type.__name__ == 'Union':
+            continue
+        
+        # Простая проверка типа
+        if not isinstance(actual_value, expected_type):
+            raise ValidationError(f"Field {key} must be of type {expected_type.__name__}")
+    
+    return True
+
+
+# =============================================================================
 # HELPERS
 # =============================================================================
 
@@ -365,3 +398,6 @@ class Validators:
     sanitize_string = staticmethod(sanitize_string)
     sanitize_html = staticmethod(sanitize_html)
     validate_sql_safe = staticmethod(validate_sql_safe)
+
+    # JSON Schema
+    validate_json_schema = staticmethod(validate_json_schema)

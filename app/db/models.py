@@ -57,10 +57,10 @@ class User(Base):
     is_verified = Column(Boolean, default=False)
     
     # Timestamps
-    created_at = Column(DateTime, server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
-    last_verified_at = Column(DateTime, nullable=True)
-    deleted_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    last_verified_at = Column(DateTime(timezone=True), nullable=True)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
     
     # Additional fields
     user_metadata = Column(JSON, nullable=True)
@@ -107,6 +107,7 @@ class Reference(Base):
     image_size_mb = Column(Float, nullable=True)
     image_format = Column(String(10), nullable=True)
     face_landmarks = Column(JSON, nullable=True)
+    quality_score = Column(Float, nullable=True)
     previous_reference_id = Column(String(36), ForeignKey("references.id", ondelete="SET NULL"), nullable=True)
 
     # Timestamps

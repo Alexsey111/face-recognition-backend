@@ -501,3 +501,139 @@ class ValidationService:
 
     def generate_file_hash(self, file_data: bytes) -> str:
         return hashlib.sha256(file_data).hexdigest()
+
+    async def analyze_spoof_signs(self, image_data: bytes) -> Dict[str, Any]:
+        """
+        Анализ признаков подделки (spoofing) с помощью эвристик.
+
+        Detects common spoofing indicators:
+        - moire_pattern: муаровые паттерны от экранов
+        - screen_glare: блики от экрана
+        - color_banding: цветовые полосы (компрессия экрана)
+        - edge_artifacts: артефакты по краям
+        - noise_inconsistency: неестественный шум
+
+        Args:
+            image_data: Байты изображения
+
+        Returns:
+            Dict с 'score' (0-1, выше = более похоже на real) и 'flags' (список обнаруженных признаков)
+        """
+        def _sync_analyze():
+            try:
+                img = cv2.imdecode(np.frombuffer(image_data, np.uint8), cv2.IMREAD_COLOR)
+                if img is None:
+                    return {"score": 0.5, "flags": ["decode_failed"], "details": {}}
+
+                h, w = img.shape[:2]
+                flags = []
+                details = {}
+
+                # 1. Moiré pattern detection (муаровые полосы от экранов)
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                fourier = np.fft.fft2(gray)
+                fourier_shift = np.fft.fftshift(fourier)
+                magnitude = np.log(np.abs(fourier_shift) + 1)
+
+                # Ищем высокочастотные паттерны в центральной области
+                center_h, center_w = h // 2, w // 2
+                center_region = magnitude[
+                    max(0, center_h - 50):min(h, center_h + 50),
+                    max(0, center_w - 50):min(w, center_w + 50)
+                ]
+                moire_score = np.std(center_region) / np.mean(center_region) if np.mean(center_region) > 0 else 0
+                details["moire_score"] = round(moire_score, 3)
+                if moire_score > 0.8:
+                    flags.append("moire_pattern")
+
+                # 2. Screen glare detection (блики от экрана)
+                gray_float = gray.astype(np.float32) / 255.0
+                luminance = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)[:, :, 0].astype(np.float32) / 255.0
+
+                # Ищем области с очень высокой яркостью
+                high_lum_mask = luminance > 0.95
+                glare_ratio = np.sum(high_lum_mask) / (h * w)
+                details["glare_ratio"] = round(glare_ratio, 4)
+                if glare_ratio > 0.15:
+                    flags.append("screen_glare")
+
+                # 3. Color banding detection (цветовые полосы от экрана)
+                # Проверяем плавность градиентов
+                grad_x = cv2.Sobel(gray_float, cv2.CV_32F, 1, 0, ksize=3)
+                grad_y = cv2.Sobel(gray_float, cv2.CV_32F, 0, 1, ksize=3)
+                gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
+
+                # Экраны часто имеют artifical sharp gradients
+                sharp_edges = np.sum(gradient_magnitude > 0.3) / (h * w)
+                details["sharp_edge_ratio"] = round(sharp_edges, 4)
+                if sharp_edges > 0.4:
+                    flags.append("color_banding")
+
+                # 4. Edge artifacts (артефакты по краям - характерно для фото экранов)
+                edges = cv2.Canny(gray, 50, 150)
+                edge_density = np.sum(edges > 0) / (h * w)
+                details["edge_density"] = round(edge_density, 4)
+
+                # Нормальное фото имеет ~10-30% edge density
+                # Фото экрана может иметь аномально высокий или низкий
+                if edge_density > 0.5 or edge_density < 0.02:
+                    flags.append("edge_artifacts")
+
+                # 5. Noise inconsistency analysis
+                # Вычисляем локальную дисперсию шума
+                noise_std_local = cv2.blur(gray.astype(np.float32)**2, (15, 15)) - \
+                                 cv2.blur(gray.astype(np.float32), (15, 15))**2
+                noise_std_local = np.sqrt(np.maximum(noise_std_local, 0))
+
+                # Фото экрана часто имеет uniform noise
+                noise_std_global = np.std(noise_std_local)
+                noise_mean_local = np.mean(noise_std_local)
+                noise_consistency = noise_std_global / (noise_mean_local + 1e-6)
+                details["noise_consistency"] = round(noise_consistency, 3)
+
+                # Неестественно uniform шум = признак экрана
+                if noise_consistency < 0.1:
+                    flags.append("noise_inconsistency")
+
+                # 6. Chromatic aberration check
+                # Экраны могут проявлять хроматическую аберрацию по краям
+                b, g, r = cv2.split(img)
+                b_mean, g_mean, r_mean = np.mean(b), np.mean(g), np.mean(r)
+                b_std, g_std, r_std = np.std(b), np.std(g), np.std(r)
+
+                # Аномально высокая корреляция между каналами
+                rg_corr = np.corrcoef(r.flatten(), g.flatten())[0, 1]
+                bg_corr = np.corrcoef(b.flatten(), g.flatten())[0, 1]
+                details["channel_correlation"] = {"rg": round(rg_corr, 3), "bg": round(bg_corr, 3)}
+
+                if rg_corr > 0.95 and bg_corr > 0.95:
+                    flags.append("screen_capture_pattern")
+
+                # 7. Calculate overall spoof score
+                # Каждый флаг снижает score
+                base_score = 1.0
+                flag_weights = {
+                    "moire_pattern": 0.15,
+                    "screen_glare": 0.2,
+                    "color_banding": 0.15,
+                    "edge_artifacts": 0.1,
+                    "noise_inconsistency": 0.2,
+                    "screen_capture_pattern": 0.2,
+                }
+
+                for flag in flags:
+                    base_score -= flag_weights.get(flag, 0.1)
+
+                score = max(0.0, min(1.0, base_score))
+
+                return {
+                    "score": round(score, 3),
+                    "flags": flags,
+                    "details": details,
+                }
+
+            except Exception as e:
+                logger.warning(f"Spoof analysis failed: {e}")
+                return {"score": 0.5, "flags": ["analysis_error"], "details": {"error": str(e)}}
+
+        return await asyncio.to_thread(_sync_analyze)

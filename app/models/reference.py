@@ -4,7 +4,7 @@ Pydantic модели для работы с эталонными изображ
 """
 
 from typing import Optional, List, Dict, Any, Union
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 from datetime import datetime, timezone
 import uuid
 
@@ -13,6 +13,8 @@ class ReferenceModel(BaseModel):
     """
     Базовая модель эталонного изображения.
     """
+
+    model_config = ConfigDict(from_attributes=True)
 
     id: str = Field(
         default_factory=lambda: str(uuid.uuid4()), description="Уникальный ID эталона"
@@ -25,7 +27,8 @@ class ReferenceModel(BaseModel):
     file_size: Optional[int] = Field(None, description="Размер файла в байтах")
     image_format: Optional[str] = Field(None, description="Формат изображения")
     image_dimensions: Optional[Dict[str, int]] = Field(
-        None, description="Размеры изображения", example={"width": 1920, "height": 1080}
+        None, description="Размеры изображения",
+        json_schema_extra={"width": 1920, "height": 1080}
     )
     embedding: Optional[bytes] = Field(None, description="Зашифрованный эмбеддинг лица")
     embedding_version: int = Field(default=1, description="Версия алгоритма эмбеддинга")
@@ -54,9 +57,6 @@ class ReferenceModel(BaseModel):
         None, description="Время обработки в секундах"
     )
 
-    class Config:
-        from_attributes = True
-
     @field_validator("label")
     @classmethod
     def validate_label(cls, v):
@@ -79,7 +79,7 @@ class ReferenceCreate(BaseModel):
     image_data: str = Field(
         ...,
         description="Изображение в формате base64 или URL",
-        example="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ...",
+        json_schema_extra={"example": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ..."}
     )
     label: Optional[str] = Field(None, max_length=100, description="Метка эталона")
     metadata: Optional[Dict[str, Any]] = Field(

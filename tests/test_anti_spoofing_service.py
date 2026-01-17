@@ -1,301 +1,457 @@
 """
-Тесты для AntiSpoofingService (MiniFASNetV2).
+Unit и integration тесты для AntiSpoofingService.
 """
 
 import pytest
+import pytest_asyncio  
 import asyncio
-from unittest.mock import Mock, patch, AsyncMock
-from pathlib import Path
-import tempfile
 import numpy as np
 from PIL import Image
 import io
+import gc
+import torch
 
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-
-class TestAntiSpoofingService:
-    """Тесты для AntiSpoofingService."""
-    
-    @pytest.fixture
-    def mock_settings(self):
-        """Мок настроек для тестирования."""
-        with patch('app.services.anti_spoofing_service.settings') as mock:
-            mock.LOCAL_ML_DEVICE = "cpu"
-            mock.LOCAL_ML_ENABLE_CUDA = False
-            mock.CERTIFIED_LIVENESS_THRESHOLD = 0.98
-            mock.CERTIFIED_LIVENESS_MODEL_PATH = None
-            yield mock
-    
-    @pytest.fixture
-    def sample_image_bytes(self):
-        """Генерация тестового изображения."""
-        img = Image.new('RGB', (224, 224), color='red')
-        buffer = io.BytesIO()
-        img.save(buffer, format='JPEG')
-        return buffer.getvalue()
-    
-    @pytest.fixture
-    def anti_spoofing_service(self, mock_settings):
-        """Создание экземпляра сервиса."""
-        from app.services.anti_spoofing_service import AntiSpoofingService
-        return AntiSpoofingService()
-    
-    def test_service_initialization(self, anti_spoofing_service, mock_settings):
-        """Тест инициализации сервиса."""
-        assert anti_spoofing_service.device is not None
-        assert anti_spoofing_service.is_initialized is False
-        assert anti_spoofing_service.threshold == 0.98
-        assert anti_spoofing_service.stats["checks_performed"] == 0
-    
-    @pytest.mark.asyncio
-    async def test_initialize_model(self, anti_spoofing_service, mock_settings):
-        """Тест инициализации модели."""
-        # Модель должна инициализироваться без ошибок
-        await anti_spoofing_service.initialize()
-        assert anti_spoofing_service.is_initialized is True
-    
-    @pytest.mark.asyncio
-    async def test_check_liveness_with_real_face(self, anti_spoofing_service, sample_image_bytes, mock_settings):
-        """Тест проверки живости с изображением реального лица."""
-        await anti_spoofing_service.initialize()
-        
-        # Проверяем, что метод возвращает ожидаемые ключи
-        result = await anti_spoofing_service.check_liveness(sample_image_bytes)
-        
-        assert "success" in result
-        assert "liveness_detected" in result
-        assert "confidence" in result
-        assert "real_probability" in result
-        assert "spoof_probability" in result
-        assert "model_type" in result
-        assert result["model_type"] == "MiniFASNetV2"
-        assert result["model_version"] == "MiniFASNetV2-certified"
-    
-    @pytest.mark.asyncio
-    async def test_check_liveness_updates_stats(self, anti_spoofing_service, sample_image_bytes, mock_settings):
-        """Тест обновления статистики после проверки."""
-        await anti_spoofing_service.initialize()
-        initial_checks = anti_spoofing_service.stats["checks_performed"]
-        
-        await anti_spoofing_service.check_liveness(sample_image_bytes)
-        
-        assert anti_spoofing_service.stats["checks_performed"] == initial_checks + 1
-    
-    def test_set_threshold(self, anti_spoofing_service):
-        """Тест установки порога."""
-        anti_spoofing_service.set_threshold(0.95)
-        assert anti_spoofing_service.threshold == 0.95
-        
-        # Проверка границ
-        anti_spoofing_service.set_threshold(1.5)
-        assert anti_spoofing_service.threshold == 1.0
-        
-        anti_spoofing_service.set_threshold(-0.5)
-        assert anti_spoofing_service.threshold == 0.0
-    
-    def test_get_stats(self, anti_spoofing_service):
-        """Тест получения статистики."""
-        stats = anti_spoofing_service.get_stats()
-        
-        assert "total_checks" in stats
-        assert "real_detected" in stats
-        assert "spoof_detected" in stats
-        assert "threshold_used" in stats
-        assert "model_accuracy_claim" in stats
-        assert stats["model_accuracy_claim"] == ">98%"
-    
-    @pytest.mark.asyncio
-    async def test_health_check(self, anti_spoofing_service, mock_settings):
-        """Тест проверки состояния сервиса."""
-        await anti_spoofing_service.initialize()
-        
-        health = await anti_spoofing_service.health_check()
-        
-        assert health["status"] == "healthy"
-        assert health["model_loaded"] is True
-        assert "device" in health
-    
-    @pytest.mark.asyncio
-    async def test_liveness_not_detected_on_low_confidence(self, anti_spoofing_service, mock_settings):
-        """Тест случая, когда живость не обнаружена."""
-        await anti_spoofing_service.initialize()
-        
-        # Устанавливаем очень высокий порог
-        anti_spoofing_service.set_threshold(0.999)
-        
-        result = await anti_spoofing_service.check_liveness(b"\x00" * 1000)
-        
-        assert result["success"] is True
-        # При очень высоком пороге результат зависит от модели
-    
-    def test_preprocess_image(self, anti_spoofing_service, sample_image_bytes):
-        """Тест предобработки изображения."""
-        tensor = anti_spoofing_service._preprocess_image(sample_image_bytes)
-        
-        assert tensor is not None
-        assert tensor.shape[0] == 1  # batch dimension
-        assert tensor.shape[1] == 3  # channels
-        assert tensor.shape[2] == 80  # height (MiniFASNetV2)
-        assert tensor.shape[3] == 80  # width (MiniFASNetV2)
+from app.services.anti_spoofing_service import (
+    AntiSpoofingService,
+    MiniFASNetV2,
+    get_anti_spoofing_service,
+    reset_anti_spoofing_service,
+    estimate_face_texture_quality,
+    analyze_image_for_spoofing_indicators,
+)
+from app.utils.exceptions import ProcessingError, ValidationError, MLServiceError
 
 
-class TestUtilityFunctions:
-    """Тесты утилитарных функций."""
-    
-    @pytest.fixture
-    def sample_image_bytes(self):
-        """Генерация тестового изображения."""
-        img = Image.new('RGB', (100, 100), color='blue')
-        buffer = io.BytesIO()
-        img.save(buffer, format='JPEG')
-        return buffer.getvalue()
-    
-    def test_estimate_face_texture_quality(self, sample_image_bytes):
-        """Тест оценки качества текстуры."""
-        from app.services.anti_spoofing_service import estimate_face_texture_quality
-        
-        quality = estimate_face_texture_quality(sample_image_bytes)
-        
-        assert 0.0 <= quality <= 1.0
-    
-    def test_analyze_image_for_spoofing_indicators(self, sample_image_bytes):
-        """Тест анализа изображения на признаки подделки."""
-        from app.services.anti_spoofing_service import analyze_image_for_spoofing_indicators
-        
-        result = analyze_image_for_spoofing_indicators(sample_image_bytes)
-        
-        assert "spoof_indicators" in result
-        assert "combined_spoof_probability" in result
-        assert "is_likely_spoof" in result
+# =============================================================================
+# Fixtures
+# =============================================================================
+
+@pytest.fixture
+def sample_image_bytes():
+    """Создание тестового изображения."""
+    img = Image.new("RGB", (80, 80), color=(128, 128, 128))
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
-class TestMiniFASNetV2Model:
-    """Тесты архитектуры модели MiniFASNetV2."""
-    
-    def test_model_creation(self):
-        """Тест создания модели."""
-        from app.services.anti_spoofing_service import MiniFASNetV2
-        
-        model = MiniFASNetV2(input_channels=3, embedding_size=128, out_classes=2)
-        
-        assert model is not None
-        assert hasattr(model, 'conv1')
-        assert hasattr(model, 'fc')
-    
-    def test_model_forward_pass(self):
-        """Тест прямого прохода через модель."""
-        import torch
-        from app.services.anti_spoofing_service import MiniFASNetV2
-        
-        model = MiniFASNetV2(input_channels=3, embedding_size=128, out_classes=2)
-        model.eval()
-        
-        # Создаем тестовый вход
-        x = torch.randn(1, 3, 80, 80)
-        
-        with torch.no_grad():
-            output = model(x)
-        
-        assert output is not None
-        assert output.shape == (1, 2)  # 2 classes
-    
-    def test_model_output_format(self):
-        """Тест формата выхода модели."""
-        import torch
-        from app.services.anti_spoofing_service import MiniFASNetV2
-        import torch.nn.functional as F
-        
-        model = MiniFASNetV2(input_channels=3, embedding_size=128, out_classes=2)
-        model.eval()
-        
-        x = torch.randn(1, 3, 80, 80)
-        
-        with torch.no_grad():
-            output = model(x)
-            probabilities = F.softmax(output, dim=1)
-        
-        # Проверяем, что сумма вероятностей = 1
-        assert probabilities.sum(dim=1).item() == pytest.approx(1.0, abs=1e-5)
+@pytest.fixture
+def sample_image_large_bytes():
+    """Создание большого тестового изображения."""
+    img = Image.new("RGB", (1024, 1024), color=(128, 128, 128))
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
-class TestEdgeCases:
-    """Тесты граничных случаев."""
+@pytest.fixture(scope="function")
+def service():
+    """
+    Fixture для AntiSpoofingService - СИНХРОННЫЙ!
+    Возвращает неинициализированный сервис.
+    """
+    svc = AntiSpoofingService()
+    yield svc
     
-    @pytest.fixture
-    def anti_spoofing_service(self):
-        """Создание сервиса для тестов граничных случаев."""
-        with patch('app.services.anti_spoofing_service.settings') as mock:
-            mock.LOCAL_ML_DEVICE = "cpu"
-            mock.LOCAL_ML_ENABLE_CUDA = False
-            mock.CERTIFIED_LIVENESS_THRESHOLD = 0.98
-            mock.CERTIFIED_LIVENESS_MODEL_PATH = None
-            
-            from app.services.anti_spoofing_service import AntiSpoofingService
-            return AntiSpoofingService()
+    # Cleanup
+    if svc.model is not None:
+        svc.model.cpu()
+        del svc.model
+        svc.model = None
     
-    @pytest.mark.asyncio
-    async def test_invalid_image_data(self, anti_spoofing_service):
-        """Тест обработки некорректных данных изображения."""
-        await anti_spoofing_service.initialize()
-        
-        # Пустые данные
-        with pytest.raises(Exception):
-            await anti_spoofing_service.check_liveness(b"")
+    svc.is_initialized = False
     
-    @pytest.mark.asyncio
-    async def test_uninitialized_service_check(self, anti_spoofing_service):
-        """Тест проверки на неинициализированном сервисе."""
-        # Проверяем, что вызов check_liveness инициализирует сервис
-        img = Image.new('RGB', (224, 224), color='red')
-        buffer = io.BytesIO()
-        img.save(buffer, format='JPEG')
-        
-        result = await anti_spoofing_service.check_liveness(buffer.getvalue())
-        
-        assert anti_spoofing_service.is_initialized is True
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+    
+    gc.collect()
 
 
-# ============================================================================
-# Integration Tests (require model files)
-# ============================================================================
+@pytest_asyncio.fixture(scope="function")
+async def initialized_service():
+    """
+    Fixture для инициализированного сервиса - ASYNC!
+    """
+    await reset_anti_spoofing_service()
+    
+    svc = AntiSpoofingService()
+    await svc.initialize()
+    
+    yield svc
+    
+    # Cleanup
+    if svc.model is not None:
+        svc.model.cpu()
+        del svc.model
+        svc.model = None
+    
+    svc.is_initialized = False
+    
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+    
+    gc.collect()
+    
+    await reset_anti_spoofing_service()
 
-@pytest.mark.integration
-class TestAntiSpoofingIntegration:
-    """Интеграционные тесты для AntiSpoofingService."""
+
+# =============================================================================
+# Model Architecture Tests (Sync)
+# =============================================================================
+
+def test_minifasnet_v2_architecture():
+    """Тест архитектуры модели."""
+    model = MiniFASNetV2(input_channels=3, embedding_size=128, out_classes=2)
     
-    @pytest.fixture
-    def integration_service(self):
-        """Сервис для интеграционного тестирования."""
-        with patch('app.services.anti_spoofing_service.settings') as mock:
-            mock.LOCAL_ML_DEVICE = "cpu"
-            mock.LOCAL_ML_ENABLE_CUDA = False
-            mock.CERTIFIED_LIVENESS_THRESHOLD = 0.98
-            mock.CERTIFIED_LIVENESS_MODEL_PATH = None  # Will use random weights
-            
-            from app.services.anti_spoofing_service import AntiSpoofingService
-            return AntiSpoofingService()
+    # Переводим модель в режим оценки для корректной работы BatchNorm
+    model.eval()
     
-    @pytest.mark.asyncio
-    async def test_full_liveness_pipeline(self, integration_service):
-        """Тест полного пайплайна проверки живости."""
-        await integration_service.initialize()
-        
-        # Создаем тестовое изображение лица
-        img = Image.new('RGB', (224, 224), color=(200, 150, 100))
-        buffer = io.BytesIO()
-        img.save(buffer, format='JPEG')
-        
-        result = await integration_service.check_liveness(buffer.getvalue())
-        
-        # Проверяем структуру ответа
-        assert result["success"] is True
-        assert "liveness_detected" in result
-        assert "confidence" in result
-        assert "processing_time" in result
+    assert hasattr(model, "conv1")
+    assert hasattr(model, "conv2_dw")
+    assert hasattr(model, "fc")
+    assert hasattr(model, "global_avg_pool")
+    
+    dummy_input = torch.randn(1, 3, 80, 80)
+    with torch.no_grad():  # Отключаем градиенты для теста
+        output = model(dummy_input)
+    
+    assert output.shape == (1, 2), f"Expected shape (1, 2), got {output.shape}"
+    
+    del model, dummy_input, output
+    gc.collect()
+
+
+def test_minifasnet_v2_forward_pass():
+    """Тест forward pass модели."""
+    model = MiniFASNetV2()
+    model.eval()
+    
+    with torch.no_grad():
+        input_tensor = torch.randn(2, 3, 80, 80)
+        output = model(input_tensor)
+    
+    assert output.shape == (2, 2)
+    assert not torch.isnan(output).any()
+    assert not torch.isinf(output).any()
+    
+    del model, input_tensor, output
+    gc.collect()
+
+
+def test_minifasnet_v2_embedding():
+    """Тест извлечения эмбеддингов."""
+    model = MiniFASNetV2(embedding_size=128)
+    model.eval()
+    
+    with torch.no_grad():
+        input_tensor = torch.randn(1, 3, 80, 80)
+        embedding = model.get_embedding(input_tensor)
+    
+    assert embedding.shape == (1, 256)
+    
+    del model, input_tensor, embedding
+    gc.collect()
+
+
+# =============================================================================
+# Service Initialization Tests (Async)
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_service_initialization():
+    """Тест инициализации сервиса."""
+    await reset_anti_spoofing_service()
+    service = AntiSpoofingService()
+    
+    assert not service.is_initialized
+    
+    await service.initialize()
+    
+    assert service.is_initialized
+    assert service.model is not None
+    assert service.model_version is not None
+    
+    await reset_anti_spoofing_service()
+
+
+@pytest.mark.asyncio
+async def test_singleton_pattern():
+    """Тест singleton pattern."""
+    await reset_anti_spoofing_service()
+    
+    service1 = await get_anti_spoofing_service()
+    service2 = await get_anti_spoofing_service()
+    
+    assert service1 is service2
+    
+    await reset_anti_spoofing_service()
+
+
+# =============================================================================
+# Input Validation Tests (Async)
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_empty_image_data(initialized_service):
+    """Тест на пустые данные."""
+    with pytest.raises(ValidationError, match="Empty image data"):
+        await initialized_service.check_liveness(b"")
+
+
+@pytest.mark.asyncio
+async def test_oversized_image(initialized_service):
+    """Тест на слишком большое изображение."""
+    large_data = b"x" * (11 * 1024 * 1024)
+    
+    with pytest.raises(ValidationError, match="exceeds maximum"):
+        await initialized_service.check_liveness(large_data)
+
+
+@pytest.mark.asyncio
+async def test_invalid_image_format(initialized_service):
+    """Тест на невалидный формат изображения."""
+    invalid_data = b"not an image"
+    
+    with pytest.raises(ProcessingError):
+        await initialized_service.check_liveness(invalid_data)
+
+
+# =============================================================================
+# Liveness Check Tests (Async)
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_basic_liveness_check(initialized_service, sample_image_bytes):
+    """Базовый тест проверки живости."""
+    result = await initialized_service.check_liveness(sample_image_bytes)
+    
+    assert result["success"] is True
+    assert "liveness_detected" in result
+    assert "confidence" in result
+    assert "real_probability" in result
+    assert "spoof_probability" in result
+    assert "processing_time" in result
+    assert "inference_time" in result
+    
+    assert 0 <= result["confidence"] <= 1
+    assert 0 <= result["real_probability"] <= 1
+    assert 0 <= result["spoof_probability"] <= 1
+    assert abs(result["real_probability"] + result["spoof_probability"] - 1.0) < 0.001
+
+
+@pytest.mark.asyncio
+async def test_liveness_check_with_features(initialized_service, sample_image_bytes):
+    """Тест с извлечением признаков."""
+    result = await initialized_service.check_liveness(
+        sample_image_bytes, 
+        return_features=True
+    )
+    
+    assert "features" in result
+    assert "embedding" in result["features"]
+    assert isinstance(result["features"]["embedding"], list)
+
+
+@pytest.mark.asyncio
+async def test_liveness_check_with_auxiliary(initialized_service, sample_image_bytes):
+    """Тест с дополнительными проверками."""
+    result = await initialized_service.check_liveness(
+        sample_image_bytes,
+        enable_auxiliary_checks=True
+    )
+    
+    assert "auxiliary_checks" in result or result["success"]
+
+
+@pytest.mark.asyncio
+async def test_batch_liveness_check(initialized_service, sample_image_bytes):
+    """Тест пакетной проверки."""
+    images = [sample_image_bytes] * 3
+    
+    results = await initialized_service.batch_check_liveness(images)
+    
+    assert len(results) == 3
+    assert all(r["success"] for r in results)
+
+
+# =============================================================================
+# Statistics Tests (Async)
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_statistics_update(initialized_service, sample_image_bytes):
+    """Тест обновления статистики."""
+    initial_stats = initialized_service.get_stats()
+    initial_count = initial_stats["total_checks"]
+    
+    await initialized_service.check_liveness(sample_image_bytes)
+    
+    updated_stats = initialized_service.get_stats()
+    
+    assert updated_stats["total_checks"] == initial_count + 1
+    assert updated_stats["avg_processing_time"] > 0
+
+
+@pytest.mark.asyncio
+async def test_statistics_reset(initialized_service, sample_image_bytes):
+    """Тест сброса статистики."""
+    await initialized_service.check_liveness(sample_image_bytes)
+    
+    initialized_service.reset_stats()
+    stats = initialized_service.get_stats()
+    
+    assert stats["total_checks"] == 0
+    assert stats["real_detected"] == 0
+    assert stats["spoof_detected"] == 0
+
+
+# =============================================================================
+# Threshold Tests (Async)
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_threshold_adjustment(initialized_service):
+    """Тест изменения порога."""
+    original_threshold = initialized_service.threshold
+    
+    initialized_service.set_threshold(0.7)
+    assert initialized_service.threshold == 0.7
+    
+    initialized_service.set_threshold(0.3)
+    assert initialized_service.threshold == 0.3
+    
+    initialized_service.set_threshold(original_threshold)
+
+
+def test_invalid_threshold():
+    """Тест невалидного порога."""
+    service = AntiSpoofingService()
+    
+    with pytest.raises(ValueError):
+        service.set_threshold(1.5)
+    
+    with pytest.raises(ValueError):
+        service.set_threshold(-0.1)
+
+
+# =============================================================================
+# Auxiliary Functions Tests (Sync)
+# =============================================================================
+
+def test_texture_quality_estimation(sample_image_bytes):
+    """Тест оценки качества текстуры."""
+    score = estimate_face_texture_quality(sample_image_bytes)
+    
+    assert 0 <= score <= 1
+    assert isinstance(score, float)
+
+
+def test_spoofing_indicators_analysis(sample_image_bytes):
+    """Тест анализа признаков подделки."""
+    result = analyze_image_for_spoofing_indicators(sample_image_bytes)
+    
+    assert "spoof_indicators" in result
+    assert "combined_spoof_probability" in result
+    assert "is_likely_spoof" in result
+    
+    indicators = result["spoof_indicators"]
+    assert "moire_score" in indicators
+    assert "uniform_regions_score" in indicators
+    assert "edge_density" in indicators
+    assert "texture_quality" in indicators
+
+
+# =============================================================================
+# Health Check Tests (Async)
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_health_check(initialized_service):
+    """Тест health check."""
+    health = await initialized_service.health_check()
+    
+    assert "status" in health
+    assert health["status"] in ["healthy", "degraded", "unhealthy"]
+    assert health["model_loaded"] is True
+    assert "stats" in health
+
+
+# =============================================================================
+# Performance Tests (Async)
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_inference_speed(initialized_service, sample_image_bytes):
+    """Тест скорости инференса."""
+    # Warmup
+    await initialized_service.check_liveness(sample_image_bytes)
+    
+    import time
+    start = time.time()
+    result = await initialized_service.check_liveness(sample_image_bytes)
+    elapsed = time.time() - start
+    
+    if initialized_service.device.type == "cuda":
+        assert result["inference_time"] < 0.05, "GPU inference too slow"
+    else:
+        assert result["inference_time"] < 0.2, "CPU inference too slow"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_requests(initialized_service, sample_image_bytes):
+    """Тест конкурентных запросов."""
+    tasks = [
+        initialized_service.check_liveness(sample_image_bytes)
+        for _ in range(10)
+    ]
+    
+    results = await asyncio.gather(*tasks)
+    
+    assert len(results) == 10
+    assert all(r["success"] for r in results)
+
+
+# =============================================================================
+# Edge Cases Tests (Async)
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_grayscale_image(initialized_service):
+    """Тест на grayscale изображение."""
+    img = Image.new("L", (80, 80), color=128)
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    
+    result = await initialized_service.check_liveness(buffer.getvalue())
+    
+    assert result["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_rgba_image(initialized_service):
+    """Тест на RGBA изображение."""
+    img = Image.new("RGBA", (80, 80), color=(128, 128, 128, 255))
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    
+    result = await initialized_service.check_liveness(buffer.getvalue())
+    
+    assert result["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_small_image(initialized_service):
+    """Тест на маленькое изображение."""
+    img = Image.new("RGB", (20, 20), color=(128, 128, 128))
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    
+    result = await initialized_service.check_liveness(buffer.getvalue())
+    
+    assert result["success"] is True
 
 
 if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+    pytest.main([__file__, "-v", "--tb=short"])

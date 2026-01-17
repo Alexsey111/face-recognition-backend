@@ -4,12 +4,15 @@ from unittest.mock import Mock, patch
 from app.utils.logger import setup_logger, get_logger
 from app.utils.constants import (
     IMAGE_FORMATS,
-    PAGINATION,
-    API_LIMITS,
-    THRESHOLDS,
-    SECURITY,
+    IMAGE_FORMAT_ALIASES,
+    FILE_LIMITS,
+    SIMILARITY_LIMITS,
+    CONFIDENCE_LEVELS,
+    USER_ROLES,
     TIME_PERIODS,
-    USER_ROLES
+    EMAIL_REGEX,
+    USERNAME_REGEX,
+    PASSWORD_REGEX
 )
 from app.utils.decorators import (
     retry_on_failure,
@@ -52,54 +55,87 @@ class TestConstants:
     
     def test_image_formats(self):
         """Тест форматов изображений"""
-        assert isinstance(IMAGE_FORMATS, list)
+        assert isinstance(IMAGE_FORMATS, set)
         assert len(IMAGE_FORMATS) > 0
         assert "JPEG" in IMAGE_FORMATS
         assert "PNG" in IMAGE_FORMATS
 
-    def test_pagination_constants(self):
-        """Тест констант пагинации"""
-        assert "default_page_size" in PAGINATION
-        assert "max_page_size" in PAGINATION
-        assert "min_page_size" in PAGINATION
-        assert PAGINATION["default_page_size"] == 20
-        assert PAGINATION["max_page_size"] == 100
+    def test_image_format_aliases(self):
+        """Тест алиасов форматов изображений"""
+        assert isinstance(IMAGE_FORMAT_ALIASES, dict)
+        assert "JPG" in IMAGE_FORMAT_ALIASES
+        assert IMAGE_FORMAT_ALIASES["JPG"] == "JPEG"
+        assert "TIF" in IMAGE_FORMAT_ALIASES
+        assert IMAGE_FORMAT_ALIASES["TIF"] == "TIFF"
     
-    def test_api_limits(self):
-        """Тест лимитов API"""
-        assert isinstance(API_LIMITS, dict)
-        assert "default_requests_per_minute" in API_LIMITS
-        assert "verify_requests_per_minute" in API_LIMITS
-        assert API_LIMITS["default_requests_per_minute"] == 60
+    def test_file_limits(self):
+        """Тест лимитов файлов"""
+        assert isinstance(FILE_LIMITS, dict)
+        assert "max_image_size" in FILE_LIMITS
+        assert "max_filename_length" in FILE_LIMITS
+        assert FILE_LIMITS["max_image_size"] == 10 * 1024 * 1024  # 10 MB
+        assert FILE_LIMITS["max_filename_length"] == 255
     
-    def test_thresholds(self):
-        """Тест пороговых значений"""
-        assert "verification" in THRESHOLDS
-        assert "liveness" in THRESHOLDS
-        assert THRESHOLDS["verification"]["default"] == 0.8
-        assert THRESHOLDS["liveness"]["default"] == 0.8
+    def test_similarity_limits(self):
+        """Тест лимитов схожести"""
+        assert isinstance(SIMILARITY_LIMITS, dict)
+        assert "min_threshold" in SIMILARITY_LIMITS
+        assert "max_threshold" in SIMILARITY_LIMITS
+        assert "default_threshold" in SIMILARITY_LIMITS
+        assert SIMILARITY_LIMITS["min_threshold"] == 0.0
+        assert SIMILARITY_LIMITS["max_threshold"] == 1.0
+        assert SIMILARITY_LIMITS["default_threshold"] == 0.6
     
-    def test_security_constants(self):
-        """Тест констант безопасности"""
-        assert "password_min_length" in SECURITY
-        assert "max_login_attempts" in SECURITY
-        assert SECURITY["password_min_length"] == 8
-        assert SECURITY["max_login_attempts"] == 5
-    
-    def test_time_constants(self):
-        """Тест временных констант"""
-        assert "minute" in TIME_PERIODS
-        assert "hour" in TIME_PERIODS
-        assert "day" in TIME_PERIODS
-        assert TIME_PERIODS["minute"] == 60
-        assert TIME_PERIODS["hour"] == 3600
+    def test_confidence_levels(self):
+        """Тест уровней уверенности"""
+        assert isinstance(CONFIDENCE_LEVELS, dict)
+        assert "very_high" in CONFIDENCE_LEVELS
+        assert "high" in CONFIDENCE_LEVELS
+        assert "medium" in CONFIDENCE_LEVELS
+        assert "low" in CONFIDENCE_LEVELS
+        assert "very_low" in CONFIDENCE_LEVELS
+        assert CONFIDENCE_LEVELS["very_high"] == 0.85
+        assert CONFIDENCE_LEVELS["high"] == 0.75
     
     def test_user_roles(self):
         """Тест ролей пользователей"""
+        assert isinstance(USER_ROLES, dict)
         assert "USER" in USER_ROLES
         assert "ADMIN" in USER_ROLES
+        assert "SYSTEM" in USER_ROLES
         assert USER_ROLES["USER"] == "user"
         assert USER_ROLES["ADMIN"] == "admin"
+
+    def test_time_constants(self):
+        """Тест временных констант"""
+        assert isinstance(TIME_PERIODS, dict)
+        assert "second" in TIME_PERIODS
+        assert "minute" in TIME_PERIODS
+        assert "hour" in TIME_PERIODS
+        assert "day" in TIME_PERIODS
+        assert TIME_PERIODS["second"] == 1
+        assert TIME_PERIODS["minute"] == 60
+        assert TIME_PERIODS["hour"] == 3600
+
+    def test_email_regex(self):
+        """Тест регулярного выражения для email"""
+        assert EMAIL_REGEX is not None
+        assert EMAIL_REGEX.match("test@example.com") is not None
+        assert EMAIL_REGEX.match("invalid-email") is None
+    
+    def test_username_regex(self):
+        """Тест регулярного выражения для username"""
+        assert USERNAME_REGEX is not None
+        assert USERNAME_REGEX.match("john_doe") is not None
+        assert USERNAME_REGEX.match("ab") is None  # too short
+    
+    def test_password_regex(self):
+        """Тест регулярного выражения для пароля"""
+        assert PASSWORD_REGEX is not None
+        # Valid password: 8+ chars, uppercase, lowercase, digit, special char
+        assert PASSWORD_REGEX.match("Password1!") is not None
+        # Invalid: no uppercase
+        assert PASSWORD_REGEX.match("password1!") is None
 
 
 class TestDecorators:

@@ -125,9 +125,14 @@ class AuthService:
     async def close_redis(cls):
         """Close shared Redis connection."""
         if cls._redis_pool:
-            await cls._redis_pool.close()
-            cls._redis_pool = None
-            logger.info("Redis connection closed")
+            try:
+                # ✅ ИСПРАВЛЕНО: close() → aclose()
+                await cls._redis_pool.aclose()
+                logger.info("Redis connection closed")
+            except Exception as e:
+                logger.error(f"Error closing Redis pool: {e}")
+            finally:
+                cls._redis_pool = None
 
     def create_access_token(
         self, 
@@ -296,7 +301,7 @@ class AuthService:
             new_refresh_token = self.create_refresh_token(user_id)
 
             # Отзываем старый refresh токен (async: Redis I/O)
-            await self.revoke_token(refresh_token)
+            await self.revoke_token(refresh_token, "refresh")
             
             logger.info(f"Token rotation completed for user {user_id}")
             
@@ -651,18 +656,24 @@ class AuthService:
             logger.error(f"Error extracting user info from token: {str(e)}")
             raise
 
-    async def revoke_token(self, token: str) -> bool:
+    async def revoke_token(self, token: str, token_type: str = None) -> bool:
         """
         Отзыв токена с сохранением в Redis.
         
         Args:
             token: Токен для отзыва
+            token_type: Тип токена (access или refresh), если None - определяется автоматически
 
         Returns:
             bool: True если токен отозван успешно
         """
         try:
-            payload = await self.verify_token(token)
+            # Если тип не указан, пробуем определить из токена
+            if token_type is None:
+                payload_info = jwt.decode(token, options={"verify_signature": False})
+                token_type = payload_info.get("type", "access")
+
+            payload = await self.verify_token(token, token_type)
             jti = payload.get("jti")
             exp = payload.get("exp")
             

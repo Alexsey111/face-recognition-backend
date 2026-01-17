@@ -59,6 +59,10 @@ class EncryptionService:
         AES-256 key.
         """
         try:
+            # Check for empty key
+            if not key or not key.strip():
+                raise EncryptionError("Encryption key cannot be empty")
+                
             # If the key is already 32 bytes, use it directly
             key_bytes = key.encode("utf-8")
             if len(key_bytes) == self.KEY_LENGTH:

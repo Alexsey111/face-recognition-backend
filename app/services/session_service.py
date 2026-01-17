@@ -39,20 +39,32 @@ class UploadSession:
 
     def __repr__(self) -> str:
         return f"<UploadSession id={self.session_id} user={self.user_id}>"
-    # ---------------------------------------------------------------------
-  
-@classmethod
-def from_redis_data(cls, session_id: str, data: Dict[str, str]) -> "UploadSession":
-    return cls(
-        session_id=session_id,
-        user_id=data["user_id"],  # обязательное, предполагаем, что есть
-        created_at=datetime.fromisoformat(data["created_at"]),
-        expiration_at=datetime.fromisoformat(data["expiration_at"]),
-        file_key=data.get("file_key"),
-        file_size=int(data["file_size"]) if data.get("file_size") else None,
-        file_hash=data.get("file_hash"),
-        metadata=json.loads(data.get("metadata", "{}")),
-    )
+
+    def is_expired(self) -> bool:
+        """Проверка истечения сессии"""
+        return utcnow() > self.expiration_at
+
+    @classmethod
+    def from_redis_data(cls, session_id: str, data: Dict[str, str]) -> "UploadSession":
+        # ✅ Безопасная загрузка metadata с дефолтным значением
+        metadata_str = data.get("metadata", "{}")
+        try:
+            metadata = json.loads(metadata_str) if metadata_str else {}
+        except json.JSONDecodeError:
+            logger.warning(f"Invalid metadata JSON for session {session_id}")
+            metadata = {}
+        return cls(
+            session_id=session_id,
+            user_id=data["user_id"],
+            created_at=datetime.fromisoformat(data["created_at"]),
+            expiration_at=datetime.fromisoformat(data["expiration_at"]),
+            file_key=data.get("file_key"),
+            file_size=int(data["file_size"]) if data.get("file_size") else None,
+            file_hash=data.get("file_hash"),
+            metadata=metadata,
+        )
+    
+
 # =============================================================================
 # Session Service 
 # =============================================================================
@@ -87,6 +99,7 @@ class SessionService:
         created_at_str = created_at.isoformat()
         
         expire_seconds = settings.UPLOAD_EXPIRATION_DAYS * 24 * 60 * 60
+        expiration_at = created_at + timedelta(days=settings.UPLOAD_EXPIRATION_DAYS)
         
         key = f"upload_session:{session_id}"
         
@@ -95,6 +108,7 @@ class SessionService:
         session_data = {
             "user_id": user_id,
             "created_at": created_at_str,
+            "expiration_at": expiration_at.isoformat(),
         }
         
         await cache.set(key, session_data, expire_seconds=expire_seconds)
@@ -134,7 +148,8 @@ class SessionService:
         file_hash: str,
     ) -> UploadSession:
         """
-        Безопасное обновление сессии (ТОЛЬКО файл)
+        Безопасное обновление сессии с использованием Redis HSET.
+        ✅ Атомарное обновление полей файла с сохранением оригинального TTL.
         """
         session = await SessionService.get_session(session_id)
         if not session:
@@ -144,23 +159,35 @@ class SessionService:
             raise PermissionError("Session does not belong to user")
         
         key = f"upload_session:{session_id}"
-        
         cache = CacheService()
         
-        updated_data = {
-            "user_id": session.user_id,
-            "created_at": session.created_at.isoformat(),
-            "file_key": file_key,
-            "file_size": file_size,
-            "file_hash": file_hash,
-        }
-        
-        await cache.set(key, updated_data)  # TTL сохранится от создания
-        
-        logger.info("File attached to session", extra={"session_id": session_id})
-        
-        # Возвращаем обновлённую сессию
-        return await SessionService.get_session(session_id)
+        try:
+            # ✅ Получаем текущий TTL перед обновлением
+            ttl = await cache.redis.ttl(key)
+            if ttl <= 0:
+                raise ValueError("Session expired")
+            
+            # ✅ Атомарное обновление только нужных полей через HSET
+            await cache.redis.hset(
+                key,
+                mapping={
+                    "file_key": file_key,
+                    "file_size": str(file_size),
+                    "file_hash": file_hash,
+                }
+            )
+            
+            # ✅ Сохраняем оригинальный TTL
+            await cache.redis.expire(key, ttl)
+            
+            logger.info("File attached to session", extra={"session_id": session_id})
+            
+            # Возвращаем обновлённую сессию
+            return await SessionService.get_session(session_id)
+            
+        except Exception as e:
+            logger.error(f"Failed to attach file to session: {e}")
+            raise
     
     @staticmethod
     async def delete_session(session_id: str) -> bool:
@@ -199,3 +226,31 @@ class SessionService:
             return False
         
         return True
+
+    @staticmethod
+    async def get_user_sessions(user_id: str) -> List[UploadSession]:
+        """
+        Получение всех активных сессий пользователя
+        """
+        cache = CacheService()
+        pattern = "upload_session:*"
+        
+        # Scan all session keys
+        all_keys = []
+        cursor = 0
+        while True:
+            cursor, keys = await cache.redis.scan(cursor, match=pattern, count=100)
+            all_keys.extend(keys)
+            if cursor == 0:
+                break
+        
+        # Filter by user_id
+        user_sessions = []
+        for key in all_keys:
+            session_id = key.decode().split(":")[-1]
+            session = await SessionService.get_session(session_id)
+            if session and session.user_id == user_id:
+                user_sessions.append(session)
+        
+        return user_sessions
+

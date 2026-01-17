@@ -98,22 +98,27 @@ class DatabaseManager:
         """Безопасное получение сессии с автоматическим commit/rollback."""
         self._ensure_engine()
         
+        # Metrics tracking - определяем доступность метрик один раз
+        metrics_available = DATABASE_CONNECTIONS_ACTIVE is not None
+        if metrics_available:
+            try:
+                DATABASE_CONNECTIONS_ACTIVE.inc()
+            except Exception:
+                metrics_available = False
+        
         async with self.SessionLocal() as session:
-            if DATABASE_CONNECTIONS_ACTIVE is not None:
-                try:
-                    DATABASE_CONNECTIONS_ACTIVE.inc()
-                except Exception:
-                    pass
-            
             try:
                 yield session
-                await session.commit()
+                # ✅ Commit только если были изменения
+                if session.dirty or session.new or session.deleted:
+                    await session.commit()
             except Exception as e:
                 await session.rollback()
                 logger.error(f"❌ Database session error: {e}")
                 raise
             finally:
-                if DATABASE_CONNECTIONS_ACTIVE is not None:
+                # ✅ Декремент только если инкремент был успешен
+                if metrics_available:
                     try:
                         DATABASE_CONNECTIONS_ACTIVE.dec()
                     except Exception:
@@ -140,6 +145,7 @@ class DatabaseManager:
             async with self.SessionLocal() as session:
                 result = await session.execute(text("SELECT 1"))
                 result.scalar_one()
+            logger.debug("✅ PostgreSQL health check passed")
             return True
         except Exception as e:
             logger.error(f"❌ PostgreSQL health check failed: {e}")

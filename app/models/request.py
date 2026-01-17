@@ -4,7 +4,7 @@ Pydantic модели для запросов API.
 """
 
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, field_validator, ValidationInfo
+from pydantic import BaseModel, Field, field_validator, ValidationInfo, model_validator
 import base64
 from urllib.parse import urlparse
 
@@ -358,7 +358,8 @@ class ReferenceUpdateRequest(BaseModel):
     )
     label: Optional[str] = Field(None, description="Новая метка эталона")
     metadata: Optional[Dict[str, Any]] = Field(
-        None, description="Обновленные метаданные"
+        None,
+        description="Обновленные метаданные"
     )
     quality_threshold: Optional[float] = Field(
         None, ge=0.0, le=1.0, description="Новый порог качества"
@@ -453,3 +454,51 @@ class UserLogin(BaseModel):
             }
         }
     }
+
+
+class CompareRequest(BaseModel):
+    """
+    Модель для запроса сравнения лица с эталонами.
+    """
+
+    image_data: str = Field(
+        ..., description="Изображение для сравнения в формате base64 или URL"
+    )
+    user_id: Optional[str] = Field(
+        None, description="ID пользователя для поиска эталонов"
+    )
+    reference_ids: Optional[List[str]] = Field(
+        None, description="Список ID конкретных эталонов для сравнения"
+    )
+    threshold: float = Field(
+        0.8, ge=0.0, le=1.0, description="Порог схожести для определения совпадения"
+    )
+    max_results: int = Field(
+        10, ge=1, le=100, description="Максимальное количество результатов"
+    )
+    include_metadata: bool = Field(
+        False, description="Включить метаданные эталонов в результат"
+    )
+
+    @field_validator("image_data")
+    @classmethod
+    def validate_image_data(cls, v):
+        """Валидация формата изображения."""
+        if v is not None:
+            return validate_image_data_static(v)
+        return v
+
+    @field_validator("reference_ids")
+    @classmethod
+    def validate_reference_ids(cls, v):
+        """Валидация списка ID эталонов."""
+        if v is not None and len(v) == 0:
+            raise ValueError("reference_ids list cannot be empty")
+        return v
+
+    @model_validator(mode='after')
+    def check_user_or_reference_ids(self):
+        """Проверка, что указан либо user_id, либо reference_ids."""
+        if not self.user_id and not self.reference_ids:
+            raise ValueError("Either user_id or reference_ids must be provided")
+        return self
