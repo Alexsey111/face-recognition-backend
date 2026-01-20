@@ -3,16 +3,66 @@
 Аутентификация и авторизация через JWT.
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, AsyncGenerator
 from fastapi import Request, HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt
 
 from app.config import settings
+from app.services.cache_service import CacheService
 from app.utils.logger import get_logger, log_with_context
 
 logger = get_logger(__name__)
 security = HTTPBearer(auto_error=False)
+
+# ==================== Cache Service Singleton ====================
+
+_cache_service_instance: CacheService = None
+
+
+async def get_cache_service() -> AsyncGenerator[CacheService, None]:
+    """
+    Dependency injection for CacheService
+    Implements singleton pattern:
+    - Creates ONE instance per application lifecycle
+    - Reuses connection pool across all requests
+    - Properly closes connection on shutdown
+
+    Usage in endpoints:
+        cache: CacheService = Depends(get_cache_service)
+    """
+    global _cache_service_instance
+
+    # Create instance once (singleton)
+    if _cache_service_instance is None:
+        _cache_service_instance = CacheService()
+        logger.info("CacheService instance created (singleton)")
+
+    try:
+        # Verify Redis connection is alive
+        redis_client = await _cache_service_instance._get_redis()
+        await redis_client.ping()
+    except Exception as e:
+        logger.error(f"Cache service error: {e}")
+        # Don't raise exception - allow request to proceed without cache
+        # (graceful degradation)
+
+    yield _cache_service_instance
+
+
+async def shutdown_cache_service():
+    """
+    Cleanup function to close Redis connections on app shutdown
+    Call this in main.py lifespan or shutdown event:
+        @app.on_event("shutdown")
+        async def shutdown():
+            await shutdown_cache_service()
+    """
+    global _cache_service_instance
+    if _cache_service_instance:
+        await _cache_service_instance.close()
+        _cache_service_instance = None
+        logger.info("CacheService closed")
 
 
 

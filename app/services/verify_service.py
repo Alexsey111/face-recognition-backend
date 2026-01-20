@@ -62,6 +62,8 @@ class VerifyService:
         threshold: Optional[float] = None,
         session_id: Optional[str] = None,
         reference_id: Optional[str] = None,
+        reference_embedding: Optional[List[float]] = None,
+        reference_version: Optional[int] = None,
         auto_enroll: bool = False,
     ) -> Dict[str, Any]:
         """
@@ -103,26 +105,33 @@ class VerifyService:
                     )
 
                 # 2. Получение reference
-                if reference_id:
-                    reference = await ReferenceCRUD.get_reference_by_id(self.db, reference_id)
+                reference = None
+                if reference_embedding is not None:
+                    # Используем переданный embedding из кэша
+                    logger.info(f"Using cached reference embedding for user {user_id}")
+                    reference_embedding_decrypted = reference_embedding
                 else:
-                    reference = await self._get_user_reference(user_id)
+                    # Получаем из БД
+                    if reference_id:
+                        reference = await ReferenceCRUD.get_reference_by_id(self.db, reference_id)
+                    else:
+                        reference = await self._get_user_reference(user_id)
 
-                if not reference:
-                    raise NotFoundError(
-                        f"Reference image not found for user {user_id}. "
-                        "Please register your face first."
+                    if not reference:
+                        raise NotFoundError(
+                            f"Reference image not found for user {user_id}. "
+                            "Please register your face first."
+                        )
+
+                    # Расшифровка reference embedding
+                    reference_embedding_decrypted = await self.encryption_service.decrypt_embedding(
+                        reference.embedding_encrypted
                     )
-
-                # 3. Расшифровка reference embedding
-                reference_embedding = await self.encryption_service.decrypt_embedding(
-                    reference.embedding_encrypted
-                )
 
                 # 4. ML верификация
                 ml_result = await self.ml_service.verify_face(
                     image_data=validation_result.image_data,
-                    reference_embedding=reference_embedding,
+                    reference_embedding=reference_embedding_decrypted,
                     threshold=threshold or settings.THRESHOLD_DEFAULT,
                 )
 
@@ -156,9 +165,10 @@ class VerifyService:
                 )
 
                 # 9. Сохранение результата в БД
+                ref_id = reference.id if reference else reference_id
                 verification = await self._save_verification(
                     user_id=user_id,
-                    reference_id=reference.id,
+                    reference_id=ref_id,
                     session_id=request_id,
                     similarity=similarity,
                     confidence=confidence,
@@ -200,7 +210,8 @@ class VerifyService:
                     "face_quality": quality_score,
                     "liveness_score": liveness_score,
                     "liveness_passed": liveness_score >= 0.5 if liveness_score > 0 else None,
-                    "reference_id": reference.id,
+                    "reference_id": ref_id,
+                    "reference_version": reference_version if reference_version else (reference.version if reference else None),
                     "metadata": {
                         "ml_model_version": ml_result.get("model_version"),
                         "detection_confidence": ml_result.get("detection_confidence"),

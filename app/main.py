@@ -135,6 +135,14 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("Schedulers stop failed", exc_info=True)
 
+    # Close cache service connections
+    try:
+        from .dependencies import shutdown_cache_service
+        await shutdown_cache_service()
+        logger.info("CacheService shutdown complete")
+    except Exception:
+        logger.warning("CacheService shutdown failed", exc_info=True)
+
     await AuthService.close_redis()
     logger.info("Redis closed")
 

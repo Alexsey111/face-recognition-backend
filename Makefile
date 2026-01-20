@@ -171,6 +171,31 @@ db-migrate-create: ## Создать новую миграцию
 	@echo "$(BLUE)[INFO]$(NC) Создание новой миграции..."
 	@source $(VENV)/bin/activate && alembic revision --autogenerate -m "$(MSG)"
 
+# ==================== Database Indexes ====================
+
+db-check-indexes: ## Проверить существующие индексы
+	@echo "$(BLUE)🔍 Checking existing indexes...$(NC)"
+	@source $(VENV)/bin/activate && python scripts/check_existing_indexes.py
+
+db-validate-performance: ## Валидация производительности запросов
+	@echo "$(BLUE)⏱️  Validating query performance...$(NC)"
+	@source $(VENV)/bin/activate && python scripts/validate_index_performance.py
+
+db-monitor-indexes: ## Мониторинг использования индексов
+	@echo "$(BLUE)📊 Monitoring index usage...$(NC)"
+	@source $(VENV)/bin/activate && python scripts/monitor_index_usage.py
+
+db-index-sizes: ## Проверить размер индексов
+	@echo "$(BLUE)📏 Checking index sizes...$(NC)"
+	@source $(VENV)/bin/activate && python scripts/check_index_size.py
+
+db-migrate-indexes: ## Применить миграцию с индексами
+	@echo "$(BLUE)🚀 Applying index migration...$(NC)"
+	@source $(VENV)/bin/activate && alembic upgrade head
+	@echo "$(GREEN)✅ Migration complete!$(NC)"
+	@echo ""
+	@make db-check-indexes
+
 db-downgrade: ## Откатить последнюю миграцию
 	@echo "$(BLUE)[INFO]$(NC) Откат последней миграции..."
 	@source $(VENV)/bin/activate && alembic downgrade -1

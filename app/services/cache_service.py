@@ -61,6 +61,11 @@ return {1, count + 1, now + window}
 
 
 class CacheService:
+    # ==================== TTL Constants ====================
+    TTL_REFERENCE_EMBEDDING = 3600      # 1 hour
+    TTL_USER_STATS = 3600               # 1 hour
+    TTL_LIVENESS_RESULT = 600          # 10 minutes
+
     def __init__(self):
         self._redis: Optional[redis.Redis] = None
 
@@ -158,6 +163,7 @@ class CacheService:
         expire_seconds,
     )
         
+
 
     async def get_verification_session(
         self,
@@ -326,3 +332,222 @@ class CacheService:
             return json.loads(raw.decode("utf-8"))
         except Exception:
             return raw
+
+    # ==================== Reference Embedding Cache ====================
+
+    async def get_reference_embedding(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get cached reference embedding for user
+        Args:
+            user_id: User UUID
+        Returns:
+            dict: {"embedding": [...], "version": 1, "cached_at": "..."}
+            None: If not in cache
+        """
+        key = f"{settings.CACHE_KEY_PREFIX}ref:emb:{user_id}"
+        try:
+            data = await self.get(key)
+            if data:
+                logger.debug(f"✅ Reference cache HIT for user {user_id}")
+                return data
+            logger.debug(f"❌ Reference cache MISS for user {user_id}")
+            return None
+        except Exception as e:
+            logger.error(f"Redis GET error for {key}: {e}")
+            return None
+
+    async def cache_reference_embedding(
+        self,
+        user_id: str,
+        embedding: list,  # List[float]
+        version: int = 1,
+        metadata: Optional[Dict] = None
+    ) -> bool:
+        """
+        Cache reference embedding with metadata
+        Args:
+            user_id: User UUID
+            embedding: Face embedding vector (512 floats)
+            version: Reference version number
+            metadata: Additional metadata (quality score, etc.)
+        Returns:
+            bool: True if cached successfully
+        """
+        key = f"{settings.CACHE_KEY_PREFIX}ref:emb:{user_id}"
+        payload = {
+            "embedding": embedding,
+            "version": version,
+            "cached_at": datetime.utcnow().isoformat(),
+            "metadata": metadata or {}
+        }
+        try:
+            success = await self.set(
+                key,
+                payload,
+                expire_seconds=self.TTL_REFERENCE_EMBEDDING
+            )
+            if success:
+                logger.info(f"📦 Cached reference embedding for user {user_id} (v{version})")
+            return success
+        except Exception as e:
+            logger.error(f"Failed to cache reference for user {user_id}: {e}")
+            return False
+
+    async def invalidate_reference(self, user_id: str) -> bool:
+        """
+        Invalidate reference cache when user uploads new reference
+        Args:
+            user_id: User UUID
+        Returns:
+            bool: True if invalidated
+        """
+        key = f"{settings.CACHE_KEY_PREFIX}ref:emb:{user_id}"
+        try:
+            deleted = await self.delete(key)
+            if deleted:
+                logger.info(f"🗑️ Invalidated reference cache for user {user_id}")
+            return deleted
+        except Exception as e:
+            logger.error(f"Failed to invalidate reference for user {user_id}: {e}")
+            return False
+
+    # ==================== User Stats Cache ====================
+
+    async def get_user_stats(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Get cached user statistics"""
+        key = f"{settings.CACHE_KEY_PREFIX}stats:{user_id}"
+        try:
+            data = await self.get(key)
+            if data:
+                logger.debug(f"✅ User stats cache HIT for {user_id}")
+                return data
+            logger.debug(f"❌ User stats cache MISS for {user_id}")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to get user stats from cache: {e}")
+            return None
+
+    async def cache_user_stats(self, user_id: str, stats_data: Dict[str, Any]) -> bool:
+        """Cache user statistics"""
+        key = f"{settings.CACHE_KEY_PREFIX}stats:{user_id}"
+        try:
+            success = await self.set(
+                key,
+                stats_data,
+                expire_seconds=self.TTL_USER_STATS
+            )
+            if success:
+                logger.debug(f"📦 Cached user stats for {user_id}")
+            return success
+        except Exception as e:
+            logger.error(f"Failed to cache user stats: {e}")
+            return False
+
+    async def invalidate_user_stats(self, user_id: str) -> bool:
+        """Invalidate user stats cache (call after new verification)"""
+        key = f"{settings.CACHE_KEY_PREFIX}stats:{user_id}"
+        try:
+            deleted = await self.delete(key)
+            if deleted:
+                logger.debug(f"🗑️ Invalidated user stats for {user_id}")
+            return deleted
+        except Exception as e:
+            logger.error(f"Failed to invalidate user stats: {e}")
+            return False
+
+    # ==================== Liveness Cache ====================
+
+    async def get_liveness_result(self, image_hash: str) -> Optional[Dict[str, Any]]:
+        """
+        Get cached liveness check result by image hash
+        (prevents re-processing same image)
+        """
+        key = f"{settings.CACHE_KEY_PREFIX}liveness:{image_hash}"
+        try:
+            data = await self.get(key)
+            if data:
+                logger.debug(f"✅ Liveness cache HIT for {image_hash[:16]}...")
+                return data
+            logger.debug(f"❌ Liveness cache MISS for {image_hash[:16]}...")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to get liveness result from cache: {e}")
+            return None
+
+    async def cache_liveness_result(
+        self,
+        image_hash: str,
+        result: Dict[str, Any]
+    ) -> bool:
+        """Cache liveness detection result"""
+        key = f"{settings.CACHE_KEY_PREFIX}liveness:{image_hash}"
+        try:
+            success = await self.set(
+                key,
+                result,
+                expire_seconds=self.TTL_LIVENESS_RESULT
+            )
+            if success:
+                logger.debug(f"📦 Cached liveness result for {image_hash[:16]}...")
+            return success
+        except Exception as e:
+            logger.error(f"Failed to cache liveness result: {e}")
+            return False
+
+    # ==================== Utility Methods ====================
+
+    def compute_image_hash(self, image_bytes: bytes) -> str:
+        """Compute SHA-256 hash of image for cache key"""
+        import hashlib
+        return hashlib.sha256(image_bytes).hexdigest()
+
+    async def get_cache_stats(self) -> Dict[str, Any]:
+        """
+        Get cache performance statistics
+        Returns:
+            Dict with hits, misses, errors, hit_rate, etc.
+        """
+        try:
+            # Используй существующий метод get_stats() и дополни его
+            redis_stats = await self.get_stats()
+            # Добавь кастомные метрики из Prometheus (если доступны)
+            try:
+                from ..middleware.metrics import cache_hits_total, cache_misses_total
+                # Получи значения счётчиков (это сложно, т.к. Counter не хранит значение)
+                # Альтернатива: используй Redis info
+                hits = redis_stats.get("hits", 0)
+                misses = redis_stats.get("misses", 0)
+                total = hits + misses
+                hit_rate = (hits / total * 100) if total > 0 else 0.0
+                return {
+                    "hits": hits,
+                    "misses": misses,
+                    "total_requests": total,
+                    "hit_rate_percent": round(hit_rate, 2),
+                    "redis_memory": redis_stats.get("used_memory"),
+                    "connected_clients": redis_stats.get("clients"),
+                    "evicted_keys": redis_stats.get("evicted", 0),
+                    "status": "healthy" if hit_rate >= 70 else "degraded"
+                }
+            except ImportError:
+                # Fallback если метрики недоступны
+                return {
+                    **redis_stats,
+                    "status": "healthy"
+                }
+        except Exception as e:
+            logger.error(f"Failed to get cache stats: {e}")
+            return {
+                "status": "error",
+                "error": str(e)
+            }
+
+    async def health_check(self) -> bool:
+        """Check if Redis is responsive"""
+        try:
+            redis_client = await self._get_redis()
+            await redis_client.ping()
+            return True
+        except Exception as e:
+            logger.error(f"Redis health check failed: {e}")
+            return False

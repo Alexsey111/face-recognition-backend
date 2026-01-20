@@ -22,8 +22,12 @@ from ..services.verify_service import VerifyService
 from ..utils.exceptions import ValidationError, ProcessingError, NotFoundError
 from ..utils.logger import get_logger
 
-logger = get_logger(__name__)
+from ..models.reference import Reference
+from ..services.cache_service import CacheService
+from ..dependencies import get_cache_service
+
 router = APIRouter(tags=["Verify"])
+logger = get_logger(__name__)
 
 
 # ======================================================================
@@ -35,6 +39,7 @@ async def verify_face(
     request: VerifyRequest,
     http_request: Request,
     current_user: str = Depends(get_current_user),
+    cache: CacheService = Depends(get_cache_service),
     db: AsyncSession = Depends(get_async_db),
 ):
     """
@@ -44,16 +49,62 @@ async def verify_face(
     
     try:
         logger.info(f"Starting verification for user {current_user}")
+        user_id = current_user
         
+        # ==================== STEP 1: Get Reference (with caching) ====================
+        # Try cache first (FAST PATH - ~10ms)
+        cached_reference = await cache.get_reference_embedding(user_id)
+        reference_embedding = None
+        reference_version = None
+
+        if cached_reference:
+            logger.info(f"✅ Using cached reference for user {user_id}")
+            reference_embedding = cached_reference["embedding"]
+            reference_version = cached_reference["version"]
+        else:
+            # Fallback to database (SLOW PATH - ~100-200ms)
+            logger.info(f"⚠️ Cache miss for user {user_id}, querying DB")
+
+            # Get reference from database using async query
+            from sqlalchemy import select
+            result_ref = await db.execute(
+                select(Reference)
+                .where(Reference.user_id == user_id)
+                .where(Reference.is_active == True)
+                .order_by(Reference.version.desc())
+            )
+            reference_obj = result_ref.scalar_one_or_none()
+
+            if not reference_obj:
+                raise NotFoundError("No reference image found. Please upload reference first.")
+
+            reference_embedding = reference_obj.embedding
+            reference_version = reference_obj.version
+
+            # Cache for future requests
+            await cache.cache_reference_embedding(
+                user_id=user_id,
+                embedding=reference_embedding,
+                version=reference_version,
+                metadata={
+                    "quality_score": getattr(reference_obj, 'quality_score', None),
+                    "created_at": reference_obj.created_at.isoformat() if reference_obj.created_at else None
+                }
+            )
+            logger.info(f"📦 Cached reference for user {user_id}")
+
+        # ==================== STEP 2: ML Processing ====================
         verify_service = VerifyService(db)
 
-        # Верификация через сервис
+        # Верификация через сервис с кэшированным embedding
         result = await verify_service.verify_face(
-            user_id=current_user,
+            user_id=user_id,
             image_data=request.image_data,
             threshold=request.threshold,
             session_id=request.session_id,
             reference_id=request.reference_id,
+            reference_embedding=reference_embedding,
+            reference_version=reference_version,
             auto_enroll=request.auto_enroll,
         )
 
@@ -61,13 +112,17 @@ async def verify_face(
         if result["verified"]:
             asyncio.create_task(
                 verify_service.send_verification_webhook(
-                    user_id=current_user,
+                    user_id=user_id,
                     verification_id=result["verification_id"],
                     verified=result["verified"],
                     similarity=result["similarity_score"],
                     confidence=result["confidence"],
                 )
             )
+
+        # ==================== STEP 3: Cache Invalidation ====================
+        # Invalidate user stats (they changed after new verification)
+        await cache.invalidate_user_stats(user_id)
 
         return VerifyResponse(**result)
 
@@ -323,5 +378,3 @@ async def get_verification_result(
     except Exception as e:
         logger.error(f"Error getting verification result: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
-
-

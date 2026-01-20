@@ -4,9 +4,6 @@ Reference API Routes - Управление эталонными изображ�
 Упрощённая версия с использованием ReferenceService.
 """
 
-from fastapi import APIRouter, Request, Query, Depends
-from typing import List, Optional
-
 from ..config import settings
 from ..models.request import ReferenceCreateRequest, ReferenceUpdateRequest
 from ..models.response import (
@@ -16,11 +13,16 @@ from ..models.response import (
 )
 from ..models.reference import ReferenceCompare
 from ..services.reference_service import ReferenceService
+from ..services.cache_service import CacheService
+from ..services.encryption_service import EncryptionService
 from ..db.database import get_async_db
 from ..routes.auth import get_current_user
+from ..dependencies import get_cache_service
 from ..utils.logger import get_logger
 from ..utils.exceptions import ValidationError, NotFoundError
 from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, Query, Request, Depends
+from typing import Optional
 import uuid
 
 router = APIRouter(tags=["Reference"])
@@ -143,7 +145,7 @@ async def get_references(
 
 @router.get("/reference/{reference_id}", response_model=ReferenceResponse)
 async def get_reference(
-    reference_id: str, 
+    reference_id: str,
     http_request: Request,
     db: AsyncSession = Depends(get_async_db),
 ):
@@ -187,19 +189,25 @@ async def get_reference(
 async def create_reference(
     request: ReferenceCreateRequest, 
     http_request: Request,
+    cache: CacheService = Depends(get_cache_service),
     db: AsyncSession = Depends(get_async_db),
 ):
     """
     Создание нового reference.
+    Cache invalidation strategy:
+    1. Invalidate old reference embedding
+    2. Cache new reference embedding immediately
+    3. Invalidate user stats
     """
     request_id = str(uuid.uuid4())
+    user_id = request.user_id
     
     try:
         reference_service = ReferenceService(db)
 
         # Создание reference через сервис
         ref = await reference_service.create_reference(
-            user_id=request.user_id,
+            user_id=user_id,
             image_data=request.image_data,
             label=request.label,
             quality_threshold=request.quality_threshold,
@@ -208,6 +216,34 @@ async def create_reference(
         )
 
         logger.info(f"Reference created: {ref.id}")
+
+        # ==================== Cache Management ====================
+        # Get embedding from the created reference (decrypt if needed)
+        embedding = None
+        if ref.embedding_encrypted:
+            encryption_service = EncryptionService()
+            embedding = await encryption_service.decrypt_embedding(ref.embedding_encrypted)
+            logger.debug(f"Decrypted embedding for user {user_id}")
+
+        if embedding is not None:
+            # Invalidate old cache
+            await cache.invalidate_reference(user_id)
+            logger.info(f"🗑️ Invalidated old reference cache for user {user_id}")
+
+            # Cache new reference immediately (warm cache)
+            await cache.cache_reference_embedding(
+                user_id=user_id,
+                embedding=embedding,
+                version=ref.version,
+                metadata={
+                    "quality_score": ref.quality_score,
+                    "created_at": ref.created_at.isoformat() if ref.created_at else None
+                }
+            )
+            logger.info(f"📦 Cached new reference (v{ref.version}) for user {user_id}")
+
+        # Invalidate user stats (reference changed)
+        await cache.invalidate_user_stats(user_id)
 
         return ReferenceResponse(
             success=True,
@@ -238,15 +274,23 @@ async def update_reference(
     reference_id: str,
     request: ReferenceUpdateRequest,
     http_request: Request,
+    cache: CacheService = Depends(get_cache_service),
     db: AsyncSession = Depends(get_async_db),
 ):
     """
     Обновление metadata reference.
+    Cache invalidation: Invalidates reference cache if is_active changes.
     """
     request_id = str(uuid.uuid4())
+    user_id = None
     
     try:
         reference_service = ReferenceService(db)
+
+        # Получаем текущий reference для user_id
+        current_ref = await reference_service.get_reference(reference_id)
+        if current_ref:
+            user_id = current_ref.user_id
 
         # Обновление через сервис
         updated = await reference_service.update_reference(
@@ -257,6 +301,12 @@ async def update_reference(
         )
 
         logger.info(f"Reference updated: {reference_id}")
+
+        # ==================== Cache Invalidation ====================
+        if user_id and request.is_active is False:
+            # Если reference деактивирован, инвалидируем кэш
+            await cache.invalidate_reference(user_id)
+            logger.info(f"🗑️ Invalidated reference cache for user {user_id} (deactivated)")
 
         return ReferenceResponse(
             success=True,
@@ -287,15 +337,23 @@ async def update_reference(
 async def delete_reference(
     reference_id: str, 
     http_request: Request,
+    cache: CacheService = Depends(get_cache_service),
     db: AsyncSession = Depends(get_async_db),
 ):
     """
     Удаление reference (soft delete по умолчанию).
+    Cache invalidation: Invalidates reference cache for user.
     """
     request_id = str(uuid.uuid4())
+    user_id = None
     
     try:
         reference_service = ReferenceService(db)
+
+        # Получаем user_id до удаления
+        ref = await reference_service.get_reference(reference_id)
+        if ref:
+            user_id = ref.user_id
 
         # Удаление через сервис
         await reference_service.delete_reference(
@@ -304,6 +362,12 @@ async def delete_reference(
         )
 
         logger.info(f"Reference deleted: {reference_id}")
+
+        # ==================== Cache Invalidation ====================
+        if user_id:
+            await cache.invalidate_reference(user_id)
+            await cache.invalidate_user_stats(user_id)
+            logger.info(f"🗑️ Invalidated reference cache for user {user_id} (deleted)")
 
         return BaseResponse(
             success=True,
