@@ -27,6 +27,8 @@ from ..utils.exceptions import (
 )
 from ..services.encryption_service import EncryptionService
 from ..services.database_service import BiometricService
+from ..services.audit_service import AuditService
+from ..middleware.metrics import record_auth, record_token
 
 # Redis integration for token revocation
 try:
@@ -182,6 +184,10 @@ class AuthService:
             )
             
             logger.info(f"Access token created for user {user_id}")
+
+            # Запись метрики токена
+            record_token("access")
+
             return token
             
         except Exception as e:
@@ -262,6 +268,10 @@ class AuthService:
                 raise UnauthorizedError("Token has been revoked")
 
             logger.debug(f"Token verified successfully for user {payload.get('user_id')}")
+
+            # Запись метрики успешной верификации
+            record_auth(result="success", method="jwt")
+
             return payload
 
         except jwt.ExpiredSignatureError:
@@ -457,7 +467,7 @@ class AuthService:
             logger.error(f"Error generating secure token: {str(e)}")
             raise AuthenticationError(f"Failed to generate secure token: {str(e)}")
 
-    def create_user_session(
+    async def create_user_session(
         self, 
         user_id: str, 
         user_agent: str = None, 
@@ -465,7 +475,7 @@ class AuthService:
         device_fingerprint: str = None
     ) -> Dict[str, str]:
         """
-        Создание пользовательской сессии с поддержкой device tracking (sync: fast CPU).
+        Создание пользовательской сессии с поддержкой device tracking.
 
         Args:
             user_id: ID пользователя
@@ -502,6 +512,23 @@ class AuthService:
             # В production здесь бы сохраняли сессию в Redis или БД
             logger.info(f"User session created for user {user_id}")
             
+            # Audit log для критичной операции входа
+            if self.db:
+                audit_service = AuditService(self.db)
+                await audit_service.log_event(
+                    action="user_login",
+                    resource_type="user",
+                    resource_id=user_id,
+                    user_id=user_id,
+                    ip_address=ip_address,
+                    user_agent=user_agent,
+                    success=True,
+                    details={
+                        "device_id": device_id,
+                        "session_created": True
+                    }
+                )
+
             return {
                 "access_token": access_token,
                 "refresh_token": refresh_token,

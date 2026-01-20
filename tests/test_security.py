@@ -102,8 +102,8 @@ class TestSecurityIntegration:
         """Тест безопасного хранения токенов."""
         user_id = "test-user"
         
-        # 1. Создание сессии (sync метод)
-        session = auth_service.create_user_session(user_id)
+        # 1. Создание сессии
+        session = await auth_service.create_user_session(user_id)
         assert "access_token" in session
         assert "refresh_token" in session
         

@@ -315,9 +315,9 @@ class TestStructuredLogging:
         import tempfile
         import os
         
-        # Создаем временный файл
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
-            temp_path = tmp.name
+        # Создаем временный файл (закрываем сразу, чтобы не блокировать)
+        fd, temp_path = tempfile.mkstemp(suffix=".log")
+        os.close(fd)
         
         try:
             LoggerFactory.clear_loggers()
@@ -337,9 +337,13 @@ class TestStructuredLogging:
             # (В реальных условиях здесь был бы файл handler)
             
         finally:
-            # Очищаем временный файл
+            # Очищаем временный файл (сначала закрываем handlers)
+            LoggerFactory.clear_loggers()
             if os.path.exists(temp_path):
-                os.unlink(temp_path)
+                try:
+                    os.unlink(temp_path)
+                except PermissionError:
+                    pass  # На Windows файл может быть занят
 
     def test_log_entry_chaining(self):
         """Тест цепочки вызовов в LogEntry"""

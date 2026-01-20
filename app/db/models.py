@@ -108,6 +108,8 @@ class Reference(Base):
     image_format = Column(String(10), nullable=True)
     face_landmarks = Column(JSON, nullable=True)
     quality_score = Column(Float, nullable=True)
+    version = Column(Integer, default=1, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
     previous_reference_id = Column(String(36), ForeignKey("references.id", ondelete="SET NULL"), nullable=True)
 
     # Timestamps
@@ -167,6 +169,7 @@ class VerificationSession(Base):
     is_match = Column(Boolean, nullable=True)
     similarity_score = Column(Float, nullable=True)
     confidence = Column(Float, nullable=True)
+    threshold_used = Column(Float, nullable=True)
     
     # Face detection info
     face_detected = Column(Boolean, default=False)

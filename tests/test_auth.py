@@ -188,12 +188,13 @@ class TestAuthService:
 
         assert "error" in token_info
 
-    def test_create_user_session_success(self, auth_service, test_user_id):
-        """Test sync: successful user session creation (no await)."""
+    @pytest.mark.asyncio
+    async def test_create_user_session_success(self, auth_service, test_user_id):
+        """Test async: successful user session creation."""
         user_agent = "test-browser"
         ip_address = "127.0.0.1"
 
-        session = auth_service.create_user_session(test_user_id, user_agent, ip_address)
+        session = await auth_service.create_user_session(test_user_id, user_agent, ip_address)
 
         assert "access_token" in session
         assert "refresh_token" in session

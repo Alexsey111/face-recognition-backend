@@ -225,9 +225,11 @@ class TestDatabaseModelsFunctional:
         """Тест: Модель UserCreate."""
         from app.models.user import UserCreate
         
-        user = UserCreate(email="test@example.com")
-        
+        # UserCreate теперь требует password
+        user = UserCreate(email="test@example.com", password="securepassword123")
+
         assert user.email == "test@example.com"
+        assert user.password == "securepassword123"
 
     def test_user_update_model(self):
         """Тест: Модель UserUpdate."""
@@ -236,7 +238,7 @@ class TestDatabaseModelsFunctional:
         update = UserUpdate(full_name="Updated Name")
         
         assert update.full_name == "Updated Name"
-        assert update.email is None
+        # UserUpdate не имеет поля email, это нормально
 
 class TestDatabaseManagerFunctional:
     """Функциональные тесты для DatabaseManager."""

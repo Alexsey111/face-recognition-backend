@@ -266,10 +266,11 @@ class ReferenceCRUD:
         user_id: str,
         embedding_encrypted: bytes,
         embedding_hash: str,
-        quality_score: float,  # ✅ ДОБАВИТЬ
+        quality_score: float,
         image_filename: str,
         image_size_mb: float,
         image_format: str,
+        version: str = None,
         file_url: str = None,
         face_landmarks: dict = None
     ) -> Reference:
@@ -281,20 +282,20 @@ class ReferenceCRUD:
                 raise ValueError("embedding_hash is required")
             if not image_filename:
                 raise ValueError("image_filename is required")
-            # ✅ ДОБАВИТЬ валидацию quality_score
             if quality_score is not None and not (0.0 <= quality_score <= 1.0):
                 raise ValueError("quality_score must be between 0.0 and 1.0")
                 
-            # Получаем максимальную версию
-            result = await db.execute(
-                select(func.max(Reference.embedding_version))
-                .where(Reference.user_id == user_id)
-            )
-            max_version = result.scalar() or "0"
-            version_num = int(max_version) + 1 if max_version != "0" else 1
-            new_version = str(version_num)
-            
-            # Получаем последний reference
+            # Используем переданную версию или вычисляем, если не передана
+            if version is None:
+                result = await db.execute(
+                    select(func.max(Reference.embedding_version))
+                    .where(Reference.user_id == user_id)
+                )
+                max_version = result.scalar() or "0"
+                version_num = int(max_version) + 1 if max_version != "0" else 1
+                version = str(version_num)
+
+            # Получаем последний reference для связи previous_reference_id
             result = await db.execute(
                 select(Reference.id)
                 .where(Reference.user_id == user_id)
@@ -302,25 +303,25 @@ class ReferenceCRUD:
                 .limit(1)
             )
             previous_id = result.scalar_one_or_none()
-            
+
             new_ref = Reference(
                 user_id=user_id,
                 embedding_encrypted=embedding_encrypted,
                 embedding_hash=embedding_hash,
-                quality_score=quality_score,  # ✅ ДОБАВИТЬ
+                quality_score=quality_score,
                 image_filename=image_filename,
                 image_size_mb=image_size_mb,
                 image_format=image_format,
                 file_url=file_url or f"file://{image_filename}",
                 face_landmarks=face_landmarks,
-                embedding_version=new_version,
+                embedding_version=version,
                 previous_reference_id=previous_id
             )
             
             db.add(new_ref)
             await db.commit()
             await db.refresh(new_ref)
-            logger.info(f"Reference created: {new_ref.id}, version: {new_version}")
+            logger.info(f"Reference created: {new_ref.id}, version: {version}")
             return new_ref
         except ValueError as e:
             logger.error(f"Validation error: {e}")
@@ -525,21 +526,31 @@ class VerificationSessionCRUD:
         is_match: bool,
         similarity_score: float,
         confidence: float,
+        threshold: float = None,
         **kwargs
     ) -> Optional[VerificationSession]:
         """✅ ИСПРАВЛЕНО: Timezone-aware datetime"""
         try:
+            # Подготовка значений для обновления
+            update_values = {
+                "status": VerificationStatus.SUCCESS,
+                "is_match": is_match,
+                "similarity_score": similarity_score,
+                "confidence": confidence,
+                "completed_at": datetime.now(timezone.utc),  # ✅ timezone-aware
+            }
+            
+            # Добавляем threshold_used, если передан threshold
+            if threshold is not None:
+                update_values["threshold_used"] = threshold
+            
+            # Добавляем остальные kwargs
+            update_values.update(kwargs)
+            
             stmt = (
                 update(VerificationSession)
                 .where(VerificationSession.session_id == session_id)
-                .values(
-                    status=VerificationStatus.SUCCESS,
-                    is_match=is_match,
-                    similarity_score=similarity_score,
-                    confidence=confidence,
-                    completed_at=datetime.now(timezone.utc),  # ✅ timezone-aware
-                    **kwargs
-                )
+                .values(**update_values)
                 .execution_options(synchronize_session="fetch")
             )
             await db.execute(stmt)

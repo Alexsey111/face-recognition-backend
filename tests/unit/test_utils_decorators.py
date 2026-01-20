@@ -241,10 +241,10 @@ class TestDecorators:
 
     def test_measure_time_with_threshold(self):
         """Тест измерения времени с порогом"""
-        with patch('app.utils.decorators.get_logger') as mock_get_logger:
+        with patch('logging.getLogger') as mock_get_logger:
             mock_logger = Mock()
             mock_get_logger.return_value = mock_logger
-            
+
             @measure_time(threshold=0.05)
             def slow_function():
                 time.sleep(0.06)  # Больше порога

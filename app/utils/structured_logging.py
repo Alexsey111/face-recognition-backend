@@ -324,7 +324,7 @@ class LoggerFactory:
                 formatter = StructuredJsonFormatter(
                     request_id=request_id,
                     user_id=user_id,
-                    extra=extra
+                    extra_fields=extra if extra else None
                 )
             else:
                 formatter = logging.Formatter(

@@ -118,7 +118,7 @@ from ..utils.logger import (
     get_logger,
     log_with_context,
     LogContext,
-    redact_sensitive_data,
+    _redact,
 )
 from ..utils.helpers import generate_request_id
 from ..config import settings
@@ -309,7 +309,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         }
         
         # Redact sensitive data
-        log_fields = redact_sensitive_data(log_fields)
+        log_fields = _redact(log_fields)
         
         # Логируем
         log_with_context(

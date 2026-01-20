@@ -11,7 +11,8 @@ from typing import Dict, Any, Optional
 
 import aiohttp
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select, update, JSON
+from sqlalchemy.dialects.postgresql import insert
 
 from ..db.models import WebhookConfig, WebhookLog, WebhookStatus
 from ..utils.logger import get_logger
@@ -140,15 +141,19 @@ class WebhookService:
             skip_duplicates: Пропускать дубликаты (по умолчанию True)
             max_retries: Переопределить количество retry (опционально)
         """
-        # Получаем активные конфигурации для данного пользователя и типа события
+        # Получаем активные конфигурации для данного пользователя
+        # event_types хранится как JSON массив, фильтруем в Python т.к. JSON @> JSON не поддерживается
         result = await self.db.execute(
             select(WebhookConfig)
             .where(WebhookConfig.user_id == user_id)
             .where(WebhookConfig.is_active.is_(True))
-            .where(WebhookConfig.event_types.contains([event_type]))
         )
 
         configs = result.scalars().all()
+        
+        # Фильтруем конфигурации по типу события
+        configs = [c for c in configs if event_type in (c.event_types or [])]
+        
         if not configs:
             logger.debug(f"No active webhook configs found for user {user_id} and event {event_type}")
             return
@@ -180,7 +185,7 @@ class WebhookService:
             signature = self.compute_hmac_signature(payload, config.secret)
 
             log = WebhookLog(
-                id=log_id,
+                id=str(log_id),  # UUID -> String для VARCHAR(36) колонки
                 webhook_config_id=config.id,
                 event_type=event_type,
                 payload=payload,
@@ -366,7 +371,7 @@ class WebhookService:
         """Обновление лога при успешной доставке."""
         await self.db.execute(
             update(WebhookLog)
-            .where(WebhookLog.id == log_id)
+            .where(WebhookLog.id == str(log_id))
             .values(
                 status=WebhookStatus.SUCCESS,
                 attempts=attempt,
@@ -397,7 +402,7 @@ class WebhookService:
             result = await self.db.execute(
                 select(WebhookConfig)
                 .join(WebhookLog, WebhookLog.webhook_config_id == WebhookConfig.id)
-                .where(WebhookLog.id == log_id)
+                .where(WebhookLog.id == str(log_id))
             )
             config = result.scalar_one_or_none()
             
@@ -408,7 +413,7 @@ class WebhookService:
 
         await self.db.execute(
             update(WebhookLog)
-            .where(WebhookLog.id == log_id)
+            .where(WebhookLog.id == str(log_id))
             .values(
                 status=WebhookStatus.RETRY,
                 attempts=attempt,
@@ -424,7 +429,7 @@ class WebhookService:
         """Пометка лога как окончательно неудавшегося."""
         await self.db.execute(
             update(WebhookLog)
-            .where(WebhookLog.id == log_id)
+            .where(WebhookLog.id == str(log_id))
             .values(
                 status=WebhookStatus.FAILED,
                 last_attempt_at=datetime.now(timezone.utc),
@@ -487,3 +492,26 @@ class WebhookService:
         # В текущей реализации нет ресурсов для закрытия,
         # но метод оставлен для возможного расширения
         logger.info("WebhookService closed")
+
+    # ------------------------------------------------------------------
+    # INTERNAL HELPERS FOR ROUTES
+    # ------------------------------------------------------------------
+
+    async def _send_webhook_with_config(
+        self,
+        payload: Dict[str, Any],
+        config: WebhookConfig,
+        log_id: str,
+    ) -> None:
+        """
+        Вспомогательный метод для отправки webhook с существующей конфигурацией.
+        Используется для retry и bulk операций.
+        """
+        signature = self.compute_hmac_signature(payload, config.secret)
+        await self._send_with_retry(
+            payload=payload,
+            config=config,
+            log_id=uuid.UUID(log_id),
+            signature=signature,
+            max_retries_override=None,
+        )

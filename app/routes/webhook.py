@@ -154,7 +154,7 @@ async def create_webhook_config(
             )
         
         # Проверяем валидность webhook URL через сервис
-        webhook_service = WebhookService()
+        webhook_service = WebhookService(db)
         validation_result = await webhook_service.validate_webhook_url(config_data.webhook_url)
         
         if not validation_result["valid"]:
@@ -351,7 +351,7 @@ async def test_webhook(
     Если webhook_url не указан, используется активная конфигурация пользователя.
     """
     try:
-        webhook_service = WebhookService()
+        webhook_service = WebhookService(db)
         
         # Если URL не указан, ищем активную конфигурацию
         webhook_url = test_request.webhook_url
@@ -586,7 +586,7 @@ async def retry_webhook(
         
         # Асинхронно отправляем webhook
         from ..services.webhook_service import WebhookService
-        webhook_service = WebhookService()
+        webhook_service = WebhookService(db)
         
         # Запускаем отправку в фоне, чтобы не блокировать ответ
         asyncio.create_task(
@@ -654,7 +654,7 @@ async def bulk_webhook_action(
             # NOTE: Использование внутреннего метода _send_webhook_with_config осознанное,
             # так как это часть внутреннего API сервиса для массового тестирования
             from ..services.webhook_service import WebhookService
-            webhook_service = WebhookService()
+            webhook_service = WebhookService(db)
             
             for config in configs:
                 payload = webhook_service.create_webhook_payload(

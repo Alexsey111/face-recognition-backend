@@ -1,4 +1,7 @@
-"""Pytest configuration and fixtures for testing."""
+"""
+Pytest configuration and fixtures for testing.
+Объединённая версия с mock services и реальной БД.
+"""
 
 import sys
 import os
@@ -22,6 +25,7 @@ from sqlalchemy.pool import NullPool
 from app.config import settings
 from app.main import app
 from app.db.database import get_db
+
 
 # =============================================================================
 # Event Loop Configuration
@@ -70,7 +74,7 @@ def event_loop():
 
 @pytest_asyncio.fixture(scope="function")
 async def async_engine():
-    """Create async engine for tests."""
+    """Create async engine for tests using real PostgreSQL."""
     db_url = settings.DATABASE_URL
     
     # Ensure asyncpg driver
@@ -93,7 +97,10 @@ async def async_engine():
 
 @pytest_asyncio.fixture(scope="function")
 async def db_session(async_engine) -> AsyncGenerator[AsyncSession, None]:
-    """Create database session for tests with automatic rollback."""
+    """
+    Create database session for tests with automatic rollback.
+    Изолированная транзакция для каждого теста.
+    """
     async_session_maker = async_sessionmaker(
         async_engine,
         class_=AsyncSession,
@@ -167,8 +174,6 @@ async def test_user_with_reference(
     await db_session.commit()
     
     yield {"user_id": test_user, "reference_id": ref.id}
-    
-    # Cleanup handled by test_user fixture
 
 
 @pytest.fixture
@@ -190,7 +195,6 @@ async def test_user_123(db_session: AsyncSession) -> str:
     """Return a fixed user ID for testing."""
     user_id = "user-123"
     
-    # Ensure user exists
     try:
         await db_session.execute(
             text(
@@ -210,6 +214,43 @@ async def test_user_123(db_session: AsyncSession) -> str:
         await db_session.rollback()
     
     return user_id
+
+
+# =============================================================================
+# Mock Data Fixtures (для unit-тестов)
+# =============================================================================
+
+@pytest.fixture
+def mock_user_id():
+    """Mock user ID."""
+    return "test-user-123"
+
+
+@pytest.fixture
+def mock_reference_id():
+    """Mock reference ID."""
+    return "test-reference-456"
+
+
+@pytest.fixture
+def mock_image_data():
+    """Mock image data (base64 encoded 1x1 pixel PNG)."""
+    return (
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    )
+
+
+@pytest.fixture
+def mock_embedding():
+    """Mock face embedding (512-dimensional vector)."""
+    import numpy as np
+    return np.random.rand(512).astype(np.float32).tobytes()
+
+
+@pytest.fixture
+def mock_quality_score():
+    """Mock quality score."""
+    return 0.85
 
 
 # =============================================================================
@@ -370,6 +411,10 @@ def pytest_configure(config):
         "markers",
         "integration: marks integration tests"
     )
+    config.addinivalue_line(
+        "markers",
+        "unit: marks unit tests"
+    )
 
 
 def pytest_collection_modifyitems(config, items):
@@ -457,10 +502,44 @@ async def reset_antispoofing_between_tests():
     except Exception as e:
         print(f"Warning: Failed to reset anti-spoofing service: {e}")
 
+
+@pytest_asyncio.fixture(scope="function", autouse=True)
+async def cleanup_test_users(db_session: AsyncSession):
+    """
+    Очистка тестовых пользователей перед каждым тестом.
+    Удаляет пользователей с тестовыми email'ами.
+    """
+    yield
+    
+    # Cleanup после теста
+    try:
+        # Удаляем тестовых пользователей по email паттерну
+        test_emails = [
+            "newuser@example.com",
+            "livenesstest@example.com",
+            "security@example.com",
+            "perf@example.com",
+        ]
+        
+        for email in test_emails:
+            try:
+                await db_session.execute(
+                    text("DELETE FROM users WHERE email = :email"),
+                    {"email": email}
+                )
+            except Exception:
+                pass
+        
+        await db_session.commit()
+    except Exception as e:
+        print(f"Warning: Failed to cleanup test users: {e}")
+        await db_session.rollback()
+
+
 @pytest_asyncio.fixture(scope="function")
 async def initialized_service():
     """
-    Fixture для инициализированного сервиса - ASYNC!
+    Fixture для инициализированного AntiSpoofingService.
     """
     # Полная очистка перед созданием
     from app.services.anti_spoofing_service import reset_anti_spoofing_service

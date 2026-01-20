@@ -5,12 +5,17 @@ import time
 import asyncio
 import inspect
 import functools
-from datetime import datetime, timezone 
+import contextvars
+from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
-from typing import Optional, Callable, Any, Dict
+from typing import Optional, Callable, Any, Dict, Mapping
 
 from ..config import settings
 
+
+# =========================
+# Sensitive data redaction
+# =========================
 
 SENSITIVE_KEYS = {
     "password",
@@ -19,280 +24,322 @@ SENSITIVE_KEYS = {
     "access_token",
     "refresh_token",
     "embeddings",
+    "embedding",
     "image",
     "file",
     "ssn",
     "credit_card",
+    "api_key",
+    "secret",
 }
 
 
-def _redact(obj: Dict[str, Any]) -> Dict[str, Any]:
-    if not isinstance(obj, dict):
-        return obj
-    redacted: Dict[str, Any] = {}
-    for k, v in obj.items():
-        if k and k.lower() in SENSITIVE_KEYS:
-            redacted[k] = "[REDACTED]"
-        else:
-            redacted[k] = v
-    return redacted
-
-
-class EmptyMessageFilter(logging.Filter):
-    """Фильтр для блокировки пустых сообщений."""
-    def filter(self, record):
-        try:
-            message = record.getMessage()
-            # Блокируем пустые сообщения
-            if not message or not message.strip():
-                return False
-            return True
-        except Exception:
-            return False
-
-
-class StructuredFormatter(logging.Formatter):
-    """Простой JSON formatter без зависимости от pythonjsonlogger."""
-    
-    def format(self, record):
-        # Блокируем пустые сообщения
-        try:
-            message = record.getMessage()
-            if not message or not message.strip():
-                return None  # Не выводим пустые логи
-        except Exception:
-            return None
-        
-        # Создаем JSON вручную
-        log_data = {
-            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
-            "level": record.levelname,
-            "name": record.name,
-            "message": message,
-            "logger": record.name
+def _redact(obj: Any) -> Any:
+    """Recursively redact sensitive fields."""
+    if isinstance(obj, dict):
+        return {
+            k: "[REDACTED]"
+            if k and k.lower() in SENSITIVE_KEYS
+            else _redact(v)
+            for k, v in obj.items()
         }
-        
-        # Добавляем дополнительные поля если есть
-        if hasattr(record, 'extra'):
-            log_data.update(record.extra)
-        
-        try:
-            return json.dumps(log_data, default=str)
-        except Exception:
-            return None
+    if isinstance(obj, list):
+        return [_redact(v) for v in obj]
+    return obj
 
 
+# =========================
+# Context-based logging
+# =========================
 
-def setup_logger(name: Optional[str] = None, level: Optional[str] = None, log_file: Optional[str] = None):
-    """Configure and return a structured JSON logger."""
-    
-    if isinstance(level, int):
-        lvl_value = level
-    else:
-        raw = (level or getattr(settings, "LOG_LEVEL", "INFO") or "INFO")
-        try:
-            lvl_name = str(raw).upper()
-            lvl_value = getattr(logging, lvl_name, None)
-            if lvl_value is None:
-                lvl_value = int(raw)
-        except Exception:
-            lvl_value = logging.INFO
-
-    logger_name = name or "app"
-    logger = logging.getLogger(logger_name)
-    logger.setLevel(lvl_value)
-
-    # ✅ Очищаем handlers
-    if logger.handlers:
-        logger.handlers.clear()
-
-    # ✅ Отключаем propagation
-    logger.propagate = False
-
-    fmt = StructuredFormatter('%(timestamp)s %(level)s %(name)s %(message)s')
-    empty_filter = EmptyMessageFilter()
-
-    # ✅ Кастомный StreamHandler который не выводит None
-    class FilteredStreamHandler(logging.StreamHandler):
-        def emit(self, record):
-            try:
-                msg = self.format(record)
-                # Не выводим None и пустые строки
-                if msg is None or not msg or not msg.strip():
-                    return
-                stream = self.stream
-                stream.write(msg + self.terminator)
-                self.flush()
-            except Exception:
-                self.handleError(record)
-
-    # Console handler с фильтрацией
-    ch = FilteredStreamHandler(sys.stdout)
-    ch.setLevel(lvl_value)
-    ch.setFormatter(fmt)
-    ch.addFilter(empty_filter)
-    logger.addHandler(ch)
-
-    # File handler if configured
-    path = log_file or getattr(settings, "LOG_FILE_PATH", None)
-    if path:
-        try:
-            max_size = int(getattr(settings, "LOG_MAX_SIZE", 10 * 1024 * 1024))
-            backup = int(getattr(settings, "LOG_BACKUP_COUNT", 5))
-            fh = _make_rotating_handler(path, max_size, backup)
-            fh.setFormatter(fmt)
-            fh.addFilter(empty_filter)
-            logger.addHandler(fh)
-        except Exception:
-            pass
-
-    # Configure audit logger
-    audit_logger = logging.getLogger("audit")
-    if not audit_logger.handlers:
-        audit_logger.setLevel(logging.INFO)
-        audit_logger.propagate = False
-        
-        audit_path = f"{path}.audit" if path else "./audit.log"
-        try:
-            af = _make_rotating_handler(
-                audit_path,
-                int(getattr(settings, "LOG_MAX_SIZE", 10 * 1024 * 1024)),
-                int(getattr(settings, "LOG_BACKUP_COUNT", 5))
-            )
-            af.setFormatter(fmt)
-            af.addFilter(empty_filter)
-            audit_logger.addHandler(af)
-        except Exception:
-            ach = FilteredStreamHandler(sys.stdout)
-            ach.setFormatter(fmt)
-            ach.addFilter(empty_filter)
-            audit_logger.addHandler(ach)
-
-    return logger
-
-
-def _make_rotating_handler(path: str, max_bytes: int, backup_count: int):
-    handler = RotatingFileHandler(path, maxBytes=max_bytes, backupCount=backup_count)
-    handler.setLevel(logging.INFO)
-    return handler
-
-def get_logger(name: Optional[str] = None):
-    logger = setup_logger(name)
-    return logging.getLogger(logger.name if isinstance(logger, logging.Logger) else (name or "app"))
-
-
-# Backwards-compatible helpers expected by other modules/tests
-class LoggerMixin:
-    @property
-    def logger(self) -> logging.Logger:
-        return get_logger(self.__class__.__module__)
-
-
-class StructuredLogger(logging.Logger):
-    pass
-
-
-def structured_logger(name: Optional[str] = None) -> logging.Logger:
-    return get_logger(name)
-
-
-def configure_logging_for_environment(env: Optional[str] = None):
-    # Lightweight configuration hook for tests/environments
-    setup_logger()
-
-
-# Context-based logging helpers used by middleware
-import contextvars
-
-_LOG_CONTEXT: contextvars.ContextVar[Dict[str, Any]] = contextvars.ContextVar("_LOG_CONTEXT", default={})
+_LOG_CONTEXT: contextvars.ContextVar[Dict[str, Any]] = contextvars.ContextVar(
+    "LOG_CONTEXT", default={}
+)
 
 
 class LogContext:
-    def __init__(self, request_id: Optional[str] = None, user_id: Optional[str] = None, extra: Optional[Dict[str, Any]] = None):
+    """
+    Context manager for request-scoped logging context.
+    Safe for async and threaded execution.
+    """
+
+    def __init__(
+        self,
+        request_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        extra: Optional[Dict[str, Any]] = None,
+    ):
         self.request_id = request_id
         self.user_id = user_id
         self.extra = extra or {}
-        self._token = None
+        self._token: Optional[contextvars.Token] = None
 
     def __enter__(self):
-        ctx = _LOG_CONTEXT.get().copy()
-        ctx.update({"request_id": self.request_id, "user_id": self.user_id})
-        ctx.setdefault("extra", {})
-        ctx["extra"].update(self.extra)
+        ctx: Dict[str, Any] = {}
+        if self.request_id:
+            ctx["request_id"] = self.request_id
+        if self.user_id:
+            ctx["user_id"] = self.user_id
+        ctx.update(self.extra)
         self._token = _LOG_CONTEXT.set(ctx)
         return self
 
     def __exit__(self, exc_type, exc, tb):
         if self._token is not None:
-            try:
-                _LOG_CONTEXT.reset(self._token)
-            except Exception:
-                pass
+            _LOG_CONTEXT.reset(self._token)
 
     async def __aenter__(self):
         return self.__enter__()
 
     async def __aexit__(self, exc_type, exc, tb):
-        return self.__exit__(exc_type, exc, tb)
+        self.__exit__(exc_type, exc, tb)
 
 
-def redact_sensitive_data(payload: Dict[str, Any]) -> Dict[str, Any]:
-    if not isinstance(payload, dict):
-        return payload
-    sensitive = {"password", "passwd", "token", "access_token", "refresh_token", "embeddings", "image", "file"}
-    redacted = {}
-    for k, v in payload.items():
-        if k and k.lower() in sensitive:
-            redacted[k] = "[REDACTED]"
-        else:
-            redacted[k] = v
-    return redacted
+# =========================
+# Logging filters / formatters
+# =========================
+
+class EmptyMessageFilter(logging.Filter):
+    """Blocks empty log messages."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+            return bool(msg and str(msg).strip())
+        except Exception:
+            return True
 
 
-def log_with_context(log_method, message, **context):
-    """
-    Log with additional context.
-    
-    Args:
-        log_method: Logger method (logger.info, logger.error, etc.)
-        message: Log message
-        **context: Additional context fields
-    """
-    # Просто вызываем переданный метод
-    log_method(message, extra=context)
+class StructuredFormatter(logging.Formatter):
+    """JSON structured logging formatter."""
 
+    def format(self, record: logging.LogRecord) -> str:
+        message = record.getMessage()
+        if not message or not message.strip():
+            return ""
 
-
-def audit_event(event_type: str, payload: Dict[str, Any], level: str = "info") -> None:
-    """Write an audit event to the `audit` logger as structured JSON.
-
-    Payload will be redacted for known sensitive keys.
-    """
-    audit_logger = logging.getLogger("audit")
-    try:
-        data = {
-            "event_type": event_type,
-            "payload": _redact(payload or {}),
-            "timestamp": time.time(),
+        log_data: Dict[str, Any] = {
+            "timestamp": datetime.fromtimestamp(
+                record.created, tz=timezone.utc
+            ).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": message,
         }
-        # Use audit logger to emit JSON structure
-        if level.lower() == "info":
-            audit_logger.info(json.dumps(data, default=str))
-        else:
-            audit_logger.warning(json.dumps(data, default=str))
-    except Exception:
-        # Best-effort; don't crash the app for audit failures
-        audit_logger.exception("Failed to emit audit event")
 
+        # ContextVar context
+        try:
+            ctx = _LOG_CONTEXT.get()
+            if ctx:
+                log_data.update(_redact(ctx))
+        except Exception:
+            pass
+
+        # Standard logging extra fields (non-internal)
+        for key, value in record.__dict__.items():
+            if key.startswith("_"):
+                continue
+            if key in (
+                "msg",
+                "args",
+                "levelname",
+                "levelno",
+                "pathname",
+                "filename",
+                "module",
+                "exc_info",
+                "exc_text",
+                "stack_info",
+                "lineno",
+                "funcName",
+                "created",
+                "msecs",
+                "relativeCreated",
+                "thread",
+                "threadName",
+                "processName",
+                "process",
+                "name",
+            ):
+                continue
+            log_data[key] = _redact(value)
+
+        if record.exc_info:
+            log_data["exception"] = self.formatException(record.exc_info)
+
+        return json.dumps(log_data, default=str)
+
+
+class SafeStreamHandler(logging.StreamHandler):
+    """Stream handler that skips empty formatted records."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            if not msg:
+                return
+            self.stream.write(msg + self.terminator)
+            self.flush()
+        except Exception:
+            self.handleError(record)
+
+
+# =========================
+# Logger setup
+# =========================
+
+def _resolve_log_level(level: Optional[str | int]) -> int:
+    if isinstance(level, int):
+        return level
+    raw = level or getattr(settings, "LOG_LEVEL", "INFO")
+    try:
+        return getattr(logging, str(raw).upper())
+    except Exception:
+        return logging.INFO
+
+
+def setup_logger(
+    name: Optional[str] = None,
+    level: Optional[str | int] = None,
+    log_file: Optional[str] = None,
+) -> logging.Logger:
+    """
+    Configure structured logger.
+    Idempotent: safe to call multiple times.
+    """
+
+    logger_name = name or "app"
+    logger = logging.getLogger(logger_name)
+
+    if getattr(logger, "_configured", False):
+        return logger
+
+    lvl = _resolve_log_level(level)
+    logger.setLevel(lvl)
+    logger.propagate = False
+
+    formatter = StructuredFormatter()
+    empty_filter = EmptyMessageFilter()
+
+    # Console
+    ch = SafeStreamHandler(sys.stdout)
+    ch.setLevel(lvl)
+    ch.setFormatter(formatter)
+    ch.addFilter(empty_filter)
+    logger.addHandler(ch)
+
+    # File handler
+    path = log_file or getattr(settings, "LOG_FILE_PATH", None)
+    if path:
+        max_size = int(getattr(settings, "LOG_MAX_SIZE", 100 * 1024 * 1024))
+        backup = int(getattr(settings, "LOG_BACKUP_COUNT", 10))
+        fh = RotatingFileHandler(path, maxBytes=max_size, backupCount=backup)
+        fh.setLevel(lvl)
+        fh.setFormatter(formatter)
+        fh.addFilter(empty_filter)
+        logger.addHandler(fh)
+
+    # Audit logger
+    audit_logger = logging.getLogger("audit")
+    if not getattr(audit_logger, "_configured", False):
+        audit_logger.setLevel(logging.INFO)
+        audit_logger.propagate = False
+
+        audit_path = f"{path}.audit" if path else "audit.log"
+        af = RotatingFileHandler(
+            audit_path,
+            maxBytes=max_size if path else 100 * 1024 * 1024,
+            backupCount=backup if path else 10,
+        )
+        af.setLevel(logging.INFO)
+        af.setFormatter(formatter)
+        af.addFilter(empty_filter)
+        audit_logger.addHandler(af)
+        audit_logger._configured = True
+
+    logger._configured = True
+    return logger
+
+
+def get_logger(name: Optional[str] = None) -> logging.Logger:
+    return setup_logger(name)
+
+
+# =========================
+# Helper logging utilities
+# =========================
+
+def log_with_context(
+    log_method: Callable[..., None],
+    message: str,
+    **context: Any,
+) -> None:
+    ctx = {}
+    try:
+        ctx.update(_LOG_CONTEXT.get())
+    except Exception:
+        pass
+    ctx.update(context)
+    log_method(message, extra=_redact(ctx))
+
+
+def audit_event(
+    *,
+    action: str,
+    target_type: str,
+    target_id: str,
+    admin_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    details: Optional[Mapping[str, Any]] = None,
+    old_values: Optional[Mapping[str, Any]] = None,
+    new_values: Optional[Mapping[str, Any]] = None,
+    ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
+    success: bool = True,
+    error_message: Optional[str] = None,
+    level: str = "info",
+) -> None:
+    audit_logger = logging.getLogger("audit")
+
+    payload = {
+        "action": action,
+        "target_type": target_type,
+        "target_id": target_id,
+        "admin_id": admin_id,
+        "user_id": user_id,
+        "details": _redact(details or {}),
+        "old_values": _redact(old_values) if old_values else None,
+        "new_values": _redact(new_values) if new_values else None,
+        "ip_address": ip_address,
+        "user_agent": user_agent,
+        "success": success,
+        "error_message": error_message,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+    msg = json.dumps(payload, default=str)
+
+    if level.lower() == "error":
+        audit_logger.error(msg)
+    elif level.lower() == "warning":
+        audit_logger.warning(msg)
+    else:
+        audit_logger.info(msg)
+
+
+# =========================
+# Retry utilities
+# =========================
 
 def retry_with_backoff(
-    func: Callable,
+    func: Callable[[], Any],
+    *,
     max_retries: int = 3,
     base_delay: float = 1.0,
     factor: float = 2.0,
-    exceptions: tuple = (Exception,),
-):
-    last_exc = None
+    exceptions: tuple[type[Exception], ...] = (Exception,),
+) -> Any:
+    last_exc: Optional[Exception] = None
     for attempt in range(max_retries + 1):
         try:
             return func()
@@ -301,91 +348,85 @@ def retry_with_backoff(
             if attempt == max_retries:
                 break
             delay = base_delay * (factor ** attempt)
-            logging.getLogger(func.__module__).warning("Retry %s in %.2fs: %s", attempt + 1, delay, exc)
+            logging.getLogger(func.__module__).warning(
+                "Retry %s in %.2fs: %s", attempt + 1, delay, exc
+            )
             time.sleep(delay)
-    raise last_exc
+    raise last_exc  # type: ignore
 
 
 async def async_retry_with_backoff(
-    func: Callable,
+    func: Callable[[], Any],
+    *,
     max_retries: int = 3,
     base_delay: float = 1.0,
     factor: float = 2.0,
-    exceptions: tuple = (Exception,),
-):
-    last_exc = None
+    exceptions: tuple[type[Exception], ...] = (Exception,),
+) -> Any:
+    last_exc: Optional[Exception] = None
     for attempt in range(max_retries + 1):
         try:
-            res = func()
-            if inspect.isawaitable(res):
-                return await res
-            return res
+            result = func()
+            return await result if inspect.isawaitable(result) else result
         except exceptions as exc:
             last_exc = exc
             if attempt == max_retries:
                 break
             delay = base_delay * (factor ** attempt)
-            logging.getLogger(func.__module__).warning("Async retry %s in %.2fs: %s", attempt + 1, delay, exc)
+            logging.getLogger(func.__module__).warning(
+                "Async retry %s in %.2fs: %s", attempt + 1, delay, exc
+            )
             await asyncio.sleep(delay)
-    raise last_exc
+    raise last_exc  # type: ignore
 
+
+# =========================
+# Timing / decorators
+# =========================
 
 class Timer:
     def __init__(self):
-        self.start_time: Optional[float] = None
-        self.end_time: Optional[float] = None
+        self._start: Optional[float] = None
 
     def start(self) -> "Timer":
-        self.start_time = time.perf_counter()
-        return self
-
-    def stop(self) -> "Timer":
-        self.end_time = time.perf_counter()
+        self._start = time.perf_counter()
         return self
 
     @property
     def elapsed(self) -> float:
-        if self.start_time is None:
+        if self._start is None:
             return 0.0
-        end = self.end_time or time.perf_counter()
-        return end - self.start_time
-
-    def __str__(self) -> str:
-        return f"{self.elapsed:.4f}s"
+        return time.perf_counter() - self._start
 
 
-def log_function_call(func):
-    """Decorator for logging sync/async function calls with duration and errors."""
+def log_function_call(func: Callable) -> Callable:
+    """Decorator for logging function execution with duration and errors."""
+
+    logger = get_logger(func.__module__)
 
     if inspect.iscoroutinefunction(func):
 
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs):
-            logger = get_logger(func.__module__)
-            start = time.perf_counter()
+            timer = Timer().start()
             try:
                 result = await func(*args, **kwargs)
-                duration = time.perf_counter() - start
-                logger.info(
+                log_with_context(
+                    logger.info,
                     "Async function executed",
-                    extra={
-                        "function": func.__name__,
-                        "duration": duration,
-                        "success": True,
-                    },
+                    function=func.__name__,
+                    duration=timer.elapsed,
+                    success=True,
                 )
                 return result
             except Exception as exc:
-                duration = time.perf_counter() - start
-                logger.error(
+                log_with_context(
+                    logger.error,
                     "Async function failed",
-                    extra={
-                        "function": func.__name__,
-                        "duration": duration,
-                        "success": False,
-                        "error": str(exc),
-                    },
-                    exc_info=True,
+                    function=func.__name__,
+                    duration=timer.elapsed,
+                    success=False,
+                    error=str(exc),
                 )
                 raise
 
@@ -393,31 +434,25 @@ def log_function_call(func):
 
     @functools.wraps(func)
     def sync_wrapper(*args, **kwargs):
-        logger = get_logger(func.__module__)
-        start = time.perf_counter()
+        timer = Timer().start()
         try:
             result = func(*args, **kwargs)
-            duration = time.perf_counter() - start
-            logger.info(
+            log_with_context(
+                logger.info,
                 "Function executed",
-                extra={
-                    "function": func.__name__,
-                    "duration": duration,
-                    "success": True,
-                },
+                function=func.__name__,
+                duration=timer.elapsed,
+                success=True,
             )
             return result
         except Exception as exc:
-            duration = time.perf_counter() - start
-            logger.error(
+            log_with_context(
+                logger.error,
                 "Function failed",
-                extra={
-                    "function": func.__name__,
-                    "duration": duration,
-                    "success": False,
-                    "error": str(exc),
-                },
-                exc_info=True,
+                function=func.__name__,
+                duration=timer.elapsed,
+                success=False,
+                error=str(exc),
             )
             raise
 

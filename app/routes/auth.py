@@ -251,8 +251,8 @@ async def login(
         user_agent = http_request.headers.get("user-agent")
         client_ip = http_request.client.host
         
-        # Создаем сессию с токенами (sync - fast CPU)
-        session_tokens = auth_service.create_user_session(
+        # Создаем сессию с токенами (async)
+        session_tokens = await auth_service.create_user_session(
             user_id=user.id,
             user_agent=user_agent,
             ip_address=client_ip
@@ -358,8 +358,8 @@ async def register(
             user_agent=user_agent
         )
         
-        # Создаем сессию с токенами (sync - fast CPU)
-        session_tokens = auth_service.create_user_session(
+        # Создаем сессию с токенами (async)
+        session_tokens = await auth_service.create_user_session(
             user_id=new_user.id,
             user_agent=user_agent,
             ip_address=client_ip
