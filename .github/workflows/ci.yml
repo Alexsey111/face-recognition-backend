@@ -126,7 +126,7 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
           ENVIRONMENT: test
           JWT_SECRET_KEY: test-secret-key
-        run: pytest --cov=app --cov-report=xml --cov-report=term
+        run: pytest --cov=app --cov-report=term-missing --cov-report=html --cov-report=xml --cov-fail-under=80
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4
@@ -140,6 +140,7 @@ jobs:
           name: test-results-${{ matrix.python-version }}
           path: |
             coverage.xml
+            htmlcov/
             junit.xml
 
   build:
