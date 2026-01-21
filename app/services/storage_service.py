@@ -44,12 +44,15 @@ ALLOWED_IMAGE_MIME_TYPES = {
     "image/gif",
 }
 
-MAX_IMAGE_SIZE_BYTES = getattr(settings, "MAX_IMAGE_SIZE_BYTES", 10 * 1024 * 1024)  # 10MB
+MAX_IMAGE_SIZE_BYTES = getattr(
+    settings, "MAX_IMAGE_SIZE_BYTES", 10 * 1024 * 1024
+)  # 10MB
 
 
 # =============================================================================
 # Storage Service
 # =============================================================================
+
 
 class StorageService:
     """
@@ -98,30 +101,36 @@ class StorageService:
         loop = asyncio.get_running_loop()
         max_retries = 5
         delays = [1, 2, 4, 8, 16]
-        
+
         for attempt in range(max_retries):
             try:
                 return await loop.run_in_executor(
                     None, functools.partial(func, *args, **kwargs)
                 )
-            except (ClientError, ConnectionError, EndpointConnectionError, socket.timeout) as e:
+            except (
+                ClientError,
+                ConnectionError,
+                EndpointConnectionError,
+                socket.timeout,
+            ) as e:
                 if attempt == max_retries - 1:
                     raise
-                
+
                 async with self._reconnect_lock:  # только один поток делает reconnect
-                    logger.warning(f"S3 error (attempt {attempt + 1}/{max_retries}): {e}. Reconnecting...")
+                    logger.warning(
+                        f"S3 error (attempt {attempt + 1}/{max_retries}): {e}. Reconnecting..."
+                    )
                     self.s3_client = self._init_client()
-                
+
                 await asyncio.sleep(delays[attempt])
-        
+
         raise RuntimeError("Unexpected exit from retry loop")
-    #--------------------------------------------------
+
+    # --------------------------------------------------
 
     async def health_check(self) -> bool:
         try:
-            await self._run(
-                self.s3_client.head_bucket, Bucket=self.bucket_name
-            )
+            await self._run(self.s3_client.head_bucket, Bucket=self.bucket_name)
             return True
 
         except ClientError as e:
@@ -148,9 +157,7 @@ class StorageService:
                 await self._run(
                     self.s3_client.create_bucket,
                     Bucket=self.bucket_name,
-                    CreateBucketConfiguration={
-                        "LocationConstraint": self.region
-                    },
+                    CreateBucketConfiguration={"LocationConstraint": self.region},
                 )
 
             if self.public_read:
@@ -199,6 +206,7 @@ class StorageService:
         ValidationError: Если изображение не проходит валидацию (размер, тип, формат)
         StorageError: При ошибке загрузки в S3
     """
+
     async def upload_image(
         self,
         image_data: bytes,
@@ -287,15 +295,16 @@ class StorageService:
     ) -> List[Dict[str, Any]]:
         """
         Список файлов в хранилище.
-        
+
         Args:
             prefix: Префикс для фильтрации (например, "uploads/")
             limit: Максимальное количество файлов
-            
+
         Returns:
             Список словарей с информацией о файлах
         """
         try:
+
             def _list():
                 response = self.s3_client.list_objects_v2(
                     Bucket=self.bucket_name,
@@ -303,18 +312,20 @@ class StorageService:
                     MaxKeys=limit,
                 )
                 return response.get("Contents", [])
-            
+
             files = await self._run(_list)
-            
+
             result = []
             for f in files:
-                result.append({
-                    "key": f["Key"],
-                    "size": f["Size"],
-                    "last_modified": f["LastModified"],
-                    "etag": f.get("ETag", ""),
-                })
-            
+                result.append(
+                    {
+                        "key": f["Key"],
+                        "size": f["Size"],
+                        "last_modified": f["LastModified"],
+                        "etag": f.get("ETag", ""),
+                    }
+                )
+
             return result
 
         except ClientError as e:
@@ -378,9 +389,7 @@ class StorageService:
             f"{uuid.uuid4().hex}{ext}"
         )
 
-    def _prepare_metadata(
-        self, metadata: Optional[Dict[str, Any]]
-    ) -> Dict[str, str]:
+    def _prepare_metadata(self, metadata: Optional[Dict[str, Any]]) -> Dict[str, str]:
         result: Dict[str, str] = {}
 
         if not metadata:
@@ -397,8 +406,4 @@ class StorageService:
         if self.endpoint_url:
             base = self.endpoint_url.rstrip("/")
             return f"{base}/{self.bucket_name}/{key}"
-        return (
-            f"https://{self.bucket_name}.s3."
-            f"{self.region}.amazonaws.com/{key}"
-        )
-
+        return f"https://{self.bucket_name}.s3." f"{self.region}.amazonaws.com/{key}"

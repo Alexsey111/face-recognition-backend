@@ -30,6 +30,7 @@ from ..middleware.metrics import record_business_error, track_processing
 router = APIRouter(prefix="/admin", tags=["Admin"])
 logger = get_logger(__name__)
 
+
 class AdminStatsResponse(BaseModel):
     success: bool
     request_id: str
@@ -40,6 +41,7 @@ class AdminStatsResponse(BaseModel):
     verification_stats: Optional[dict] = None
     timestamp: datetime
 
+
 class UserActivityResponse(BaseModel):
     success: bool
     request_id: str
@@ -48,6 +50,7 @@ class UserActivityResponse(BaseModel):
     page: int
     page_size: int
     timestamp: datetime
+
 
 class AuditLogResponse(BaseModel):
     success: bool
@@ -59,12 +62,14 @@ class AuditLogResponse(BaseModel):
     has_next: bool
     timestamp: datetime
 
+
 def get_client_ip(request: Request) -> str:
     """Extract client IP address from request."""
     forwarded = request.headers.get("X-Forwarded-For")
     if forwarded:
         return forwarded.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
+
 
 async def get_performance_metrics() -> dict:
     """Get system performance metrics."""
@@ -85,6 +90,7 @@ async def get_performance_metrics() -> dict:
         }
     except Exception:
         return {}
+
 
 @router.get("/stats", response_model=AdminStatsResponse)
 async def get_admin_stats(
@@ -111,7 +117,9 @@ async def get_admin_stats(
 
             # Get verification stats
             verification_stats = await db_service.get_verification_stats()
-            user_activity = await db_service.get_user_activity(date_from=date_from, date_to=date_to)
+            user_activity = await db_service.get_user_activity(
+                date_from=date_from, date_to=date_to
+            )
 
             performance_metrics = None
             if include_performance:
@@ -152,6 +160,7 @@ async def get_admin_stats(
         record_business_error("admin_stats_error")
         logger.exception("Admin stats error")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/audit-logs")
 async def get_audit_logs(
@@ -236,6 +245,7 @@ async def get_audit_logs(
         logger.exception("Audit logs error")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.get("/system/health")
 async def get_system_health(
     http_request: Request,
@@ -261,9 +271,7 @@ async def get_system_health(
             services_status["database"] = await check(
                 "database", DatabaseService().health_check
             )
-            services_status["redis"] = await check(
-                "redis", CacheService().health_check
-            )
+            services_status["redis"] = await check("redis", CacheService().health_check)
             services_status["storage"] = await check(
                 "storage", StorageService().health_check
             )
@@ -309,6 +317,7 @@ async def get_system_health(
         logger.exception("Health check error")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 @router.get("/errors")
 async def get_errors(
     limit: int = Query(100, ge=1, le=1000),
@@ -335,12 +344,16 @@ async def get_errors(
                 try:
                     parsed_date_from = datetime.strptime(date_from, "%Y-%m-%d %H:%M:%S")
                 except ValueError:
-                    raise ValidationError("Invalid date_from format. Expected: YYYY-MM-DD HH:MM:SS")
+                    raise ValidationError(
+                        "Invalid date_from format. Expected: YYYY-MM-DD HH:MM:SS"
+                    )
             if date_to:
                 try:
                     parsed_date_to = datetime.strptime(date_to, "%Y-%m-%d %H:%M:%S")
                 except ValueError:
-                    raise ValidationError("Invalid date_to format. Expected: YYYY-MM-DD HH:MM:SS")
+                    raise ValidationError(
+                        "Invalid date_to format. Expected: YYYY-MM-DD HH:MM:SS"
+                    )
             # Построение фильтров
             filters = {}
             if error_type:
@@ -374,7 +387,10 @@ async def get_errors(
                 # Обновляем last_occurred
                 occurred_at = log.get("created_at")
                 if occurred_at:
-                    if not error_stats[error_type]["last_occurred"] or occurred_at > error_stats[error_type]["last_occurred"]:
+                    if (
+                        not error_stats[error_type]["last_occurred"]
+                        or occurred_at > error_stats[error_type]["last_occurred"]
+                    ):
                         error_stats[error_type]["last_occurred"] = occurred_at
             # Audit log
             audit_event(

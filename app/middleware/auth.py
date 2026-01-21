@@ -86,6 +86,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
             "/api/v1/ready",
             "/api/v1/live",
             "/api/v1/metrics",
+            "/api/v1/ml/details",
+            "/api/v1/system/metrics",
             # ✅ Auth endpoints - только с префиксом /api/v1 (после исправления в main.py)
             "/api/v1/auth/login",
             "/api/v1/auth/register",
@@ -109,7 +111,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if path.startswith("/api/v1/reference/") and request.method == "GET":
                 return True
             # GET запросы к health endpoints без префикса /api/v1
-            if path.startswith("/") and path.split("/")[1] in ["health", "status", "ready", "live", "metrics"]:
+            if path.startswith("/") and path.split("/")[1] in [
+                "health",
+                "status",
+                "ready",
+                "live",
+                "metrics",
+            ]:
                 return True
 
         return False

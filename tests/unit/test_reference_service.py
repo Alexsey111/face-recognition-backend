@@ -16,6 +16,7 @@ from app.utils.exceptions import ValidationError, ProcessingError, NotFoundError
 # Fixtures
 # ======================================================================
 
+
 @pytest.fixture
 def reference_service(
     db_session,
@@ -26,13 +27,13 @@ def reference_service(
 ):
     """Создание ReferenceService с замоканными зависимостями."""
     service = ReferenceService(db_session)
-    
+
     # Патчим зависимости
     service.ml_service = mock_ml_service
     service.encryption_service = mock_encryption_service
     service.validation_service = mock_validation_service
     service.storage_service = mock_storage_service
-    
+
     return service
 
 
@@ -61,6 +62,7 @@ def mock_reference(mock_user_id, mock_reference_id, mock_embedding):
 # Тесты create_reference
 # ======================================================================
 
+
 @pytest.mark.asyncio
 async def test_create_reference_success(
     reference_service,
@@ -68,20 +70,22 @@ async def test_create_reference_success(
     mock_image_data,
 ):
     """Тест успешного создания reference."""
-    
+
     with patch("app.services.reference_service.ReferenceCRUD") as mock_crud:
         # Mock создания reference - используем AsyncMock для async метода
-        mock_crud.create_reference = AsyncMock(return_value=Reference(
-            id="new-ref-123",
-            user_id=mock_user_id,
-            quality_score=0.85,
-            version=1,
-            is_active=True,
-        ))
-        
+        mock_crud.create_reference = AsyncMock(
+            return_value=Reference(
+                id="new-ref-123",
+                user_id=mock_user_id,
+                quality_score=0.85,
+                version=1,
+                is_active=True,
+            )
+        )
+
         # Mock получения предыдущего reference для calculate_similarity_with_old
         mock_crud.get_reference_by_id = AsyncMock(return_value=None)
-        
+
         # Создание reference
         result = await reference_service.create_reference(
             user_id=mock_user_id,
@@ -89,15 +93,15 @@ async def test_create_reference_success(
             label="test",
             quality_threshold=0.7,
         )
-        
+
         # Проверки
         assert result is not None
         assert result.user_id == mock_user_id
         assert result.quality_score == 0.85
-        
+
         # Проверяем, что ML сервис был вызван
         reference_service.ml_service.generate_embedding.assert_called_once()
-        
+
         # Проверяем, что шифрование было выполнено
         reference_service.encryption_service.encrypt_embedding.assert_called_once()
 
@@ -109,7 +113,7 @@ async def test_create_reference_low_quality(
     mock_image_data,
 ):
     """Тест отклонения reference из-за низкого качества."""
-    
+
     # Устанавливаем низкий quality_score
     reference_service.ml_service.generate_embedding.return_value = {
         "success": True,
@@ -117,7 +121,7 @@ async def test_create_reference_low_quality(
         "quality_score": 0.3,  # Ниже порога
         "face_detected": True,
     }
-    
+
     # Ожидаем ValidationError
     with pytest.raises(ValidationError, match="quality.*below threshold"):
         await reference_service.create_reference(
@@ -134,13 +138,13 @@ async def test_create_reference_embedding_failed(
     mock_image_data,
 ):
     """Тест ошибки генерации embedding."""
-    
+
     # Устанавливаем неудачный результат
     reference_service.ml_service.generate_embedding.return_value = {
         "success": False,
         "error": "Face not detected",
     }
-    
+
     # Ожидаем ProcessingError
     with pytest.raises(ProcessingError, match="Embedding generation failed"):
         await reference_service.create_reference(
@@ -157,32 +161,34 @@ async def test_create_reference_with_versioning(
     mock_reference,
 ):
     """Тест создания reference с версионированием."""
-    
+
     with patch("app.services.reference_service.ReferenceCRUD") as mock_crud:
         # Mock получения предыдущего reference
         async def mock_get_latest(user_id):
             return mock_reference
-        
+
         reference_service.get_latest_reference = mock_get_latest
-        
+
         # Mock создания нового reference
-        mock_crud.create_reference = AsyncMock(return_value=Reference(
-            id="new-ref-456",
-            user_id=mock_user_id,
-            version=2,  # Должна быть версия 2
-            previous_reference_id=mock_reference.id,
-            is_active=True,
-        ))
-        
+        mock_crud.create_reference = AsyncMock(
+            return_value=Reference(
+                id="new-ref-456",
+                user_id=mock_user_id,
+                version=2,  # Должна быть версия 2
+                previous_reference_id=mock_reference.id,
+                is_active=True,
+            )
+        )
+
         # Mock get_reference_by_id для calculate_similarity_with_old
         mock_crud.get_reference_by_id = AsyncMock(return_value=mock_reference)
-        
+
         # Создание reference
         result = await reference_service.create_reference(
             user_id=mock_user_id,
             image_data=mock_image_data.encode(),
         )
-        
+
         # Проверяем версию
         assert result.version == 2
         assert result.previous_reference_id == mock_reference.id
@@ -192,6 +198,7 @@ async def test_create_reference_with_versioning(
 # Тесты get_reference
 # ======================================================================
 
+
 @pytest.mark.asyncio
 async def test_get_reference_success(
     reference_service,
@@ -199,12 +206,12 @@ async def test_get_reference_success(
     mock_reference,
 ):
     """Тест успешного получения reference."""
-    
+
     with patch("app.services.reference_service.ReferenceCRUD") as mock_crud:
         mock_crud.get_reference_by_id = AsyncMock(return_value=mock_reference)
-        
+
         result = await reference_service.get_reference(mock_reference_id)
-        
+
         assert result is not None
         assert result.id == mock_reference_id
 
@@ -215,18 +222,19 @@ async def test_get_reference_not_found(
     mock_reference_id,
 ):
     """Тест получения несуществующего reference."""
-    
+
     with patch("app.services.reference_service.ReferenceCRUD") as mock_crud:
         mock_crud.get_reference_by_id = AsyncMock(return_value=None)
-        
+
         result = await reference_service.get_reference(mock_reference_id)
-        
+
         assert result is None
 
 
 # ======================================================================
 # Тесты update_reference
 # ======================================================================
+
 
 @pytest.mark.asyncio
 async def test_update_reference_success(
@@ -235,10 +243,10 @@ async def test_update_reference_success(
     mock_reference,
 ):
     """Тест успешного обновления reference."""
-    
+
     with patch("app.services.reference_service.ReferenceCRUD") as mock_crud:
         mock_crud.get_reference_by_id = AsyncMock(return_value=mock_reference)
-        
+
         updated_ref = Reference(
             id=mock_reference.id,
             user_id=mock_reference.user_id,
@@ -248,7 +256,7 @@ async def test_update_reference_success(
             is_active=mock_reference.is_active,
         )
         mock_crud.update_reference = AsyncMock(return_value=updated_ref)
-        
+
         result = await reference_service.update_reference(
             reference_id=mock_reference_id,
             label="updated_label",
@@ -263,10 +271,10 @@ async def test_update_reference_not_found(
     mock_reference_id,
 ):
     """Тест обновления несуществующего reference."""
-    
+
     with patch("app.services.reference_service.ReferenceCRUD") as mock_crud:
         mock_crud.get_reference_by_id = AsyncMock(return_value=None)
-        
+
         with pytest.raises(NotFoundError, match="not found"):
             await reference_service.update_reference(
                 reference_id=mock_reference_id,
@@ -278,6 +286,7 @@ async def test_update_reference_not_found(
 # Тесты delete_reference
 # ======================================================================
 
+
 @pytest.mark.asyncio
 async def test_delete_reference_soft(
     reference_service,
@@ -285,16 +294,16 @@ async def test_delete_reference_soft(
     mock_reference,
 ):
     """Тест soft delete reference."""
-    
+
     with patch("app.services.reference_service.ReferenceCRUD") as mock_crud:
         mock_crud.get_reference_by_id = AsyncMock(return_value=mock_reference)
         mock_crud.update_reference = AsyncMock(return_value=mock_reference)
-        
+
         result = await reference_service.delete_reference(
             reference_id=mock_reference_id,
             soft_delete=True,
         )
-        
+
         assert result is True
         mock_crud.update_reference.assert_called_once()
 
@@ -306,16 +315,16 @@ async def test_delete_reference_hard(
     mock_reference,
 ):
     """Тест hard delete reference."""
-    
+
     with patch("app.services.reference_service.ReferenceCRUD") as mock_crud:
         mock_crud.get_reference_by_id = AsyncMock(return_value=mock_reference)
         mock_crud.delete_reference = AsyncMock(return_value=True)
-        
+
         result = await reference_service.delete_reference(
             reference_id=mock_reference_id,
             soft_delete=False,
         )
-        
+
         assert result is True
         mock_crud.delete_reference.assert_called_once()
 
@@ -324,6 +333,7 @@ async def test_delete_reference_hard(
 # Тесты compare_with_references
 # ======================================================================
 
+
 @pytest.mark.asyncio
 async def test_compare_with_references_success(
     reference_service,
@@ -331,21 +341,21 @@ async def test_compare_with_references_success(
     mock_reference,
 ):
     """Тест успешного сравнения с references."""
-    
+
     with patch("app.services.reference_service.ReferenceCRUD") as mock_crud:
         # Mock получения references
         async def mock_get_all(user_id, include_inactive=False):
             return [mock_reference]
-        
+
         reference_service.get_all_references = mock_get_all
-        
+
         # Сравнение
         results = await reference_service.compare_with_references(
             image_data=mock_image_data.encode(),
             user_id=mock_reference.user_id,
             threshold=0.6,
         )
-        
+
         # Проверки
         assert len(results) > 0
         assert results[0]["reference_id"] == mock_reference.id
@@ -360,25 +370,25 @@ async def test_compare_with_references_no_match(
     mock_reference,
 ):
     """Тест сравнения без совпадений."""
-    
+
     # Устанавливаем низкий similarity
     reference_service.ml_service.compare_faces.return_value = {
         "success": True,
         "similarity_score": 0.3,
         "distance": 0.7,
     }
-    
+
     async def mock_get_all(user_id, include_inactive=False):
         return [mock_reference]
-    
+
     reference_service.get_all_references = mock_get_all
-    
+
     results = await reference_service.compare_with_references(
         image_data=mock_image_data.encode(),
         user_id=mock_reference.user_id,
         threshold=0.6,
     )
-    
+
     # Должен быть результат, но is_match=False
     assert len(results) > 0
     assert results[0]["is_match"] is False
@@ -390,7 +400,7 @@ async def test_compare_with_references_no_user_id_no_reference_ids(
     mock_image_data,
 ):
     """Тест сравнения без user_id и reference_ids."""
-    
+
     with pytest.raises(ValidationError, match="user_id.*must be provided"):
         await reference_service.compare_with_references(
             image_data=mock_image_data.encode(),
@@ -401,6 +411,7 @@ async def test_compare_with_references_no_user_id_no_reference_ids(
 # Тесты calculate_similarity_with_old
 # ======================================================================
 
+
 @pytest.mark.asyncio
 async def test_calculate_similarity_with_old_success(
     reference_service,
@@ -409,15 +420,15 @@ async def test_calculate_similarity_with_old_success(
     mock_embedding,
 ):
     """Тест расчёта similarity с предыдущим reference."""
-    
+
     with patch("app.services.reference_service.ReferenceCRUD") as mock_crud:
         mock_crud.get_reference_by_id = AsyncMock(return_value=mock_reference)
-        
+
         similarity = await reference_service.calculate_similarity_with_old(
             new_embedding=mock_embedding,
             old_reference_id=mock_reference_id,
         )
-        
+
         assert similarity > 0.0
         assert similarity <= 1.0
 
@@ -429,15 +440,15 @@ async def test_calculate_similarity_with_old_not_found(
     mock_embedding,
 ):
     """Тест расчёта similarity с несуществующим reference."""
-    
+
     with patch("app.services.reference_service.ReferenceCRUD") as mock_crud:
         mock_crud.get_reference_by_id = AsyncMock(return_value=None)
-        
+
         similarity = await reference_service.calculate_similarity_with_old(
             new_embedding=mock_embedding,
             old_reference_id=mock_reference_id,
         )
-        
+
         # Должен вернуть 0.0 при отсутствии reference
         assert similarity == 0.0
 
@@ -446,6 +457,7 @@ async def test_calculate_similarity_with_old_not_found(
 # Тесты get_reference_statistics
 # ======================================================================
 
+
 @pytest.mark.asyncio
 async def test_get_reference_statistics(
     reference_service,
@@ -453,9 +465,9 @@ async def test_get_reference_statistics(
     mock_reference,
 ):
     """Тест получения статистики по references."""
-    
+
     now = datetime.now(timezone.utc)
-    
+
     # Mock нескольких references
     ref1 = Reference(
         id="ref-1",
@@ -482,14 +494,14 @@ async def test_get_reference_statistics(
         created_at=now,
     )
     references = [ref1, ref2, ref3]
-    
+
     async def mock_get_all(user_id, include_inactive=True):
         return references
-    
+
     reference_service.get_all_references = mock_get_all
-    
+
     stats = await reference_service.get_reference_statistics(mock_user_id)
-    
+
     # Проверки
     assert stats["total_references"] == 3
     assert stats["active_references"] == 2

@@ -28,6 +28,7 @@ logger = get_logger(__name__)
 # ID / REQUEST HELPERS
 # ============================================================
 
+
 def generate_unique_id(prefix: str = "") -> str:
     uid = uuid.uuid4().hex
     return f"{prefix}_{uid}" if prefix else uid
@@ -41,6 +42,7 @@ def generate_request_id() -> str:
 # ============================================================
 # FILE / SIZE HELPERS
 # ============================================================
+
 
 def format_file_size(size_bytes: int) -> str:
     if size_bytes <= 0:
@@ -74,6 +76,7 @@ def sanitize_filename(filename: str) -> str:
 # ============================================================
 # IMAGE / BASE64 HELPERS
 # ============================================================
+
 
 def validate_image_base64(image_data: str) -> None:
     if not image_data:
@@ -144,6 +147,7 @@ def calculate_similarity_score(a: List[float], b: List[float]) -> float:
 # HASHING / SECURITY
 # ============================================================
 
+
 def calculate_file_hash(
     data: Union[str, bytes],
     algorithm: str = "sha256",
@@ -190,13 +194,12 @@ def verify_hmac_signature(
 # VALIDATION HELPERS
 # ============================================================
 
+
 def validate_email_format(email: str) -> None:
     if not email or not isinstance(email, str):
         raise ValidationError("Invalid email")
 
-    pattern = re.compile(
-        r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
-    )
+    pattern = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 
     if not pattern.match(email):
         raise ValidationError(
@@ -229,6 +232,7 @@ def validate_threshold(
 # API RESPONSE
 # ============================================================
 
+
 def create_api_response(
     success: bool,
     data: Any = None,
@@ -256,6 +260,7 @@ def create_api_response(
 # RETRY / BATCH / TIMING
 # ============================================================
 
+
 def retry_with_backoff(
     func: Callable,
     max_retries: int = 3,
@@ -274,7 +279,7 @@ def retry_with_backoff(
             if attempt >= max_retries:
                 break
 
-            delay = base_delay * (backoff_factor ** attempt)
+            delay = base_delay * (backoff_factor**attempt)
             logger.warning(
                 "Retry attempt failed",
                 extra={
@@ -335,6 +340,7 @@ class Timer:
 # CACHE KEYS
 # ============================================================
 
+
 class CacheKeyGenerator:
     """Генератор ключей кэша"""
 
@@ -364,7 +370,15 @@ def mask_sensitive_data(obj: Any) -> Any:
     """Redact common sensitive fields in a dict-like object."""
     if not isinstance(obj, dict):
         return obj
-    keys_to_redact = {"password", "passwd", "token", "access_token", "refresh_token", "ssn", "credit_card"}
+    keys_to_redact = {
+        "password",
+        "passwd",
+        "token",
+        "access_token",
+        "refresh_token",
+        "ssn",
+        "credit_card",
+    }
     redacted = {}
     for k, v in obj.items():
         if k and k.lower() in keys_to_redact:

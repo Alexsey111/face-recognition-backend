@@ -27,8 +27,9 @@ class ReferenceModel(BaseModel):
     file_size: Optional[int] = Field(None, description="Размер файла в байтах")
     image_format: Optional[str] = Field(None, description="Формат изображения")
     image_dimensions: Optional[Dict[str, int]] = Field(
-        None, description="Размеры изображения",
-        json_schema_extra={"width": 1920, "height": 1080}
+        None,
+        description="Размеры изображения",
+        json_schema_extra={"width": 1920, "height": 1080},
     )
     embedding: Optional[bytes] = Field(None, description="Зашифрованный эмбеддинг лица")
     embedding_version: int = Field(default=1, description="Версия алгоритма эмбеддинга")
@@ -79,7 +80,9 @@ class ReferenceCreate(BaseModel):
     image_data: str = Field(
         ...,
         description="Изображение в формате base64 или URL",
-        json_schema_extra={"example": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ..."}
+        json_schema_extra={
+            "example": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ..."
+        },
     )
     label: Optional[str] = Field(None, max_length=100, description="Метка эталона")
     metadata: Optional[Dict[str, Any]] = Field(
@@ -166,19 +169,19 @@ class ReferenceSearch(BaseModel):
     def validate_ranges(self):
         """Валидация диапазонов качества и использования."""
         if (
-            self.quality_min is not None 
-            and self.quality_max is not None 
+            self.quality_min is not None
+            and self.quality_max is not None
             and self.quality_min > self.quality_max
         ):
             raise ValueError("quality_min cannot be greater than quality_max")
-        
+
         if (
-            self.usage_count_min is not None 
-            and self.usage_count_max is not None 
+            self.usage_count_min is not None
+            and self.usage_count_max is not None
             and self.usage_count_min > self.usage_count_max
         ):
             raise ValueError("usage_count_min cannot be greater than usage_count_max")
-        
+
         return self
 
 
@@ -255,6 +258,10 @@ class ReferenceListResponse(BaseModel):
     )
 
 
+# Alias для обратной совместимости
+Reference = ReferenceModel
+
+
 class ReferenceStats(BaseModel):
     """
     Модель для статистики эталонных изображений.
@@ -271,10 +278,12 @@ class ReferenceStats(BaseModel):
     quality_distribution: Dict[str, int] = Field(
         ...,
         description="Распределение по качеству",
-        json_schema_extra={"example": {"excellent": 45, "good": 30, "fair": 20, "poor": 5}}
+        json_schema_extra={
+            "example": {"excellent": 45, "good": 30, "fair": 20, "poor": 5}
+        },
     )
     user_distribution: Dict[str, int] = Field(
         ...,
         description="Распределение по пользователям",
-        json_schema_extra={"example": {"user_123": 15, "user_456": 8, "user_789": 3}}
+        json_schema_extra={"example": {"user_123": 15, "user_456": 8, "user_789": 3}},
     )

@@ -30,6 +30,7 @@ try:
         REGISTRY,
         CollectorRegistry,
     )
+
     PROMETHEUS_AVAILABLE = True
 except Exception:
     PROMETHEUS_AVAILABLE = False
@@ -89,8 +90,21 @@ http_request_duration_seconds = Histogram(
     "HTTP request duration in seconds",
     ["method", "endpoint"],
     buckets=[
-        0.005, 0.01, 0.025, 0.05, 0.075, 0.1,
-        0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.075,
+        0.1,
+        0.25,
+        0.5,
+        0.75,
+        1.0,
+        2.5,
+        5.0,
+        10.0,
+        30.0,
+        60.0,
     ],
     registry=app_registry,
 )
@@ -240,12 +254,11 @@ app_info = Info(
 # Middleware
 # =============================================================================
 
+
 class MetricsMiddleware(BaseHTTPMiddleware):
     """HTTP metrics middleware."""
 
-    SKIP_PATHS = {
-        "/metrics", "/health", "/ready", "/live", "/status", "/favicon.ico"
-    }
+    SKIP_PATHS = {"/metrics", "/health", "/ready", "/live", "/status", "/favicon.ico"}
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
@@ -285,9 +298,11 @@ class MetricsMiddleware(BaseHTTPMiddleware):
                 endpoint=endpoint,
             ).observe(duration)
 
-            response_size = int(
-                getattr(response, "headers", {}).get("content-length", 0)
-            ) if "response" in locals() else 0
+            response_size = (
+                int(getattr(response, "headers", {}).get("content-length", 0))
+                if "response" in locals()
+                else 0
+            )
 
             http_response_size_bytes.labels(
                 method=method,
@@ -297,13 +312,17 @@ class MetricsMiddleware(BaseHTTPMiddleware):
     @staticmethod
     def _normalize_path(path: str) -> str:
         patterns = [
-            (r"/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", "/{uuid}"),
+            (
+                r"/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+                "/{uuid}",
+            ),
             (r"/\d+(?=/|$)", "/{id}"),
             (r"/[a-f0-9]{16,}", "/{hash}"),
         ]
         for pattern, repl in patterns:
             path = re.sub(pattern, repl, path)
         return path
+
 
 # =============================================================================
 # Additional metrics for compatibility
@@ -334,26 +353,34 @@ cache_size_gauge = Gauge(
 # Business metric helpers
 # =============================================================================
 
+
 def record_verification(result: str):
     verifications_total.labels(result=result).inc()
+
 
 def record_liveness(result: str):
     liveness_checks_total.labels(result=result).inc()
 
+
 def record_upload(result: str, file_type: str):
     uploads_total.labels(result=result, file_type=file_type).inc()
+
 
 def record_reference(operation: str):
     references_total.labels(operation=operation).inc()
 
+
 def record_auth(result: str, method: str):
     auth_attempts_total.labels(result=result, method=method).inc()
+
 
 def record_token(token_type: str):
     auth_tokens_total.labels(token_type=token_type).inc()
 
+
 def record_business_error(error_type: str):
     business_errors_total.labels(error_type=error_type).inc()
+
 
 def record_error(error_type: str, endpoint: str):
     """Record an HTTP error for metrics."""
@@ -364,67 +391,83 @@ def record_error(error_type: str, endpoint: str):
 # Compatibility functions (alias names)
 # =============================================================================
 
+
 def record_verification_start():
     """Record verification started."""
     verifications_total.labels(result="started").inc()
+
 
 def record_verification_success():
     """Record successful verification."""
     verifications_total.labels(result="success").inc()
 
+
 def record_verification_failed():
     """Record failed verification."""
     verifications_total.labels(result="failed").inc()
+
 
 def record_liveness_check(result: str):
     """Record liveness check result."""
     liveness_checks_total.labels(result=result).inc()
 
+
 def record_reference_created():
     """Record reference created."""
     references_total.labels(operation="create").inc()
 
+
 def record_reference_deleted():
     """Record reference deleted."""
     references_total.labels(operation="delete").inc()
+
 
 def record_auth_attempt(success: bool):
     """Record authentication attempt."""
     result = "success" if success else "failure"
     auth_attempts_total.labels(result=result, method="jwt").inc()
 
+
 def record_logout():
     """Record user logout."""
     auth_attempts_total.labels(result="logout", method="jwt").inc()
 
+
 def record_token_issued(token_type: str):
     """Record token issued."""
     auth_tokens_total.labels(token_type=token_type).inc()
+
 
 def record_token_validation(success: bool):
     """Record token validation."""
     result = "success" if success else "failure"
     auth_attempts_total.labels(result=result, method="token").inc()
 
+
 def record_cache_hit(cache_type: str):
     """Record cache hit."""
     cache_hits_total.labels(cache_type=cache_type).inc()
+
 
 def record_cache_miss(cache_type: str):
     """Record cache miss."""
     cache_misses_total.labels(cache_type=cache_type).inc()
 
+
 def update_db_connections(count: int):
     """Update database connections gauge."""
     database_connections_active.set(count)
+
 
 def update_active_sessions(count: int):
     """Update active sessions gauge."""
     active_sessions_gauge.set(count)
 
+
 def update_queue_size(queue_name: str, size: int):
     """Update queue size gauge."""
     queue_size_gauge.labels(queue_name=queue_name).set(size)
+
 
 def update_cache_size(cache_type: str, size: int):
     """Update cache size gauge."""
@@ -435,8 +478,10 @@ def update_cache_size(cache_type: str, size: int):
 # Decorator for function metrics
 # =============================================================================
 
+
 def track_function_metrics(metric_name: str):
     """Decorator to track function execution metrics."""
+
     def decorator(func):
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
@@ -461,15 +506,18 @@ def track_function_metrics(metric_name: str):
                 )
 
         import asyncio
+
         if asyncio.iscoroutinefunction(func):
             return async_wrapper
         return sync_wrapper
 
     return decorator
 
+
 # =============================================================================
 # Context managers
 # =============================================================================
+
 
 @contextmanager
 def track_db_query(query_type: str):
@@ -481,6 +529,7 @@ def track_db_query(query_type: str):
             time.perf_counter() - start
         )
 
+
 @contextmanager
 def track_processing(operation_type: str):
     start = time.perf_counter()
@@ -491,28 +540,35 @@ def track_processing(operation_type: str):
             time.perf_counter() - start
         )
 
+
 # =============================================================================
 # Metrics endpoint helpers
 # =============================================================================
 
+
 def initialize_metrics():
     if not PROMETHEUS_AVAILABLE:
         return
-    app_info.info({
-        "app_name": getattr(settings, "APP_NAME", "face-recognition-service"),
-        "version": "1.0.0",
-        "environment": getattr(settings, "ENVIRONMENT", "production"),
-        "debug": str(getattr(settings, "DEBUG", False)),
-    })
+    app_info.info(
+        {
+            "app_name": getattr(settings, "APP_NAME", "face-recognition-service"),
+            "version": "1.0.0",
+            "environment": getattr(settings, "ENVIRONMENT", "production"),
+            "debug": str(getattr(settings, "DEBUG", False)),
+        }
+    )
+
 
 def get_metrics() -> str:
     if not PROMETHEUS_AVAILABLE or app_registry is None:
         return ""
     try:
         from prometheus_client import generate_latest
+
         return generate_latest(app_registry).decode("utf-8")
     except Exception:
         return ""
+
 
 def get_metrics_content_type() -> str:
     return "text/plain; version=0.0.4; charset=utf-8"

@@ -26,7 +26,7 @@ async def check_database_connection() -> tuple[bool, str]:
     try:
         # Пытаемся подключиться к PostgreSQL
         conn = await asyncpg.connect(settings.DATABASE_URL)
-        await conn.execute('SELECT 1')
+        await conn.execute("SELECT 1")
         # Для asyncpg используется close(), не aclose()
         await conn.close()
         return True, "connected"
@@ -51,22 +51,33 @@ async def check_redis_connection() -> tuple[bool, str]:
 async def check_storage_connection() -> tuple[bool, str]:
     """Проверка подключения к хранилищу (S3/MinIO)."""
     try:
-        import aioboto3
+        import boto3
         from botocore.config import Config
-        
-        session = aioboto3.Session()
-        async with session.client(
-            's3',
+        import asyncio
+        import functools
+
+        config = Config(
+            region_name=settings.S3_REGION,
+            signature_version="s3v4",
+            retries={"max_attempts": 3, "mode": "standard"},
+        )
+
+        s3_client = boto3.client(
+            "s3",
             endpoint_url=settings.S3_ENDPOINT_URL,
             aws_access_key_id=settings.S3_ACCESS_KEY,
             aws_secret_access_key=settings.S3_SECRET_KEY,
-            region_name=settings.S3_REGION,
-            config=Config(signature_version='s3v4'),
-            use_ssl=settings.S3_USE_SSL
-        ) as s3_client:
-            # Проверяем существование бакета
-            await s3_client.head_bucket(Bucket=settings.S3_BUCKET_NAME)
-            return True, "connected"
+            config=config,
+            use_ssl=settings.S3_USE_SSL,
+        )
+
+        # Выполняем синхронный вызов в отдельном потоке
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            functools.partial(s3_client.head_bucket, Bucket=settings.S3_BUCKET_NAME),
+        )
+        return True, "connected"
     except Exception as e:
         logger.error(f"Storage health check failed: {str(e)}")
         return False, str(e)
@@ -78,10 +89,11 @@ async def check_ml_service_connection() -> tuple[bool, str]:
         if not settings.USE_LOCAL_ML_SERVICE:
             # Проверка внешнего ML сервиса
             import aiohttp
+
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     f"{settings.ML_SERVICE_URL}/health",
-                    timeout=aiohttp.ClientTimeout(total=5)
+                    timeout=aiohttp.ClientTimeout(total=5),
                 ) as response:
                     if response.status == 200:
                         return True, "connected"
@@ -102,7 +114,7 @@ async def check_all_services() -> dict[str, tuple[bool, str]]:
         "storage": check_storage_connection(),
         "ml_service": check_ml_service_connection(),
     }
-    
+
     results = {}
     for service_name, task in tasks.items():
         try:
@@ -111,7 +123,7 @@ async def check_all_services() -> dict[str, tuple[bool, str]]:
         except Exception as e:
             logger.error(f"Health check for {service_name} failed: {str(e)}")
             results[service_name] = (False, str(e))
-    
+
     return results
 
 
@@ -124,24 +136,27 @@ async def health_check():
 
         # Проверяем все сервисы
         service_results = await check_all_services()
-        
+
         # Формируем статусы сервисов
         services_status = {}
         for service_name, (is_healthy, status) in service_results.items():
-            services_status[service_name] = "healthy" if is_healthy else f"unhealthy: {status}"
-        
+            services_status[service_name] = (
+                "healthy" if is_healthy else f"unhealthy: {status}"
+            )
+
         # API всегда здоров
         services_status["api"] = "healthy"
-        
+
         # Проверяем, все ли критичные сервисы здоровы
         critical_services = ["database", "storage"]
         all_healthy = all(
-            service_results[service][0] for service in critical_services 
+            service_results[service][0]
+            for service in critical_services
             if service in service_results
         )
-        
+
         overall_status = "healthy" if all_healthy else "degraded"
-        
+
         return HealthResponse(
             success=all_healthy,
             status=overall_status,
@@ -165,20 +180,37 @@ async def detailed_status_check():
     try:
         # Проверяем все сервисы
         service_results = await check_all_services()
-        
+
         # Формируем статусы сервисов
-        database_status = "healthy" if service_results.get("database", (False, ""))[0] else f"unhealthy: {service_results.get('database', (False, 'not checked'))[1]}"
-        redis_status = "healthy" if service_results.get("redis", (False, ""))[0] else f"unhealthy: {service_results.get('redis', (False, 'not checked'))[1]}"
-        storage_status = "healthy" if service_results.get("storage", (False, ""))[0] else f"unhealthy: {service_results.get('storage', (False, 'not checked'))[1]}"
-        ml_service_status = "healthy" if service_results.get("ml_service", (False, ""))[0] else f"unhealthy: {service_results.get('ml_service', (False, 'not checked'))[1]}"
-        
+        database_status = (
+            "healthy"
+            if service_results.get("database", (False, ""))[0]
+            else f"unhealthy: {service_results.get('database', (False, 'not checked'))[1]}"
+        )
+        redis_status = (
+            "healthy"
+            if service_results.get("redis", (False, ""))[0]
+            else f"unhealthy: {service_results.get('redis', (False, 'not checked'))[1]}"
+        )
+        storage_status = (
+            "healthy"
+            if service_results.get("storage", (False, ""))[0]
+            else f"unhealthy: {service_results.get('storage', (False, 'not checked'))[1]}"
+        )
+        ml_service_status = (
+            "healthy"
+            if service_results.get("ml_service", (False, ""))[0]
+            else f"unhealthy: {service_results.get('ml_service', (False, 'not checked'))[1]}"
+        )
+
         # Проверяем общий статус
         critical_services = ["database", "storage"]
         all_critical_healthy = all(
-            service_results[service][0] for service in critical_services 
+            service_results[service][0]
+            for service in critical_services
             if service in service_results
         )
-        
+
         return StatusResponse(
             success=all_critical_healthy,
             database_status=database_status,
@@ -204,7 +236,7 @@ async def liveness_check():
     return BaseResponse(success=True, message="Service is alive")
 
 
-@router.get("/metrics", response_model=dict)
+@router.get("/system/metrics", response_model=dict)
 async def get_metrics():
     """Получение метрик производительности сервиса."""
     try:
@@ -243,4 +275,70 @@ async def get_metrics():
         }
     except Exception as e:
         logger.error(f"Failed to get metrics: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/ml/details", response_model=dict)
+async def get_ml_metrics():
+    """
+    Получение метрик ML сервиса:
+    - Статус инициализации моделей
+    - GPU память (если доступно)
+    - Статистика запросов
+    """
+    try:
+        import torch
+        from ..services.ml_service import get_ml_service
+
+        ml_service = await get_ml_service()
+        stats = ml_service.get_stats()
+
+        # GPU метрики
+        gpu_metrics = {}
+        if torch.cuda.is_available():
+            gpu_metrics = {
+                "cuda_available": True,
+                "gpu_device": torch.cuda.get_device_name(0),
+                "gpu_memory_allocated_mb": round(
+                    torch.cuda.memory_allocated(0) / 1024**2, 2
+                ),
+                "gpu_memory_reserved_mb": round(
+                    torch.cuda.memory_reserved(0) / 1024**2, 2
+                ),
+                "gpu_memory_free_mb": round(
+                    torch.cuda.get_device_properties(0).total_memory / 1024**2, 2
+                ),
+            }
+        else:
+            gpu_metrics = {
+                "cuda_available": False,
+                "device": str(stats.get("device", "cpu")),
+            }
+
+        return {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "models_initialized": stats.get("models_initialized", False),
+            "device": stats.get("device", "unknown"),
+            "gpu": gpu_metrics,
+            "statistics": {
+                "total_requests": stats.get("requests", 0),
+                "embeddings_generated": stats.get("embeddings_generated", 0),
+                "liveness_checks": stats.get("liveness_checks", 0),
+                "depth_checks": stats.get("depth_checks", 0),
+                "avg_processing_time": round(
+                    stats.get("average_processing_time", 0), 4
+                ),
+                "max_processing_time": round(stats.get("max_processing_time", 0), 4),
+            },
+            "certified_liveness": {
+                "enabled": stats.get("certified_liveness_enabled", False),
+                "model_loaded": (
+                    stats.get("anti_spoofing", {}).get("model_loaded", False)
+                    if stats.get("anti_spoofing")
+                    else False
+                ),
+            },
+        }
+    except Exception as e:
+        logger.error(f"Failed to get ML metrics: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

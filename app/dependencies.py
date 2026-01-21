@@ -65,10 +65,10 @@ async def shutdown_cache_service():
         logger.info("CacheService closed")
 
 
-
 # =========================
 # Internal helpers
 # =========================
+
 
 def _unauthorized(detail: str) -> HTTPException:
     return HTTPException(
@@ -114,6 +114,7 @@ def _decode_jwt(token: str) -> Dict[str, Any]:
 # =========================
 # Dependencies
 # =========================
+
 
 async def get_current_user(
     request: Request,

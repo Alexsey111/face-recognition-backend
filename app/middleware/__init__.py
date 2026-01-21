@@ -7,7 +7,12 @@ from .auth import AuthMiddleware
 from .rate_limit import RateLimitMiddleware
 from .logging import LoggingMiddleware
 from .error_handler import ErrorHandlerMiddleware
-from .request_logging import RequestLoggingMiddleware, RequestIDMiddleware, ContextLoggerMiddleware, timed_operation
+from .request_logging import (
+    RequestLoggingMiddleware,
+    RequestIDMiddleware,
+    ContextLoggerMiddleware,
+    timed_operation,
+)
 from .metrics import (
     MetricsMiddleware,
     track_function_metrics,
@@ -47,7 +52,6 @@ __all__ = [
     "RequestIDMiddleware",
     "ContextLoggerMiddleware",
     "MetricsMiddleware",
-    
     # Metrics
     "get_metrics",
     "get_metrics_content_type",
@@ -55,7 +59,6 @@ __all__ = [
     "track_function_metrics",
     "track_db_query",
     "track_processing",
-    
     # Metrics recording functions
     "record_verification_start",
     "record_verification_success",
@@ -75,7 +78,6 @@ __all__ = [
     "update_active_sessions",
     "update_queue_size",
     "update_cache_size",
-    
     # Utilities
     "timed_operation",
 ]

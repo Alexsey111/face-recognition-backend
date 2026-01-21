@@ -9,9 +9,11 @@ from typing import Any, Optional, Dict
 from datetime import datetime
 import redis.asyncio as redis
 from redis.exceptions import RedisError, ConnectionError
+
 try:
     from prometheus_client import Counter
 except Exception:
+
     class _NoopCounter:
         def __init__(self, *args, **kwargs):
             pass
@@ -33,11 +35,14 @@ logger = get_logger(__name__)
 
 # Reuse application-level cache metrics to avoid duplicate registration
 try:
-    from ..middleware.metrics import cache_hits_total as CACHE_HITS, cache_misses_total as CACHE_MISSES
+    from ..middleware.metrics import (
+        cache_hits_total as CACHE_HITS,
+        cache_misses_total as CACHE_MISSES,
+    )
 except Exception:
     # Fallback to local Counter definitions if metrics module isn't importable
-    CACHE_HITS = Counter("cache_hits_total", "Total cache hits", ["cache_name"]) 
-    CACHE_MISSES = Counter("cache_misses_total", "Total cache misses", ["cache_name"]) 
+    CACHE_HITS = Counter("cache_hits_total", "Total cache hits", ["cache_name"])
+    CACHE_MISSES = Counter("cache_misses_total", "Total cache misses", ["cache_name"])
 
 
 RATE_LIMIT_LUA = """
@@ -62,9 +67,9 @@ return {1, count + 1, now + window}
 
 class CacheService:
     # ==================== TTL Constants ====================
-    TTL_REFERENCE_EMBEDDING = 3600      # 1 hour
-    TTL_USER_STATS = 3600               # 1 hour
-    TTL_LIVENESS_RESULT = 600          # 10 minutes
+    TTL_REFERENCE_EMBEDDING = 3600  # 1 hour
+    TTL_USER_STATS = 3600  # 1 hour
+    TTL_LIVENESS_RESULT = 600  # 10 minutes
 
     def __init__(self):
         self._redis: Optional[redis.Redis] = None
@@ -75,7 +80,9 @@ class CacheService:
                 await self._redis.ping()
                 return self._redis
             except (ConnectionError, RedisError, TimeoutError) as e:
-                logger.warning(f"Redis connection lost: {e}. Attempting to reconnect...")
+                logger.warning(
+                    f"Redis connection lost: {e}. Attempting to reconnect..."
+                )
                 await self._redis.close()  # Закрываем старый клиент
                 self._redis = None  # Сбрасываем, чтобы пересоздать
 
@@ -158,23 +165,23 @@ class CacheService:
         expire_seconds: int = 1800,
     ) -> bool:
         return await self.set(
-        f"{settings.CACHE_KEY_PREFIX}verification_session:{session_id}",
-        data,
-        expire_seconds,
-    )
-        
-
+            f"{settings.CACHE_KEY_PREFIX}verification_session:{session_id}",
+            data,
+            expire_seconds,
+        )
 
     async def get_verification_session(
         self,
         session_id: str,
     ) -> Optional[Dict[str, Any]]:
         return await self.get(
-    f"{settings.CACHE_KEY_PREFIX}verification_session:{session_id}")
+            f"{settings.CACHE_KEY_PREFIX}verification_session:{session_id}"
+        )
 
     async def delete_verification_session(self, session_id: str) -> bool:
         return await self.delete(
-    f"{settings.CACHE_KEY_PREFIX}verification_session:{session_id}")
+            f"{settings.CACHE_KEY_PREFIX}verification_session:{session_id}"
+        )
 
     # -------------------- Tokens --------------------
 
@@ -187,7 +194,11 @@ class CacheService:
         redis_client = await self._get_redis()
 
         pipe = redis_client.pipeline()
-        pipe.set(f"{settings.CACHE_KEY_PREFIX}access_token:{token}", user_id, ex=expire_seconds)
+        pipe.set(
+            f"{settings.CACHE_KEY_PREFIX}access_token:{token}",
+            user_id,
+            ex=expire_seconds,
+        )
         pipe.sadd(f"{settings.CACHE_KEY_PREFIX}user_tokens:{user_id}", token)
         pipe.expire(f"{settings.CACHE_KEY_PREFIX}user_tokens:{user_id}", expire_seconds)
         await pipe.execute()
@@ -196,7 +207,9 @@ class CacheService:
 
     async def validate_access_token(self, token: str) -> Optional[str]:
         redis_client = await self._get_redis()
-        return await redis_client.get(f"{settings.CACHE_KEY_PREFIX}access_token:{token}")
+        return await redis_client.get(
+            f"{settings.CACHE_KEY_PREFIX}access_token:{token}"
+        )
 
     async def revoke_access_token(self, user_id: str, token: str) -> bool:
         redis_client = await self._get_redis()
@@ -210,7 +223,9 @@ class CacheService:
 
     async def revoke_all_user_tokens(self, user_id: str) -> int:
         redis_client = await self._get_redis()
-        tokens = await redis_client.smembers(f"{settings.CACHE_KEY_PREFIX}user_tokens:{user_id}")
+        tokens = await redis_client.smembers(
+            f"{settings.CACHE_KEY_PREFIX}user_tokens:{user_id}"
+        )
 
         if not tokens:
             return 0
@@ -242,7 +257,9 @@ class CacheService:
 
     async def get_cached_embedding(self, image_hash: str) -> Optional[bytes]:
         redis_client = await self._get_redis()
-        return await redis_client.get(f"{settings.CACHE_KEY_PREFIX}embedding:{image_hash}")
+        return await redis_client.get(
+            f"{settings.CACHE_KEY_PREFIX}embedding:{image_hash}"
+        )
 
     # -------------------- Rate limit (Lua) --------------------
 
@@ -361,7 +378,7 @@ class CacheService:
         user_id: str,
         embedding: list,  # List[float]
         version: int = 1,
-        metadata: Optional[Dict] = None
+        metadata: Optional[Dict] = None,
     ) -> bool:
         """
         Cache reference embedding with metadata
@@ -378,16 +395,16 @@ class CacheService:
             "embedding": embedding,
             "version": version,
             "cached_at": datetime.utcnow().isoformat(),
-            "metadata": metadata or {}
+            "metadata": metadata or {},
         }
         try:
             success = await self.set(
-                key,
-                payload,
-                expire_seconds=self.TTL_REFERENCE_EMBEDDING
+                key, payload, expire_seconds=self.TTL_REFERENCE_EMBEDDING
             )
             if success:
-                logger.info(f"📦 Cached reference embedding for user {user_id} (v{version})")
+                logger.info(
+                    f"📦 Cached reference embedding for user {user_id} (v{version})"
+                )
             return success
         except Exception as e:
             logger.error(f"Failed to cache reference for user {user_id}: {e}")
@@ -432,9 +449,7 @@ class CacheService:
         key = f"{settings.CACHE_KEY_PREFIX}stats:{user_id}"
         try:
             success = await self.set(
-                key,
-                stats_data,
-                expire_seconds=self.TTL_USER_STATS
+                key, stats_data, expire_seconds=self.TTL_USER_STATS
             )
             if success:
                 logger.debug(f"📦 Cached user stats for {user_id}")
@@ -475,17 +490,13 @@ class CacheService:
             return None
 
     async def cache_liveness_result(
-        self,
-        image_hash: str,
-        result: Dict[str, Any]
+        self, image_hash: str, result: Dict[str, Any]
     ) -> bool:
         """Cache liveness detection result"""
         key = f"{settings.CACHE_KEY_PREFIX}liveness:{image_hash}"
         try:
             success = await self.set(
-                key,
-                result,
-                expire_seconds=self.TTL_LIVENESS_RESULT
+                key, result, expire_seconds=self.TTL_LIVENESS_RESULT
             )
             if success:
                 logger.debug(f"📦 Cached liveness result for {image_hash[:16]}...")
@@ -499,6 +510,7 @@ class CacheService:
     def compute_image_hash(self, image_bytes: bytes) -> str:
         """Compute SHA-256 hash of image for cache key"""
         import hashlib
+
         return hashlib.sha256(image_bytes).hexdigest()
 
     async def get_cache_stats(self) -> Dict[str, Any]:
@@ -513,6 +525,7 @@ class CacheService:
             # Добавь кастомные метрики из Prometheus (если доступны)
             try:
                 from ..middleware.metrics import cache_hits_total, cache_misses_total
+
                 # Получи значения счётчиков (это сложно, т.к. Counter не хранит значение)
                 # Альтернатива: используй Redis info
                 hits = redis_stats.get("hits", 0)
@@ -527,20 +540,14 @@ class CacheService:
                     "redis_memory": redis_stats.get("used_memory"),
                     "connected_clients": redis_stats.get("clients"),
                     "evicted_keys": redis_stats.get("evicted", 0),
-                    "status": "healthy" if hit_rate >= 70 else "degraded"
+                    "status": "healthy" if hit_rate >= 70 else "degraded",
                 }
             except ImportError:
                 # Fallback если метрики недоступны
-                return {
-                    **redis_stats,
-                    "status": "healthy"
-                }
+                return {**redis_stats, "status": "healthy"}
         except Exception as e:
             logger.error(f"Failed to get cache stats: {e}")
-            return {
-                "status": "error",
-                "error": str(e)
-            }
+            return {"status": "error", "error": str(e)}
 
     async def health_check(self) -> bool:
         """Check if Redis is responsive"""

@@ -15,7 +15,17 @@ from typing import Any
 
 from . import __version__
 from .config import settings
-from .routes import health, upload, verify, liveness, reference, admin, auth, webhook, metrics
+from .routes import (
+    health,
+    upload,
+    verify,
+    liveness,
+    reference,
+    admin,
+    auth,
+    webhook,
+    metrics,
+)
 from .middleware.auth import AuthMiddleware
 from .middleware.rate_limit import RateLimitMiddleware
 from .middleware.logging_middleware import LoggingMiddleware
@@ -27,13 +37,16 @@ from .utils.logger import setup_logger
 # JSON utils
 # -----------------------------
 
+
 def json_serializer(obj: Any) -> Any:
     if isinstance(obj, (datetime, date)):
         return obj.isoformat()
     raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
 
-def create_custom_json_response(content: Any, status_code: int = 200, **kwargs) -> JSONResponse:
+def create_custom_json_response(
+    content: Any, status_code: int = 200, **kwargs
+) -> JSONResponse:
     return JSONResponse(
         content=json.loads(json.dumps(content, default=json_serializer)),
         status_code=status_code,
@@ -44,6 +57,7 @@ def create_custom_json_response(content: Any, status_code: int = 200, **kwargs) 
 # -----------------------------
 # Exception handlers
 # -----------------------------
+
 
 async def http_exception_handler(request, exc: HTTPException):
     return JSONResponse(
@@ -84,6 +98,7 @@ async def general_exception_handler(request, exc: Exception):
 # Lifespan
 # -----------------------------
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger = setup_logger()
@@ -94,18 +109,19 @@ async def lifespan(app: FastAPI):
     logger.info("Metrics initialized")
 
     from .services.auth_service import AuthService
-    await AuthService.init_redis()
+
+    AuthService.init_redis()
     logger.info("Redis initialized")
 
     # Test environment DB bootstrap
-    is_test_env = (
-        getattr(settings, "ENVIRONMENT", "") == "test"
-        or bool(os.getenv("PYTEST_CURRENT_TEST"))
+    is_test_env = getattr(settings, "ENVIRONMENT", "") == "test" or bool(
+        os.getenv("PYTEST_CURRENT_TEST")
     )
 
     if is_test_env:
         try:
             from .db import database as db_mod
+
             test_db_path = os.path.join(os.getcwd(), "test_sqlite.db")
             test_url = f"sqlite+aiosqlite:///{test_db_path}"
 
@@ -119,6 +135,7 @@ async def lifespan(app: FastAPI):
     # Schedulers
     try:
         from .tasks.scheduler import start_schedulers
+
         start_schedulers()
         logger.info("Schedulers started")
     except Exception:
@@ -130,6 +147,7 @@ async def lifespan(app: FastAPI):
 
     try:
         from .tasks.scheduler import stop_schedulers
+
         await stop_schedulers()
         logger.info("Schedulers stopped")
     except Exception:
@@ -138,18 +156,20 @@ async def lifespan(app: FastAPI):
     # Close cache service connections
     try:
         from .dependencies import shutdown_cache_service
+
         await shutdown_cache_service()
         logger.info("CacheService shutdown complete")
     except Exception:
         logger.warning("CacheService shutdown failed", exc_info=True)
 
-    await AuthService.close_redis()
+    AuthService.close_redis()
     logger.info("Redis closed")
 
 
 # -----------------------------
 # App factory
 # -----------------------------
+
 
 def create_app() -> FastAPI:
     app = FastAPI(
@@ -221,7 +241,9 @@ def create_test_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+    app.add_middleware(
+        CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+    )
     app.add_middleware(MetricsMiddleware)
     app.add_middleware(LoggingMiddleware)
 

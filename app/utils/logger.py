@@ -38,9 +38,7 @@ def _redact(obj: Any) -> Any:
     """Recursively redact sensitive fields."""
     if isinstance(obj, dict):
         return {
-            k: "[REDACTED]"
-            if k and k.lower() in SENSITIVE_KEYS
-            else _redact(v)
+            k: "[REDACTED]" if k and k.lower() in SENSITIVE_KEYS else _redact(v)
             for k, v in obj.items()
         }
     if isinstance(obj, list):
@@ -98,6 +96,7 @@ class LogContext:
 # =========================
 # Logging filters / formatters
 # =========================
+
 
 class EmptyMessageFilter(logging.Filter):
     """Blocks empty log messages."""
@@ -188,6 +187,7 @@ class SafeStreamHandler(logging.StreamHandler):
 # Logger setup
 # =========================
 
+
 def _resolve_log_level(level: Optional[str | int]) -> int:
     if isinstance(level, int):
         return level
@@ -269,6 +269,7 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
 # Helper logging utilities
 # =========================
 
+
 def log_with_context(
     log_method: Callable[..., None],
     message: str,
@@ -331,6 +332,7 @@ def audit_event(
 # Retry utilities
 # =========================
 
+
 def retry_with_backoff(
     func: Callable[[], Any],
     *,
@@ -347,7 +349,7 @@ def retry_with_backoff(
             last_exc = exc
             if attempt == max_retries:
                 break
-            delay = base_delay * (factor ** attempt)
+            delay = base_delay * (factor**attempt)
             logging.getLogger(func.__module__).warning(
                 "Retry %s in %.2fs: %s", attempt + 1, delay, exc
             )
@@ -372,7 +374,7 @@ async def async_retry_with_backoff(
             last_exc = exc
             if attempt == max_retries:
                 break
-            delay = base_delay * (factor ** attempt)
+            delay = base_delay * (factor**attempt)
             logging.getLogger(func.__module__).warning(
                 "Async retry %s in %.2fs: %s", attempt + 1, delay, exc
             )
@@ -383,6 +385,7 @@ async def async_retry_with_backoff(
 # =========================
 # Timing / decorators
 # =========================
+
 
 class Timer:
     def __init__(self):

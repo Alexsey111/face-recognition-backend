@@ -13,6 +13,7 @@ class BaseResponse(BaseModel):
     """
     Базовый класс для всех ответов API.
     """
+
     model_config = ConfigDict(populate_by_name=True)
 
     success: bool = Field(..., description="Статус выполнения операции")
@@ -24,6 +25,7 @@ class BaseResponse(BaseModel):
     request_id: str = Field(
         default_factory=lambda: str(uuid.uuid4()), description="Уникальный ID запроса"
     )
+
 
 class ErrorResponse(BaseResponse):
     """
@@ -45,7 +47,9 @@ class UploadResponse(BaseResponse):
     file_size: Optional[int] = Field(None, description="Размер файла в байтах")
     image_format: Optional[str] = Field(None, description="Формат изображения")
     image_dimensions: Optional[Dict[str, int]] = Field(
-        None, description="Размеры изображения", json_schema_extra={"example": {"width": 1920, "height": 1080}}
+        None,
+        description="Размеры изображения",
+        json_schema_extra={"example": {"width": 1920, "height": 1080}},
     )
     processing_time: Optional[float] = Field(
         None, description="Время обработки в секундах"
@@ -151,7 +155,9 @@ class BatchEmbeddingResponse(BaseResponse):
 
     batch_id: str = Field(..., description="ID батча")
     total_images: int = Field(..., description="Общее количество изображений")
-    successful_embeddings: int = Field(..., description="Успешно обработанные эмбеддинги")
+    successful_embeddings: int = Field(
+        ..., description="Успешно обработанные эмбеддинги"
+    )
     failed_embeddings: int = Field(..., description="Неудачные попытки")
     processing_time: float = Field(..., description="Время обработки в секундах")
     results: List[Dict[str, Any]] = Field(
@@ -191,8 +197,10 @@ class AdvancedAntiSpoofingResponse(BaseResponse):
     confidence: float = Field(..., ge=0.0, le=1.0, description="Уровень уверенности")
     analysis_type: str = Field(..., description="Тип выполненного анализа")
     processing_time: float = Field(..., description="Время обработки в секундах")
-    anti_spoofing_score: float = Field(..., ge=0.0, le=1.0, description="Общая оценка anti-spoofing")
-    
+    anti_spoofing_score: float = Field(
+        ..., ge=0.0, le=1.0, description="Общая оценка anti-spoofing"
+    )
+
     # Результаты различных анализов
     depth_analysis: Optional[Dict[str, Any]] = Field(
         None, description="Результаты анализа глубины"
@@ -203,7 +211,7 @@ class AdvancedAntiSpoofingResponse(BaseResponse):
     certified_analysis: Optional[Dict[str, Any]] = Field(
         None, description="Результаты сертифицированной проверки"
     )
-    
+
     # Multi-turn reasoning
     reasoning_result: Optional[Dict[str, Any]] = Field(
         None, description="Результат multi-turn reasoning анализа"
@@ -211,20 +219,18 @@ class AdvancedAntiSpoofingResponse(BaseResponse):
     reasoning_summary: Optional[str] = Field(
         None, description="Краткое описание reasoning процесса"
     )
-    
+
     # Компонентные оценки
     component_scores: Optional[Dict[str, float]] = Field(
         None, description="Оценки отдельных компонентов анализа"
     )
-    
+
     # Сертификация
     certification_level: Optional[str] = Field(
         None, description="Уровень сертификации (basic, standard, premium)"
     )
-    certification_passed: bool = Field(
-        ..., description="Прошла ли сертификация"
-    )
-    
+    certification_passed: bool = Field(..., description="Прошла ли сертификация")
+
     face_detected: bool = Field(..., description="Обнаружено лицо на изображении")
     multiple_faces: bool = Field(..., description="Обнаружено несколько лиц")
     recommendations: Optional[List[str]] = Field(
@@ -240,18 +246,16 @@ class ChallengeResponse(BaseResponse):
     session_id: str = Field(..., description="ID сессии")
     challenge_type: str = Field(..., description="Тип челленджа")
     instruction: str = Field(..., description="Инструкция для пользователя")
-    expected_action: Optional[str] = Field(
-        None, description="Ожидаемое действие"
-    )
+    expected_action: Optional[str] = Field(None, description="Ожидаемое действие")
     response_detected: bool = Field(..., description="Обнаружен ответ на челлендж")
-    confidence: float = Field(..., ge=0.0, le=1.0, description="Уровень уверенности в ответе")
+    confidence: float = Field(
+        ..., ge=0.0, le=1.0, description="Уровень уверенности в ответе"
+    )
     response_analysis: Optional[Dict[str, Any]] = Field(
         None, description="Анализ ответа на челлендж"
     )
     processing_time: float = Field(..., description="Время обработки")
-    recommendations: Optional[List[str]] = Field(
-        None, description="Рекомендации"
-    )
+    recommendations: Optional[List[str]] = Field(None, description="Рекомендации")
 
 
 class ActiveLivenessResponse(BaseResponse):
@@ -264,7 +268,7 @@ class ActiveLivenessResponse(BaseResponse):
     liveness_detected: bool = Field(..., description="Обнаружены признаки живости")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Уровень уверенности")
     processing_time: float = Field(..., description="Время обработки в секундах")
-    
+
     # Специфичные данные для типа активной проверки
     blink_analysis: Optional[Dict[str, Any]] = Field(
         None, description="Анализ моргания (для blink challenge)"
@@ -278,7 +282,7 @@ class ActiveLivenessResponse(BaseResponse):
     challenge_response_analysis: Optional[Dict[str, Any]] = Field(
         None, description="Анализ challenge-response"
     )
-    
+
     # Общие результаты
     anti_spoofing_score: Optional[float] = Field(
         None, ge=0.0, le=1.0, description="Оценка anti-spoofing"
@@ -287,9 +291,7 @@ class ActiveLivenessResponse(BaseResponse):
     image_quality: Optional[float] = Field(
         None, ge=0.0, le=1.0, description="Качество изображения"
     )
-    recommendations: Optional[List[str]] = Field(
-        None, description="Рекомендации"
-    )
+    recommendations: Optional[List[str]] = Field(None, description="Рекомендации")
 
 
 class ReferenceResponse(BaseResponse):

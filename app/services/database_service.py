@@ -212,7 +212,9 @@ class BiometricService:
         """Try to get latest reference from Redis cache, fallback to DB and populate cache."""
         try:
             cache = CacheService()
-            cached = await cache.get(f"{settings.CACHE_KEY_PREFIX}user:{user_id}:reference:latest")
+            cached = await cache.get(
+                f"{settings.CACHE_KEY_PREFIX}user:{user_id}:reference:latest"
+            )
             if cached:
                 # ✅ Кешируем только ID, загружаем полный объект из DB
                 ref_id = cached.get("id")
@@ -328,9 +330,10 @@ class BiometricService:
         """Создание записи о верификации с сохранением threshold_used."""
         # Создаём сессию верификации
         import uuid
+
         session_id = str(uuid.uuid4())
         expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
-        
+
         session = await VerificationSessionCRUD.create_session(
             self.db,
             user_id=user_id,
@@ -365,9 +368,7 @@ class BiometricService:
             return None
 
         total_sessions = await self.db.scalar(
-            select(func.count()).where(
-                VerificationSession.user_id == user_id
-            )
+            select(func.count()).where(VerificationSession.user_id == user_id)
         )
 
         successful_sessions = await self.db.scalar(
@@ -392,8 +393,7 @@ class BiometricService:
             "total_sessions": total_sessions,
             "successful_verifications": successful_sessions,
             "success_rate": (
-                successful_sessions / total_sessions
-                if total_sessions else 0
+                successful_sessions / total_sessions if total_sessions else 0
             ),
         }
 
@@ -421,8 +421,7 @@ class BiometricService:
             "total_sessions": total_sessions,
             "successful_sessions": successful_sessions,
             "success_rate": (
-                successful_sessions / total_sessions
-                if total_sessions else 0
+                successful_sessions / total_sessions if total_sessions else 0
             ),
             "timestamp": datetime.now(timezone.utc),
         }
@@ -437,10 +436,9 @@ class BiometricService:
     async def get_user(self, user_id: str) -> Optional[User]:
         return await UserCRUD.get_user(self.db, user_id)
 
-
-# =========================================================================
-# Admin Statistics Methods (for admin routes)
-# =========================================================================
+    # =========================================================================
+    # Admin Statistics Methods (for admin routes)
+    # =========================================================================
 
     async def get_total_requests_count(
         self,
@@ -479,10 +477,12 @@ class BiometricService:
         """Get failed requests count for period."""
         result = await self.db.scalar(
             select(func.count()).where(
-                VerificationSession.status.in_([
-                    VerificationStatus.FAILED,
-                    VerificationStatus.ERROR,
-                ]),
+                VerificationSession.status.in_(
+                    [
+                        VerificationStatus.FAILED,
+                        VerificationStatus.ERROR,
+                    ]
+                ),
                 VerificationSession.created_at >= date_from,
                 VerificationSession.created_at <= date_to,
             )
@@ -511,32 +511,43 @@ class BiometricService:
         date_to: datetime,
     ) -> Dict[str, Any]:
         """Get verification statistics for period."""
-        total = await self.db.scalar(
-            select(func.count()).where(
-                VerificationSession.created_at >= date_from,
-                VerificationSession.created_at <= date_to,
+        total = (
+            await self.db.scalar(
+                select(func.count()).where(
+                    VerificationSession.created_at >= date_from,
+                    VerificationSession.created_at <= date_to,
+                )
             )
-        ) or 0
+            or 0
+        )
 
-        successful = await self.db.scalar(
-            select(func.count()).where(
-                VerificationSession.status == VerificationStatus.SUCCESS,
-                VerificationSession.is_match.is_(True),
-                VerificationSession.created_at >= date_from,
-                VerificationSession.created_at <= date_to,
+        successful = (
+            await self.db.scalar(
+                select(func.count()).where(
+                    VerificationSession.status == VerificationStatus.SUCCESS,
+                    VerificationSession.is_match.is_(True),
+                    VerificationSession.created_at >= date_from,
+                    VerificationSession.created_at <= date_to,
+                )
             )
-        ) or 0
+            or 0
+        )
 
-        failed = await self.db.scalar(
-            select(func.count()).where(
-                VerificationSession.status.in_([
-                    VerificationStatus.FAILED,
-                    VerificationStatus.ERROR,
-                ]),
-                VerificationSession.created_at >= date_from,
-                VerificationSession.created_at <= date_to,
+        failed = (
+            await self.db.scalar(
+                select(func.count()).where(
+                    VerificationSession.status.in_(
+                        [
+                            VerificationStatus.FAILED,
+                            VerificationStatus.ERROR,
+                        ]
+                    ),
+                    VerificationSession.created_at >= date_from,
+                    VerificationSession.created_at <= date_to,
+                )
             )
-        ) or 0
+            or 0
+        )
 
         avg_similarity = await self.db.scalar(
             select(func.avg(VerificationSession.similarity_score)).where(
@@ -560,29 +571,38 @@ class BiometricService:
         date_to: datetime,
     ) -> Dict[str, Any]:
         """Get liveness check statistics for period."""
-        total = await self.db.scalar(
-            select(func.count()).where(
-                VerificationSession.is_liveness_passed.isnot(None),
-                VerificationSession.created_at >= date_from,
-                VerificationSession.created_at <= date_to,
+        total = (
+            await self.db.scalar(
+                select(func.count()).where(
+                    VerificationSession.is_liveness_passed.isnot(None),
+                    VerificationSession.created_at >= date_from,
+                    VerificationSession.created_at <= date_to,
+                )
             )
-        ) or 0
+            or 0
+        )
 
-        passed = await self.db.scalar(
-            select(func.count()).where(
-                VerificationSession.is_liveness_passed.is_(True),
-                VerificationSession.created_at >= date_from,
-                VerificationSession.created_at <= date_to,
+        passed = (
+            await self.db.scalar(
+                select(func.count()).where(
+                    VerificationSession.is_liveness_passed.is_(True),
+                    VerificationSession.created_at >= date_from,
+                    VerificationSession.created_at <= date_to,
+                )
             )
-        ) or 0
+            or 0
+        )
 
-        failed = await self.db.scalar(
-            select(func.count()).where(
-                VerificationSession.is_liveness_passed.is_(False),
-                VerificationSession.created_at >= date_from,
-                VerificationSession.created_at <= date_to,
+        failed = (
+            await self.db.scalar(
+                select(func.count()).where(
+                    VerificationSession.is_liveness_passed.is_(False),
+                    VerificationSession.created_at >= date_from,
+                    VerificationSession.created_at <= date_to,
+                )
             )
-        ) or 0
+            or 0
+        )
 
         avg_score = await self.db.scalar(
             select(func.avg(VerificationSession.liveness_score)).where(
@@ -608,20 +628,25 @@ class BiometricService:
         """Get user statistics for period."""
         total = await self.db.scalar(select(func.count()).select_from(User))
 
-        new_users = await self.db.scalar(
-            select(func.count()).where(
-                User.created_at >= date_from,
-                User.created_at <= date_to,
+        new_users = (
+            await self.db.scalar(
+                select(func.count()).where(
+                    User.created_at >= date_from,
+                    User.created_at <= date_to,
+                )
             )
-        ) or 0
+            or 0
+        )
 
-        active_users = await self.db.scalar(
-            select(func.count()).where(User.is_active.is_(True))
-        ) or 0
+        active_users = (
+            await self.db.scalar(select(func.count()).where(User.is_active.is_(True)))
+            or 0
+        )
 
-        verified_users = await self.db.scalar(
-            select(func.count()).where(User.is_verified.is_(True))
-        ) or 0
+        verified_users = (
+            await self.db.scalar(select(func.count()).where(User.is_verified.is_(True)))
+            or 0
+        )
 
         return {
             "total_users": total,
@@ -686,9 +711,12 @@ class BiometricService:
         """Get user by ID (alias for admin routes)."""
         return await UserCRUD.get_user(self.db, user_id)
 
-    async def update_user(self, user_id: str, user_data: Dict[str, Any]) -> Optional[User]:
+    async def update_user(
+        self, user_id: str, user_data: Dict[str, Any]
+    ) -> Optional[User]:
         """Update user (for admin routes)."""
         from app.models.user import UserUpdate
+
         user_update = UserUpdate(**user_data)
         return await UserCRUD.update_user(self.db, user_id, user_update)
 
@@ -838,10 +866,10 @@ class BiometricService:
             conditions.append(AuditLog.created_at <= date_to)
         if conditions:
             query = query.where(and_(*conditions))
-        
+
         # Сортировка и лимит
         query = query.order_by(AuditLog.created_at.desc()).limit(limit)
-        
+
         result = await self.db.execute(query)
         logs = result.scalars().all()
 

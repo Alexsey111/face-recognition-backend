@@ -41,8 +41,8 @@ class EncryptionService:
     SUPPORTED_VERSION = "2.0"
     ALGORITHM = "aes-256-gcm"
     NONCE_LENGTH = 12  # GCM recommended nonce size
-    KEY_LENGTH = 32    # AES-256 requires 32-byte key
-    TAG_LENGTH = 16    # GCM authentication tag length
+    KEY_LENGTH = 32  # AES-256 requires 32-byte key
+    TAG_LENGTH = 16  # GCM authentication tag length
 
     def __init__(self) -> None:
         self._key = self._derive_key(settings.ENCRYPTION_KEY)
@@ -62,7 +62,7 @@ class EncryptionService:
             # Check for empty key
             if not key or not key.strip():
                 raise EncryptionError("Encryption key cannot be empty")
-                
+
             # If the key is already 32 bytes, use it directly
             key_bytes = key.encode("utf-8")
             if len(key_bytes) == self.KEY_LENGTH:
@@ -83,7 +83,7 @@ class EncryptionService:
                 length=self.KEY_LENGTH,
                 salt=salt,
                 iterations=480000,  # OWASP recommended minimum
-                backend=default_backend()
+                backend=default_backend(),
             )
             return kdf.derive(key_bytes)
 
@@ -119,7 +119,9 @@ class EncryptionService:
     # Payload packing (no encryption here)
     # =========================================================================
 
-    def _pack_payload(self, data: bytes, metadata: Optional[Dict[str, Any]], version: str) -> bytes:
+    def _pack_payload(
+        self, data: bytes, metadata: Optional[Dict[str, Any]], version: str
+    ) -> bytes:
         """
         Pack data into JSON payload (WITHOUT nonce).
         """
@@ -158,10 +160,15 @@ class EncryptionService:
     # Public API
     # =========================================================================
 
-    async def encrypt(self, data: bytes, metadata: Optional[Dict[str, Any]] = None, version: str = SUPPORTED_VERSION) -> bytes:
+    async def encrypt(
+        self,
+        data: bytes,
+        metadata: Optional[Dict[str, Any]] = None,
+        version: str = SUPPORTED_VERSION,
+    ) -> bytes:
         """
         Encrypt data using AES-256-GCM.
-        
+
         Returns: nonce (12 bytes) + encrypted_payload
         """
         if data is None:
@@ -178,7 +185,7 @@ class EncryptionService:
             encrypted = await asyncio.to_thread(
                 self._aesgcm.encrypt, nonce, payload_bytes, None
             )
-            
+
             # 4. Return: nonce + encrypted_payload
             return nonce + encrypted
         except Exception as exc:
@@ -187,7 +194,7 @@ class EncryptionService:
     async def decrypt(self, token: bytes) -> Tuple[bytes, Dict[str, Any]]:
         """
         Decrypt data using AES-256-GCM.
-        
+
         Token format: nonce (12 bytes) + encrypted_data
         """
         if not token:
@@ -198,8 +205,8 @@ class EncryptionService:
 
         try:
             # 1. Extract nonce and encrypted data
-            nonce = token[:self.NONCE_LENGTH]
-            encrypted_data = token[self.NONCE_LENGTH:]
+            nonce = token[: self.NONCE_LENGTH]
+            encrypted_data = token[self.NONCE_LENGTH :]
 
             # 2. Decrypt payload
             decrypted_bytes = await asyncio.to_thread(
@@ -223,7 +230,9 @@ class EncryptionService:
         data, _ = await self.decrypt(encrypted_embedding)
         return data
 
-    async def encrypt_data(self, data: bytes, metadata: Optional[Dict[str, Any]] = None) -> bytes:
+    async def encrypt_data(
+        self, data: bytes, metadata: Optional[Dict[str, Any]] = None
+    ) -> bytes:
         """Compatibility wrapper used by tests and other services."""
         return await self.encrypt(data, metadata)
 
@@ -240,22 +249,22 @@ class EncryptionService:
         def _read_encrypted():
             with open(encrypted_path, "rb") as f:
                 return f.read()
-        
+
         token = await asyncio.to_thread(_read_encrypted)
-        
+
         data, meta = await self.decrypt(token)
-        
+
         if not output_path:
             # Извлекаем имя файла из metadata, если есть
             output_path = meta.get("meta", {}).get("filename", encrypted_path + ".dec")
-        
+
         # Запись расшифрованного файла — в отдельный поток
         def _write_decrypted():
             with open(output_path, "wb") as f:
                 f.write(data)
-        
+
         await asyncio.to_thread(_write_decrypted)
-        
+
         logger.info("File decrypted: %s -> %s", encrypted_path, output_path)
         return output_path
 

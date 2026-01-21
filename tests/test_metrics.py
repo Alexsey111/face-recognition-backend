@@ -1,4 +1,5 @@
 """Tests for metrics middleware."""
+
 import time
 from unittest.mock import patch, MagicMock
 from contextlib import contextmanager
@@ -29,7 +30,11 @@ class TestPrometheusAvailability:
 
     def test_prometheus_available_flag_exists(self):
         """PROMETHEUS_AVAILABLE flag should exist."""
-        assert hasattr(PROMETHEUS_AVAILABLE, "__bool__") or PROMETHEUS_AVAILABLE is None or isinstance(PROMETHEUS_AVAILABLE, bool)
+        assert (
+            hasattr(PROMETHEUS_AVAILABLE, "__bool__")
+            or PROMETHEUS_AVAILABLE is None
+            or isinstance(PROMETHEUS_AVAILABLE, bool)
+        )
 
 
 class TestRecordVerification:
@@ -150,7 +155,12 @@ class TestRecordBusinessError:
 
     def test_record_business_error_with_different_types(self):
         """Should record different business error types."""
-        for error_type in ["validation_error", "processing_error", "auth_error", "not_found"]:
+        for error_type in [
+            "validation_error",
+            "processing_error",
+            "auth_error",
+            "not_found",
+        ]:
             record_business_error(error_type)
 
 
@@ -206,7 +216,12 @@ class TestTrackProcessing:
 
     def test_track_processing_different_operations(self):
         """Should track different operation types."""
-        for operation in ["admin_stats", "admin_audit_logs", "admin_health", "admin_errors"]:
+        for operation in [
+            "admin_stats",
+            "admin_audit_logs",
+            "admin_health",
+            "admin_errors",
+        ]:
             with track_processing(operation):
                 time.sleep(0.001)
 
@@ -252,7 +267,14 @@ class TestMetricsMiddleware:
         """Should skip metrics for health endpoints."""
         middleware = MetricsMiddleware(app=MagicMock())
 
-        skipped_paths = ["/health", "/ready", "/live", "/status", "/metrics", "/favicon.ico"]
+        skipped_paths = [
+            "/health",
+            "/ready",
+            "/live",
+            "/status",
+            "/metrics",
+            "/favicon.ico",
+        ]
         for path in skipped_paths:
             assert path in middleware.SKIP_PATHS
 

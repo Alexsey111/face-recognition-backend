@@ -17,15 +17,23 @@ class _DBManagerProxy:
     def __getattr__(self, item):
         return getattr(_database.db_manager, item)
 
+
 db_manager = _DBManagerProxy()
 
 # Все модели
 from .models import (
-    User, Reference, VerificationSession,
-    AuditLog, SystemConfig, ApiKey,
-    WebhookConfig, WebhookLog,
-    VerificationStatus, ActionType,
-    WebhookEventType, WebhookStatus
+    User,
+    Reference,
+    VerificationSession,
+    AuditLog,
+    SystemConfig,
+    ApiKey,
+    WebhookConfig,
+    WebhookLog,
+    VerificationStatus,
+    ActionType,
+    WebhookEventType,
+    WebhookStatus,
 )
 
 # CRUD-классы (самые часто используемые)
@@ -42,7 +50,6 @@ __all__ = [
     "Base",
     "db_manager",
     "get_db",
-
     # Модели
     "User",
     "Reference",
@@ -56,7 +63,6 @@ __all__ = [
     "ActionType",
     "WebhookEventType",
     "WebhookStatus",
-
     # CRUD
     "UserCRUD",
     "ReferenceCRUD",

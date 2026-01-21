@@ -41,42 +41,50 @@ class BaseAppException(Exception):
 
 class EncryptionError(Exception):
     """Encryption/Decryption errors"""
+
     pass
 
 
 class UnauthorizedError(Exception):
     """401 Unauthorized"""
+
     pass
 
 
 class ForbiddenError(Exception):
     """403 Forbidden"""
+
     pass
 
 
 class ValidationError(Exception):
     """Validation errors"""
+
     pass
 
 
 class AuthenticationError(Exception):
     """General authentication errors"""
+
     pass
 
 
 # Дополнительные исключения для полноты
 class NotFoundError(BaseAppException):
     """Resource not found (404)"""
+
     pass
 
 
 class ConflictError(BaseAppException):
     """Resource conflict (409)"""
+
     pass
 
 
 class DatabaseError(BaseAppException):
     """Database operation errors"""
+
     pass
 
 

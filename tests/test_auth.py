@@ -43,7 +43,7 @@ class TestAuthService:
     # =============================================================================
     # SYNC METHOD TESTS (no await)
     # =============================================================================
-    
+
     def test_create_access_token_success(self, auth_service, test_user_id, test_role):
         """Test sync: successful access token creation (no await)."""
         token = auth_service.create_access_token(test_user_id, test_role)
@@ -53,7 +53,9 @@ class TestAuthService:
         assert len(token) > 0
 
         # Decode token to verify contents
-        payload = jwt.decode(token, auth_service.jwt_secret_key, algorithms=[auth_service.jwt_algorithm])
+        payload = jwt.decode(
+            token, auth_service.jwt_secret_key, algorithms=[auth_service.jwt_algorithm]
+        )
 
         assert payload["user_id"] == test_user_id
         assert payload["role"] == test_role
@@ -68,17 +70,25 @@ class TestAuthService:
 
         token = auth_service.create_access_token(test_user_id, permissions=permissions)
 
-        payload = jwt.decode(token, auth_service.jwt_secret_key, algorithms=[auth_service.jwt_algorithm])
+        payload = jwt.decode(
+            token, auth_service.jwt_secret_key, algorithms=[auth_service.jwt_algorithm]
+        )
 
         assert payload["permissions"] == permissions
 
-    def test_create_access_token_with_additional_claims(self, auth_service, test_user_id):
+    def test_create_access_token_with_additional_claims(
+        self, auth_service, test_user_id
+    ):
         """Test sync: access token creation with additional claims (no await)."""
         additional_claims = {"tenant_id": "tenant-123", "scope": "admin"}
 
-        token = auth_service.create_access_token(test_user_id, additional_claims=additional_claims)
+        token = auth_service.create_access_token(
+            test_user_id, additional_claims=additional_claims
+        )
 
-        payload = jwt.decode(token, auth_service.jwt_secret_key, algorithms=[auth_service.jwt_algorithm])
+        payload = jwt.decode(
+            token, auth_service.jwt_secret_key, algorithms=[auth_service.jwt_algorithm]
+        )
 
         assert payload["tenant_id"] == "tenant-123"
         assert payload["scope"] == "admin"
@@ -91,7 +101,9 @@ class TestAuthService:
         assert isinstance(token, str)
         assert len(token) > 0
 
-        payload = jwt.decode(token, auth_service.jwt_secret_key, algorithms=[auth_service.jwt_algorithm])
+        payload = jwt.decode(
+            token, auth_service.jwt_secret_key, algorithms=[auth_service.jwt_algorithm]
+        )
 
         assert payload["user_id"] == test_user_id
         assert payload["type"] == "refresh"
@@ -113,7 +125,7 @@ class TestAuthService:
             "admin", ["read", "write", "delete", "admin"]
         )
         assert result is True
-        
+
     def test_validate_user_permissions_user_role(self, auth_service):
         """Test sync: permission validation for user role (no await)."""
         result = auth_service.validate_user_permissions("user", ["read_own_data"])
@@ -130,12 +142,17 @@ class TestAuthService:
         """Test sync: permission validation with explicit user permissions (no await)."""
         user_permissions = ["read", "write"]
 
-        result = auth_service.validate_user_permissions("user", ["read"], user_permissions)
+        result = auth_service.validate_user_permissions(
+            "user", ["read"], user_permissions
+        )
         assert result is True
 
         from app.utils.exceptions import ForbiddenError
+
         with pytest.raises(ForbiddenError):
-            auth_service.validate_user_permissions("user", ["read", "write", "delete"], user_permissions)
+            auth_service.validate_user_permissions(
+                "user", ["read", "write", "delete"], user_permissions
+            )
 
     def test_needs_password_rehash_bcrypt(self, auth_service):
         """Test sync: check if bcrypt password needs rehash (no await)."""
@@ -167,10 +184,10 @@ class TestAuthService:
                 "type": "access",
                 "role": "user",
                 "iat": datetime.now(timezone.utc),
-                "exp": datetime.now(timezone.utc) + timedelta(hours=1)
+                "exp": datetime.now(timezone.utc) + timedelta(hours=1),
             },
             auth_service.jwt_secret_key,
-            algorithm=auth_service.jwt_algorithm
+            algorithm=auth_service.jwt_algorithm,
         )
 
         token_info = auth_service.get_token_info(token)
@@ -194,7 +211,9 @@ class TestAuthService:
         user_agent = "test-browser"
         ip_address = "127.0.0.1"
 
-        session = await auth_service.create_user_session(test_user_id, user_agent, ip_address)
+        session = await auth_service.create_user_session(
+            test_user_id, user_agent, ip_address
+        )
 
         assert "access_token" in session
         assert "refresh_token" in session
@@ -206,7 +225,7 @@ class TestAuthService:
     # =============================================================================
     # ASYNC METHOD TESTS (with await)
     # =============================================================================
-    
+
     @pytest.mark.asyncio
     async def test_verify_valid_access_token(self, auth_service, test_user_id):
         """Test async: verify valid access token (with await)."""
@@ -235,7 +254,7 @@ class TestAuthService:
             "type": "access",
             "exp": expire,
             "iat": datetime.now(timezone.utc),
-            "jti": "test-jti"
+            "jti": "test-jti",
         }
 
         expired_token = jwt.encode(
@@ -243,6 +262,7 @@ class TestAuthService:
         )
 
         from app.utils.exceptions import UnauthorizedError
+
         with pytest.raises(UnauthorizedError, match="Token has expired"):
             await auth_service.verify_token(expired_token, "access")
 
@@ -252,6 +272,7 @@ class TestAuthService:
         token = auth_service.create_access_token(test_user_id)  # sync
 
         from app.utils.exceptions import UnauthorizedError
+
         with pytest.raises(UnauthorizedError, match="Invalid token type"):
             await auth_service.verify_token(token, "refresh")
 
@@ -274,6 +295,7 @@ class TestAuthService:
     async def test_refresh_access_token_invalid(self, auth_service):
         """Test async: refresh with invalid token (with await)."""
         from app.utils.exceptions import UnauthorizedError
+
         with pytest.raises(UnauthorizedError):
             await auth_service.refresh_access_token("invalid_token")
 
@@ -330,7 +352,9 @@ class TestAuthService:
 
         password = "test_password_123"
         salt = secrets.token_bytes(32)
-        password_hash = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 100000)
+        password_hash = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), salt, 100000
+        )
         legacy_hash = (salt + password_hash).hex()
 
         is_valid = await auth_service.verify_password(password, legacy_hash)
@@ -346,7 +370,9 @@ class TestAuthService:
 
         password = "migration_test_password"
         salt = secrets.token_bytes(32)
-        password_hash = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, 100000)
+        password_hash = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), salt, 100000
+        )
         old_hash = (salt + password_hash).hex()
 
         assert await auth_service.verify_password(password, old_hash) is True
@@ -421,6 +447,7 @@ class TestAuthServiceSecurity:
         )
 
         from app.utils.exceptions import UnauthorizedError
+
         with pytest.raises(UnauthorizedError):
             await auth_service.verify_token(tampered_token, "access")
 
@@ -440,7 +467,10 @@ class TestAuthServiceSecurity:
 
         assert await auth_service.verify_password(password, hashed_password)
         assert await auth_service.verify_password(password, hash2)
-        assert await auth_service.verify_password("wrong_password", hashed_password) is False
+        assert (
+            await auth_service.verify_password("wrong_password", hashed_password)
+            is False
+        )
         assert await auth_service.verify_password("wrong_password", hash2) is False
 
     def test_jwt_algorithm_security(self, auth_service):
@@ -472,7 +502,9 @@ class TestAuthServiceSecurity:
             user_id, role="user", permissions=["read_own_data"]
         )
 
-        payload = jwt.decode(token, auth_service.jwt_secret_key, algorithms=[auth_service.jwt_algorithm])
+        payload = jwt.decode(
+            token, auth_service.jwt_secret_key, algorithms=[auth_service.jwt_algorithm]
+        )
 
         assert payload["role"] == "user"
         assert "admin" not in payload.get("permissions", [])

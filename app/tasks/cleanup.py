@@ -64,10 +64,10 @@ class CleanupTasks:
             files = await storage.list_files(prefix="uploads/", limit=1000)
             deleted_count = 0
             for file_info in files:
-                last_modified = file_info.get('last_modified')
+                last_modified = file_info.get("last_modified")
                 if last_modified and last_modified < cutoff_date:
                     try:
-                        await storage.delete_image(file_info['key'])
+                        await storage.delete_image(file_info["key"])
                         deleted_count += 1
                     except Exception as e:
                         logger.error(f"Failed to delete file {file_info['key']}: {e}")
@@ -97,16 +97,12 @@ class CleanupTasks:
                 )
                 await db.commit()
 
-                logger.info(
-                    "Cleanup: removed %s old verification sessions", deleted
-                )
+                logger.info("Cleanup: removed %s old verification sessions", deleted)
                 return deleted
 
             except Exception:
                 await db.rollback()
-                logger.exception(
-                    "cleanup_old_verification_sessions failed"
-                )
+                logger.exception("cleanup_old_verification_sessions failed")
                 return 0
 
     # ------------------------------------------------------------------
@@ -123,9 +119,7 @@ class CleanupTasks:
                 )
                 await db.commit()
 
-                logger.info(
-                    "Cleanup: removed %s old audit log records", deleted
-                )
+                logger.info("Cleanup: removed %s old audit log records", deleted)
                 return deleted
 
             except Exception:
@@ -141,7 +135,7 @@ class CleanupTasks:
         return {
             "timestamp": utcnow().isoformat(),
             "message": "Cleanup handled automatically by Redis TTL and S3 lifecycle rules",
-            "note": "Manual cleanup tasks are minimized. Use run_full_cleanup() for on-demand cleanup."
+            "note": "Manual cleanup tasks are minimized. Use run_full_cleanup() for on-demand cleanup.",
         }
 
     # ------------------------------------------------------------------

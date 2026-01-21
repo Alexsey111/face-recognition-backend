@@ -22,6 +22,7 @@ logger = get_logger(__name__)
 # Hashing / Tokens
 # ==========================================================
 
+
 class SecurityHash:
     """Утилиты для создания безопасных хешей."""
 
@@ -35,9 +36,7 @@ class SecurityHash:
 
         try:
             return hmac.new(
-                secret_key.encode(),
-                data.encode(),
-                hashlib.sha256
+                secret_key.encode(), data.encode(), hashlib.sha256
             ).hexdigest()
         except Exception as exc:
             logger.exception("Failed to generate secure hash")
@@ -57,6 +56,7 @@ class SecurityHash:
 # ==========================================================
 # CORS
 # ==========================================================
+
 
 class CORSConfig:
     """Конфигурация CORS для FastAPI."""
@@ -103,6 +103,7 @@ class CORSConfig:
 # Security Headers
 # ==========================================================
 
+
 class SecurityHeaders:
     """Security headers для HTTP ответов."""
 
@@ -139,16 +140,19 @@ class SecurityHeaders:
     @staticmethod
     def api_headers() -> Dict[str, str]:
         headers = SecurityHeaders.base_headers()
-        headers.update({
-            "X-Robots-Tag": "noindex, nofollow",
-            "API-Version": "v1",
-        })
+        headers.update(
+            {
+                "X-Robots-Tag": "noindex, nofollow",
+                "API-Version": "v1",
+            }
+        )
         return headers
 
 
 # ==========================================================
 # Rate limiting
 # ==========================================================
+
 
 class RateLimitConfig:
     """Конфигурация rate limiting."""
@@ -164,15 +168,28 @@ class RateLimitConfig:
     @staticmethod
     def per_endpoint() -> Dict[str, Dict[str, Any]]:
         return {
-            "/api/v1/auth/login": {"requests_per_minute": 5, "burst_size": 2, "block_duration": 900},
-            "/api/v1/auth/register": {"requests_per_minute": 3, "burst_size": 1, "block_duration": 1800},
-            "/api/v1/auth/refresh": {"requests_per_minute": 10, "burst_size": 3, "block_duration": 300},
+            "/api/v1/auth/login": {
+                "requests_per_minute": 5,
+                "burst_size": 2,
+                "block_duration": 900,
+            },
+            "/api/v1/auth/register": {
+                "requests_per_minute": 3,
+                "burst_size": 1,
+                "block_duration": 1800,
+            },
+            "/api/v1/auth/refresh": {
+                "requests_per_minute": 10,
+                "burst_size": 3,
+                "block_duration": 300,
+            },
         }
 
 
 # ==========================================================
 # Input Sanitization
 # ==========================================================
+
 
 class InputSanitizer:
     """Санитизация входных данных."""
@@ -198,7 +215,7 @@ class InputSanitizer:
 
         if len(filename) > 255:
             name, ext = os.path.splitext(filename)
-            filename = name[:250 - len(ext)] + ext
+            filename = name[: 250 - len(ext)] + ext
 
         return filename
 
@@ -206,6 +223,7 @@ class InputSanitizer:
 # ==========================================================
 # Utilities
 # ==========================================================
+
 
 class SecurityUtils:
     """Общие утилиты безопасности."""

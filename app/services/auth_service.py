@@ -20,10 +20,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..config import settings
 from ..utils.logger import get_logger
 from ..utils.exceptions import (
-    UnauthorizedError, 
-    ForbiddenError, 
+    UnauthorizedError,
+    ForbiddenError,
     ValidationError,
-    AuthenticationError
+    AuthenticationError,
 )
 from ..services.encryption_service import EncryptionService
 from ..services.database_service import BiometricService
@@ -33,17 +33,18 @@ from ..middleware.metrics import record_auth, record_token
 # Redis integration for token revocation
 try:
     from redis import asyncio as aioredis
+
     REDIS_AVAILABLE = True
 except ImportError:
     REDIS_AVAILABLE = False
 
 # Prometheus metrics
 auth_service_duration = Histogram(
-    'auth_service_duration_seconds',
-    'Time spent in AuthService methods'
+    "auth_service_duration_seconds", "Time spent in AuthService methods"
 )
 
 logger = get_logger(__name__)
+
 
 class AuthService:
     """
@@ -79,37 +80,41 @@ class AuthService:
 
         # ✅ Use shared pwd_context
         self.pwd_context = AuthService._pwd_context
-        
+
         # JWT settings
         self.jwt_secret_key = settings.JWT_SECRET_KEY
         self.jwt_algorithm = settings.JWT_ALGORITHM
         self.access_token_expire_minutes = settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES
         self.refresh_token_expire_days = settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS
         self.encryption_service = EncryptionService()
-        
+
         # ✅ Shared Redis connection
         self.redis = AuthService._redis_pool
 
         # Rate limiting for login attempts
         self.login_attempts = defaultdict(list)
-        
+
         # Rate limit failure policy
         self.rate_limit_failure_policy = settings.rate_limit_on_redis_failure.lower()
-        
+
         policy_messages = {
             "block": "BLOCK — all logins will be blocked if Redis is unavailable (highest security)",
             "allow": "ALLOW — logins permitted if Redis is unavailable (highest availability)",
             "error": "ERROR — return 503 Service Unavailable if Redis is unavailable",
         }
-        
+
         if self.rate_limit_failure_policy not in policy_messages:
-            logger.warning(f"Invalid rate_limit_on_redis_failure value: {settings.rate_limit_on_redis_failure}...")
+            logger.warning(
+                f"Invalid rate_limit_on_redis_failure value: {settings.rate_limit_on_redis_failure}..."
+            )
             self.rate_limit_failure_policy = "block"
-        
+
         message = policy_messages[self.rate_limit_failure_policy]
-        log_level = logger.warning if self.rate_limit_failure_policy == "allow" else logger.info
+        log_level = (
+            logger.warning if self.rate_limit_failure_policy == "allow" else logger.info
+        )
         log_level(f"Rate limit on Redis failure policy: {message}")
-        
+
         # In-memory fallback storage for revoked tokens
         self._initialize_memory_storage()
 
@@ -137,11 +142,11 @@ class AuthService:
                 cls._redis_pool = None
 
     def create_access_token(
-        self, 
-        user_id: str, 
+        self,
+        user_id: str,
         role: str = "user",
         permissions: List[str] = None,
-        additional_claims: Dict[str, Any] = None
+        additional_claims: Dict[str, Any] = None,
     ) -> str:
         """
         Создание access токена.
@@ -159,10 +164,10 @@ class AuthService:
             expire = datetime.now(timezone.utc) + timedelta(
                 minutes=self.access_token_expire_minutes
             )
-            
+
             # Уникальный идентификатор токена
             jti = str(uuid4())
-            
+
             payload = {
                 "user_id": user_id,
                 "role": role,
@@ -172,24 +177,22 @@ class AuthService:
                 "iat": datetime.now(timezone.utc),
                 "jti": jti,
             }
-            
+
             # Добавляем дополнительные claims
             if additional_claims:
                 payload.update(additional_claims)
-            
+
             token = jwt.encode(
-                payload, 
-                self.jwt_secret_key, 
-                algorithm=self.jwt_algorithm
+                payload, self.jwt_secret_key, algorithm=self.jwt_algorithm
             )
-            
+
             logger.info(f"Access token created for user {user_id}")
 
             # Запись метрики токена
             record_token("access")
 
             return token
-            
+
         except Exception as e:
             logger.error(f"Error creating access token: {str(e)}")
             raise AuthenticationError(f"Failed to create access token: {str(e)}")
@@ -208,9 +211,9 @@ class AuthService:
             expire = datetime.now(timezone.utc) + timedelta(
                 days=self.refresh_token_expire_days
             )
-            
+
             jti = str(uuid4())
-            
+
             payload = {
                 "user_id": user_id,
                 "type": "refresh",
@@ -218,21 +221,21 @@ class AuthService:
                 "iat": datetime.now(timezone.utc),
                 "jti": jti,
             }
-            
+
             token = jwt.encode(
-                payload,
-                self.jwt_secret_key,
-                algorithm=self.jwt_algorithm
+                payload, self.jwt_secret_key, algorithm=self.jwt_algorithm
             )
-            
+
             logger.info(f"Refresh token created for user {user_id}")
             return token
-            
+
         except Exception as e:
             logger.error(f"Error creating refresh token: {str(e)}")
             raise AuthenticationError(f"Failed to create refresh token: {str(e)}")
 
-    async def verify_token(self, token: str, token_type: str = "access") -> Dict[str, Any]:
+    async def verify_token(
+        self, token: str, token_type: str = "access"
+    ) -> Dict[str, Any]:
         """
         Верификация токена (async: needs Redis I/O for revocation check).
 
@@ -248,26 +251,28 @@ class AuthService:
         """
         try:
             payload = jwt.decode(
-                token, 
-                self.jwt_secret_key, 
-                algorithms=[self.jwt_algorithm]
+                token, self.jwt_secret_key, algorithms=[self.jwt_algorithm]
             )
-            
+
             # Проверяем тип токена
             if payload.get("type") != token_type:
                 raise UnauthorizedError(f"Invalid token type. Expected {token_type}")
-            
+
             # Проверяем срок действия
             exp = payload.get("exp")
-            if exp and datetime.fromtimestamp(exp, tz=timezone.utc) < datetime.now(timezone.utc):
+            if exp and datetime.fromtimestamp(exp, tz=timezone.utc) < datetime.now(
+                timezone.utc
+            ):
                 raise UnauthorizedError("Token has expired")
-            
+
             # Проверяем, не отозван ли токен (Redis I/O)
             jti = payload.get("jti")
             if jti and await self.is_token_revoked(jti):
                 raise UnauthorizedError("Token has been revoked")
 
-            logger.debug(f"Token verified successfully for user {payload.get('user_id')}")
+            logger.debug(
+                f"Token verified successfully for user {payload.get('user_id')}"
+            )
 
             # Запись метрики успешной верификации
             record_auth(result="success", method="jwt")
@@ -285,7 +290,7 @@ class AuthService:
     async def refresh_access_token(self, refresh_token: str) -> Dict[str, str]:
         """
         Обновление access токена с помощью refresh токена (с rotation).
-        
+
         Возвращает НОВЫЕ access и refresh токены, а старый refresh токен отзывает.
         Это критически важно для безопасности.
 
@@ -301,27 +306,27 @@ class AuthService:
         try:
             # Верифицируем refresh токен (async: needs Redis check)
             payload = await self.verify_token(refresh_token, "refresh")
-            
+
             user_id = payload.get("user_id")
             if not user_id:
                 raise UnauthorizedError("Invalid refresh token payload")
-            
+
             # Создаём новые токены (sync: fast CPU)
             new_access_token = self.create_access_token(user_id)
             new_refresh_token = self.create_refresh_token(user_id)
 
             # Отзываем старый refresh токен (async: Redis I/O)
             await self.revoke_token(refresh_token, "refresh")
-            
+
             logger.info(f"Token rotation completed for user {user_id}")
-            
+
             return {
                 "access_token": new_access_token,
                 "refresh_token": new_refresh_token,
                 "token_type": "bearer",
-                "expires_in": self.access_token_expire_minutes * 60
+                "expires_in": self.access_token_expire_minutes * 60,
             }
-            
+
         except Exception as e:
             logger.error(f"Error refreshing access token: {str(e)}")
             raise
@@ -334,10 +339,10 @@ class AuthService:
         try:
             # Переносим тяжёлое хэширование в отдельный поток
             hashed_password = await asyncio.to_thread(self.pwd_context.hash, password)
-            
+
             logger.debug("Password hashed successfully using pbkdf2_sha256")
             return hashed_password
-        
+
         except Exception as e:
             logger.error(f"Error hashing password with pbkdf2_sha256: {str(e)}")
             raise AuthenticationError(f"Failed to hash password: {str(e)}")
@@ -352,17 +357,25 @@ class AuthService:
         try:
             # Основная проверка pbkdf2_sha256 — в отдельном потоке
             try:
-                is_valid = await asyncio.to_thread(self.pwd_context.verify, password, hashed_password)
+                is_valid = await asyncio.to_thread(
+                    self.pwd_context.verify, password, hashed_password
+                )
                 if is_valid:
-                    logger.debug(f"Password verified successfully using pbkdf2_sha256 (took {time.time() - start:.3f}s)")
+                    logger.debug(
+                        f"Password verified successfully using pbkdf2_sha256 (took {time.time() - start:.3f}s)"
+                    )
                     return True
             except Exception:
                 pass  # Если не удалось — пробуем legacy
 
             # Legacy PBKDF2 — тоже в отдельном потоке (редко, но на всякий случай)
-            is_legacy_valid = await asyncio.to_thread(self._verify_legacy_pbkdf2, password, hashed_password)
+            is_legacy_valid = await asyncio.to_thread(
+                self._verify_legacy_pbkdf2, password, hashed_password
+            )
             if is_legacy_valid:
-                logger.debug(f"Password verified using legacy PBKDF2 hash (took {time.time() - start:.3f}s)")
+                logger.debug(
+                    f"Password verified using legacy PBKDF2 hash (took {time.time() - start:.3f}s)"
+                )
                 return True
 
             logger.debug("Password verification failed")
@@ -386,22 +399,19 @@ class AuthService:
         try:
             # Декодируем хеш из hex
             combined = bytes.fromhex(hashed_password)
-            
+
             # Извлекаем соль и хеш
             salt = combined[:32]
             stored_hash = combined[32:]
-            
+
             # Хешируем введенный пароль с той же солью
             password_hash = hashlib.pbkdf2_hmac(
-                'sha256',
-                password.encode('utf-8'),
-                salt,
-                100000
+                "sha256", password.encode("utf-8"), salt, 100000
             )
-            
+
             # Сравниваем хеши
             return password_hash == stored_hash
-            
+
         except Exception as e:
             logger.debug(f"Legacy PBKDF2 verification failed: {str(e)}")
             return False
@@ -424,16 +434,22 @@ class AuthService:
             else:
                 # Если алгоритм определен, проверяем, не устарел ли он
                 return self.pwd_context.needs_update(hashed_password)
-                
+
         except Exception as e:
             logger.debug(f"Error checking if password needs rehash: {str(e)}")
             return False
 
     # 🟢 Добавь миграцию старых паролей
-    async def migrate_password_if_needed(self, user_id: str, password: str, hashed: str, db_service: BiometricService = None):
+    async def migrate_password_if_needed(
+        self,
+        user_id: str,
+        password: str,
+        hashed: str,
+        db_service: BiometricService = None,
+    ):
         """
         Re-hash password with new algorithm after successful login
-        
+
         Args:
             user_id: ID пользователя
             password: Пароль в открытом виде
@@ -443,7 +459,7 @@ class AuthService:
         if db_service is None:
             logger.warning("No db_service provided for password migration")
             return
-            
+
         if await self.needs_password_rehash(hashed):
             new_hash = await self.hash_password(password)
             await db_service.update_user(user_id, {"password_hash": new_hash})
@@ -462,17 +478,17 @@ class AuthService:
         try:
             token_bytes = secrets.token_bytes(length)
             return token_bytes.hex()
-            
+
         except Exception as e:
             logger.error(f"Error generating secure token: {str(e)}")
             raise AuthenticationError(f"Failed to generate secure token: {str(e)}")
 
     async def create_user_session(
-        self, 
-        user_id: str, 
-        user_agent: str = None, 
+        self,
+        user_id: str,
+        user_agent: str = None,
         ip_address: str = None,
-        device_fingerprint: str = None
+        device_fingerprint: str = None,
     ) -> Dict[str, str]:
         """
         Создание пользовательской сессии с поддержкой device tracking.
@@ -491,11 +507,11 @@ class AuthService:
             device_id = None
             if device_fingerprint:
                 device_id = hashlib.sha256(device_fingerprint.encode()).hexdigest()
-            
+
             # Создаем access и refresh токены с device info (sync: fast CPU)
             access_token = self.create_access_token(
-                user_id, 
-                additional_claims={"device_id": device_id} if device_id else None
+                user_id,
+                additional_claims={"device_id": device_id} if device_id else None,
             )
             refresh_token = self.create_refresh_token(user_id)
 
@@ -506,12 +522,12 @@ class AuthService:
                 "ip_address": ip_address,
                 "device_id": device_id,
                 "access_token": access_token,
-                "refresh_token": refresh_token
+                "refresh_token": refresh_token,
             }
-            
+
             # В production здесь бы сохраняли сессию в Redis или БД
             logger.info(f"User session created for user {user_id}")
-            
+
             # Audit log для критичной операции входа
             if self.db:
                 audit_service = AuditService(self.db)
@@ -523,19 +539,16 @@ class AuthService:
                     ip_address=ip_address,
                     user_agent=user_agent,
                     success=True,
-                    details={
-                        "device_id": device_id,
-                        "session_created": True
-                    }
+                    details={"device_id": device_id, "session_created": True},
                 )
 
             return {
                 "access_token": access_token,
                 "refresh_token": refresh_token,
                 "token_type": "bearer",
-                "expires_in": self.access_token_expire_minutes * 60
+                "expires_in": self.access_token_expire_minutes * 60,
             }
-            
+
         except Exception as e:
             logger.error(f"Error creating user session: {str(e)}")
             raise
@@ -549,17 +562,21 @@ class AuthService:
             key = f"login_attempts:{user_id}"
             attempts = await self.redis.get(key)
             attempts_count = int(attempts) if attempts is not None else 0
-            
+
             if attempts_count >= 5:
-                logger.warning(f"Rate limit exceeded for user {user_id} (attempts: {attempts_count})")
+                logger.warning(
+                    f"Rate limit exceeded for user {user_id} (attempts: {attempts_count})"
+                )
                 raise UnauthorizedError("Too many login attempts. Try again later.")
-            
+
             return True
-        
+
         except Exception as e:
             logger.error(f"Error checking rate limit in Redis: {str(e)}")
             # Здесь твой выбор: блокировка или ошибка
-            raise UnauthorizedError("Login temporarily unavailable due to technical issues. Try again later.")
+            raise UnauthorizedError(
+                "Login temporarily unavailable due to technical issues. Try again later."
+            )
 
     async def record_failed_login(self, user_id: str) -> None:
         """
@@ -573,11 +590,15 @@ class AuthService:
                 # Если это первая попытка — устанавливаем TTL 15 минут
                 if attempts == 1:
                     await self.redis.expire(key, 900)  # 15 * 60 = 900 секунд
-                logger.debug(f"Failed login attempt recorded for user {user_id} (attempts: {attempts})")
+                logger.debug(
+                    f"Failed login attempt recorded for user {user_id} (attempts: {attempts})"
+                )
             else:
                 # Fallback на in-memory, если Redis недоступен
                 self.login_attempts[user_id].append(datetime.now(timezone.utc))
-                logger.debug(f"Failed login attempt recorded in memory for user {user_id}")
+                logger.debug(
+                    f"Failed login attempt recorded in memory for user {user_id}"
+                )
         except Exception as e:
             logger.error(f"Error recording failed login: {str(e)}")
             # Даже если Redis упал — fallback на память
@@ -604,10 +625,10 @@ class AuthService:
                 self.login_attempts[user_id].clear()
 
     def validate_user_permissions(
-        self, 
-        user_role: str, 
+        self,
+        user_role: str,
         required_permissions: List[str],
-        user_permissions: List[str] = None
+        user_permissions: List[str] = None,
     ) -> bool:
         """
         Валидация разрешений пользователя.
@@ -625,10 +646,10 @@ class AuthService:
         """
         # Роли с полными правами
         admin_roles = ["admin", "superuser"]
-        
+
         if user_role in admin_roles:
             return True
-        
+
         # Проверяем конкретные разрешения
         if user_permissions:
             missing_permissions = set(required_permissions) - set(user_permissions)
@@ -637,23 +658,23 @@ class AuthService:
                     f"Insufficient permissions. Missing: {', '.join(missing_permissions)}"
                 )
             return True
-        
+
         # Если нет конкретных разрешений, проверяем роль
         role_permissions = {
             "user": ["read_own_data"],
             "premium": ["read_own_data", "advanced_features"],
-            "admin": ["read_own_data", "manage_users", "system_admin"]
+            "admin": ["read_own_data", "manage_users", "system_admin"],
         }
-        
+
         available_permissions = role_permissions.get(user_role, [])
         missing_permissions = set(required_permissions) - set(available_permissions)
-        
+
         if missing_permissions:
             raise ForbiddenError(
                 f"Insufficient permissions for role '{user_role}'. "
                 f"Missing: {', '.join(missing_permissions)}"
             )
-            
+
         return True
 
     async def get_user_info_from_token(self, token: str) -> Dict[str, Any]:
@@ -668,7 +689,7 @@ class AuthService:
         """
         try:
             payload = await self.verify_token(token)
-            
+
             return {
                 "user_id": payload.get("user_id"),
                 "role": payload.get("role"),
@@ -676,9 +697,9 @@ class AuthService:
                 "token_type": payload.get("type"),
                 "issued_at": payload.get("iat"),
                 "expires_at": payload.get("exp"),
-                "jti": payload.get("jti")
+                "jti": payload.get("jti"),
             }
-            
+
         except Exception as e:
             logger.error(f"Error extracting user info from token: {str(e)}")
             raise
@@ -686,7 +707,7 @@ class AuthService:
     async def revoke_token(self, token: str, token_type: str = None) -> bool:
         """
         Отзыв токена с сохранением в Redis.
-        
+
         Args:
             token: Токен для отзыва
             token_type: Тип токена (access или refresh), если None - определяется автоматически
@@ -703,7 +724,7 @@ class AuthService:
             payload = await self.verify_token(token, token_type)
             jti = payload.get("jti")
             exp = payload.get("exp")
-            
+
             if jti and exp:
                 # Сохраняем в Redis с TTL до истечения токена
                 if self.redis:
@@ -723,11 +744,11 @@ class AuthService:
                     # Fallback to in-memory storage if Redis not available
                     self._revoked_tokens_memory[jti] = exp
                     logger.info(f"Token revoked in memory: {jti}")
-                
+
                 return True
-            
+
             return False
-            
+
         except Exception as e:
             logger.error(f"Error revoking token: {str(e)}")
             return False
@@ -735,10 +756,10 @@ class AuthService:
     async def is_token_revoked(self, jti: str) -> bool:
         """
         Проверяет, был ли токен отозван.
-        
+
         Args:
             jti: JWT ID токена
-            
+
         Returns:
             bool: True если токен отозван
         """
@@ -755,7 +776,7 @@ class AuthService:
 
     def _initialize_memory_storage(self) -> None:
         """Инициализация in-memory хранилища для отозванных токенов (fallback)."""
-        if not hasattr(self, '_revoked_tokens_memory'):
+        if not hasattr(self, "_revoked_tokens_memory"):
             self._revoked_tokens_memory = {}
 
     def get_token_info(self, token: str) -> Dict[str, Any]:
@@ -770,11 +791,8 @@ class AuthService:
         """
         try:
             # Декодируем без проверки подписи для получения информации
-            payload = jwt.decode(
-                token, 
-                options={"verify_signature": False}
-            )
-            
+            payload = jwt.decode(token, options={"verify_signature": False})
+
             return {
                 "type": payload.get("type"),
                 "user_id": payload.get("user_id"),
@@ -783,9 +801,10 @@ class AuthService:
                 "expires_at": payload.get("exp"),
                 "is_expired": datetime.fromtimestamp(
                     payload.get("exp", 0), tz=timezone.utc
-                ) < datetime.now(timezone.utc)
+                )
+                < datetime.now(timezone.utc),
             }
-            
+
         except Exception as e:
             logger.error(f"Error getting token info: {str(e)}")
             return {"error": str(e)}
@@ -793,9 +812,11 @@ class AuthService:
 
 class TokenExpiredError(AuthenticationError):
     """Исключение для истекших токенов."""
+
     pass
 
 
 class InvalidTokenError(AuthenticationError):
     """Исключение для невалидных токенов."""
+
     pass

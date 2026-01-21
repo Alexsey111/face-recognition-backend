@@ -31,6 +31,7 @@ from app.db.database import get_db
 # Event Loop Configuration
 # =============================================================================
 
+
 @pytest.fixture(scope="function")
 def event_loop():
     """
@@ -40,20 +41,19 @@ def event_loop():
     policy = asyncio.get_event_loop_policy()
     loop = policy.new_event_loop()
     asyncio.set_event_loop(loop)
-    
+
     yield loop
-    
+
     # Cleanup pending tasks
     try:
         pending = asyncio.all_tasks(loop)
         for task in pending:
             task.cancel()
-        
+
         if pending:
             loop.run_until_complete(
                 asyncio.wait_for(
-                    asyncio.gather(*pending, return_exceptions=True),
-                    timeout=5.0
+                    asyncio.gather(*pending, return_exceptions=True), timeout=5.0
                 )
             )
     except (asyncio.TimeoutError, RuntimeError, Exception) as e:
@@ -72,26 +72,27 @@ def event_loop():
 # Database Fixtures
 # =============================================================================
 
+
 @pytest_asyncio.fixture(scope="function")
 async def async_engine():
     """Create async engine for tests using real PostgreSQL."""
     db_url = settings.DATABASE_URL
-    
+
     # Ensure asyncpg driver
     if "postgresql://" in db_url and "+asyncpg" not in db_url:
         db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
     if "postgres://" in db_url and "+asyncpg" not in db_url:
         db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
-    
+
     engine = create_async_engine(
         db_url,
         poolclass=NullPool,
         echo=False,
         future=True,
     )
-    
+
     yield engine
-    
+
     await engine.dispose()
 
 
@@ -106,7 +107,7 @@ async def db_session(async_engine) -> AsyncGenerator[AsyncSession, None]:
         class_=AsyncSession,
         expire_on_commit=False,
     )
-    
+
     async with async_session_maker() as session:
         yield session
         # Automatic rollback after test
@@ -117,11 +118,12 @@ async def db_session(async_engine) -> AsyncGenerator[AsyncSession, None]:
 # User Fixtures
 # =============================================================================
 
+
 @pytest_asyncio.fixture(scope="function")
 async def test_user(db_session: AsyncSession) -> AsyncGenerator[str, None]:
     """Create test user and return user_id."""
     test_user_id = f"test-user-{uuid.uuid4().hex[:8]}"
-    
+
     try:
         await db_session.execute(
             text(
@@ -131,21 +133,20 @@ async def test_user(db_session: AsyncSession) -> AsyncGenerator[str, None]:
                 "ON CONFLICT (id) DO NOTHING"
             ),
             {
-                "id": test_user_id, 
+                "id": test_user_id,
                 "email": f"{test_user_id}@example.com",
-                "password_hash": "test_hash_placeholder"
+                "password_hash": "test_hash_placeholder",
             },
         )
         await db_session.commit()
-        
+
         yield test_user_id
-        
+
     finally:
         # Cleanup
         try:
             await db_session.execute(
-                text("DELETE FROM users WHERE id = :id"), 
-                {"id": test_user_id}
+                text("DELETE FROM users WHERE id = :id"), {"id": test_user_id}
             )
             await db_session.commit()
         except Exception as e:
@@ -155,12 +156,11 @@ async def test_user(db_session: AsyncSession) -> AsyncGenerator[str, None]:
 
 @pytest_asyncio.fixture(scope="function")
 async def test_user_with_reference(
-    db_session: AsyncSession, 
-    test_user: str
+    db_session: AsyncSession, test_user: str
 ) -> AsyncGenerator[dict, None]:
     """Create test user with reference image."""
     from app.db.crud import ReferenceCRUD
-    
+
     ref = await ReferenceCRUD.create_reference(
         db_session,
         user_id=test_user,
@@ -169,10 +169,10 @@ async def test_user_with_reference(
         quality_score=0.85,
         image_filename="test_photo.jpg",
         image_size_mb=1.5,
-        image_format="JPG"
+        image_format="JPG",
     )
     await db_session.commit()
-    
+
     yield {"user_id": test_user, "reference_id": ref.id}
 
 
@@ -180,13 +180,13 @@ async def test_user_with_reference(
 def test_user_data():
     """Create test user data for UserCreate model."""
     from app.models.user import UserCreate
-    
+
     unique_id = uuid.uuid4().hex[:8]
     return UserCreate(
         email=f"test-{unique_id}@example.com",
         password="testpassword123",
         phone=f"+1234567890{unique_id[:4]}",
-        full_name=f"Test User {unique_id}"
+        full_name=f"Test User {unique_id}",
     )
 
 
@@ -194,7 +194,7 @@ def test_user_data():
 async def test_user_123(db_session: AsyncSession) -> str:
     """Return a fixed user ID for testing."""
     user_id = "user-123"
-    
+
     try:
         await db_session.execute(
             text(
@@ -206,19 +206,20 @@ async def test_user_123(db_session: AsyncSession) -> str:
             {
                 "id": user_id,
                 "email": "user-123@example.com",
-                "password_hash": "test_hash"
-            }
+                "password_hash": "test_hash",
+            },
         )
         await db_session.commit()
     except:
         await db_session.rollback()
-    
+
     return user_id
 
 
 # =============================================================================
 # Mock Data Fixtures (для unit-тестов)
 # =============================================================================
+
 
 @pytest.fixture
 def mock_user_id():
@@ -235,15 +236,14 @@ def mock_reference_id():
 @pytest.fixture
 def mock_image_data():
     """Mock image data (base64 encoded 1x1 pixel PNG)."""
-    return (
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
-    )
+    return "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
 
 
 @pytest.fixture
 def mock_embedding():
     """Mock face embedding (512-dimensional vector)."""
     import numpy as np
+
     return np.random.rand(512).astype(np.float32).tobytes()
 
 
@@ -268,9 +268,9 @@ async def redis_client():
         encoding="utf-8",
         decode_responses=True,
     )
-    
+
     yield client
-    
+
     await client.aclose()
 
 
@@ -278,15 +278,15 @@ async def redis_client():
 def redis_sync_client():
     """Create sync Redis client for sync tests."""
     import redis as redis_sync
-    
+
     client = redis_sync.from_url(
         settings.REDIS_URL,
         encoding="utf-8",
         decode_responses=True,
     )
-    
+
     yield client
-    
+
     client.close()
 
 
@@ -294,11 +294,11 @@ def redis_sync_client():
 async def cache():
     """Create cache service for tests."""
     from app.services.cache_service import CacheService
-    
+
     cache_service = CacheService()
-    
+
     yield cache_service
-    
+
     await cache_service.close()
 
 
@@ -324,15 +324,15 @@ async def db_session_override(app_instance, async_engine):
         class_=AsyncSession,
         expire_on_commit=False,
     )
-    
+
     async def get_test_db() -> AsyncGenerator[AsyncSession, None]:
         async with async_session_maker() as session:
             yield session
-    
+
     app_instance.dependency_overrides[get_db] = get_test_db
-    
+
     yield
-    
+
     app_instance.dependency_overrides.clear()
 
 
@@ -355,18 +355,17 @@ async def async_client(db_session_override, app_instance):
 # Authentication Fixtures
 # =============================================================================
 
+
 @pytest_asyncio.fixture(scope="function")
 async def auth_headers(test_user: str) -> dict:
     """Create authorization headers with test user JWT."""
     from app.services.auth_service import AuthService
-    
+
     auth_service = AuthService()
     tokens = await auth_service.create_user_session(
-        user_id=test_user,
-        user_agent="test-agent",
-        ip_address="127.0.0.1"
+        user_id=test_user, user_agent="test-agent", ip_address="127.0.0.1"
     )
-    
+
     return {"Authorization": f"Bearer {tokens['access_token']}"}
 
 
@@ -374,14 +373,14 @@ async def auth_headers(test_user: str) -> dict:
 # Test Data Fixtures
 # =============================================================================
 
+
 @pytest.fixture
 def sample_image_bytes() -> bytes:
     """Create sample image bytes for upload tests."""
     import base64
+
     # Minimal 1x1 PNG image
-    png_base64 = (
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
-    )
+    png_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
     return base64.b64decode(png_base64)
 
 
@@ -397,24 +396,15 @@ def sample_image_file(tmp_path, sample_image_bytes):
 # Pytest Configuration
 # =============================================================================
 
+
 def pytest_configure(config):
     """Configure pytest with custom markers."""
     config.addinivalue_line(
-        "markers", 
-        "slow: marks tests as slow (deselect with '-m \"not slow\"')"
+        "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
     )
-    config.addinivalue_line(
-        "markers", 
-        "gpu: marks tests that require GPU"
-    )
-    config.addinivalue_line(
-        "markers",
-        "integration: marks integration tests"
-    )
-    config.addinivalue_line(
-        "markers",
-        "unit: marks unit tests"
-    )
+    config.addinivalue_line("markers", "gpu: marks tests that require GPU")
+    config.addinivalue_line("markers", "integration: marks integration tests")
+    config.addinivalue_line("markers", "unit: marks unit tests")
 
 
 def pytest_collection_modifyitems(config, items):
@@ -430,12 +420,13 @@ def pytest_collection_modifyitems(config, items):
 # Session-level Setup/Teardown
 # =============================================================================
 
+
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_environment():
     """Setup test environment before all tests."""
     # Set test environment variables
     os.environ["TESTING"] = "1"
-    
+
     yield
 
     # Cleanup after all tests
@@ -449,7 +440,7 @@ def configure_asyncio():
     if sys.platform == "win32":
         # Use WindowsSelectorEventLoopPolicy on Windows
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    
+
     yield
 
 
@@ -457,11 +448,12 @@ def configure_asyncio():
 # Resource Cleanup
 # =============================================================================
 
+
 @pytest.fixture(scope="function", autouse=True)
 def cleanup_resources():
     """Automatic resource cleanup after each test."""
     yield
-    
+
     # Force garbage collection
     gc.collect()
 
@@ -470,13 +462,13 @@ def cleanup_resources():
 def reset_torch_state():
     """Reset PyTorch state between tests."""
     yield
-    
+
     try:
         import torch
-        
+
         # Disable gradients
         torch.set_grad_enabled(False)
-        
+
         # Clear CUDA cache
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -489,13 +481,14 @@ def reset_torch_state():
 # Anti-Spoofing Service Fixtures
 # =============================================================================
 
+
 @pytest_asyncio.fixture(scope="function", autouse=True)
 async def reset_antispoofing_between_tests():
     """Сброс AntiSpoofing сервиса между тестами."""
     from app.services.anti_spoofing_service import reset_anti_spoofing_service
-    
+
     yield
-    
+
     # Cleanup после каждого теста
     try:
         await reset_anti_spoofing_service()
@@ -510,7 +503,7 @@ async def cleanup_test_users(db_session: AsyncSession):
     Удаляет пользователей с тестовыми email'ами.
     """
     yield
-    
+
     # Cleanup после теста
     try:
         # Удаляем тестовых пользователей по email паттерну
@@ -520,16 +513,15 @@ async def cleanup_test_users(db_session: AsyncSession):
             "security@example.com",
             "perf@example.com",
         ]
-        
+
         for email in test_emails:
             try:
                 await db_session.execute(
-                    text("DELETE FROM users WHERE email = :email"),
-                    {"email": email}
+                    text("DELETE FROM users WHERE email = :email"), {"email": email}
                 )
             except Exception:
                 pass
-        
+
         await db_session.commit()
     except Exception as e:
         print(f"Warning: Failed to cleanup test users: {e}")
@@ -543,28 +535,32 @@ async def initialized_service():
     """
     # Полная очистка перед созданием
     from app.services.anti_spoofing_service import reset_anti_spoofing_service
+
     await reset_anti_spoofing_service()
-    
+
     import gc
+
     gc.collect()
     try:
         import torch
+
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
     except ImportError:
         pass
-    
+
     # Создание нового сервиса
     from app.services.anti_spoofing_service import AntiSpoofingService
+
     svc = AntiSpoofingService()
-    
+
     try:
         await svc.initialize()
     except Exception as e:
         pytest.skip(f"Failed to initialize service: {e}")
-    
+
     yield svc
-    
+
     # Cleanup
     try:
         if svc.model is not None:
@@ -572,15 +568,16 @@ async def initialized_service():
             del svc.model
         svc.model = None
         svc.is_initialized = False
-        
+
         try:
             import torch
+
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
                 torch.cuda.synchronize()
         except ImportError:
             pass
-        
+
         gc.collect()
     finally:
         await reset_anti_spoofing_service()

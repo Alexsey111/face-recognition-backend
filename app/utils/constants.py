@@ -2,6 +2,7 @@
 Application constants
 Centralized immutable values for validation, security and file detection.
 """
+
 import re
 
 # =============================================================================
@@ -72,22 +73,18 @@ SIMILARITY_LIMITS = {
 # =============================================================================
 CONFIDENCE_LEVELS = {
     "very_high": 0.85,  # Very confident match
-    "high": 0.75,       # High confidence
-    "medium": 0.65,     # Medium confidence
-    "low": 0.55,        # Low confidence
-    "very_low": 0.45,   # Very low confidence
+    "high": 0.75,  # High confidence
+    "medium": 0.65,  # Medium confidence
+    "low": 0.55,  # Low confidence
+    "very_low": 0.45,  # Very low confidence
 }
 
 # =============================================================================
 # Regex patterns for validation
 # =============================================================================
-EMAIL_REGEX = re.compile(
-    r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
-)
+EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 
-USERNAME_REGEX = re.compile(
-    r"^[a-zA-Z0-9_-]{3,50}$"
-)
+USERNAME_REGEX = re.compile(r"^[a-zA-Z0-9_-]{3,50}$")
 
 # Strong but UX-friendly password policy
 PASSWORD_REGEX = re.compile(
@@ -113,4 +110,3 @@ TIME_PERIODS = {
     "day": 86400,
     "week": 604800,
 }
-

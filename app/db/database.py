@@ -7,8 +7,11 @@ PostgreSQL Database Manager (asyncpg + psycopg2 для Alembic).
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy import text
 from sqlalchemy.orm import DeclarativeBase
+
 try:
-    from ..middleware.metrics import database_connections_active as DATABASE_CONNECTIONS_ACTIVE
+    from ..middleware.metrics import (
+        database_connections_active as DATABASE_CONNECTIONS_ACTIVE,
+    )
 except Exception:
     DATABASE_CONNECTIONS_ACTIVE = None
 from typing import AsyncGenerator
@@ -19,6 +22,7 @@ from ..config import settings
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
+
 
 # Базовый класс для всех моделей
 class Base(DeclarativeBase):
@@ -91,13 +95,15 @@ class DatabaseManager:
         )
 
         self._engine_initialized = True
-        logger.info(f"✅ PostgreSQL engine initialized: {self.database_url.split('@')[-1]}")
+        logger.info(
+            f"✅ PostgreSQL engine initialized: {self.database_url.split('@')[-1]}"
+        )
 
     @asynccontextmanager
     async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
         """Безопасное получение сессии с автоматическим commit/rollback."""
         self._ensure_engine()
-        
+
         # Metrics tracking - определяем доступность метрик один раз
         metrics_available = DATABASE_CONNECTIONS_ACTIVE is not None
         if metrics_available:
@@ -105,7 +111,7 @@ class DatabaseManager:
                 DATABASE_CONNECTIONS_ACTIVE.inc()
             except Exception:
                 metrics_available = False
-        
+
         async with self.SessionLocal() as session:
             try:
                 yield session
@@ -162,6 +168,22 @@ class DatabaseManager:
 # Глобальный экземпляр менеджера
 # ============================================================================
 db_manager = DatabaseManager()
+
+# Backwards compatibility - expose engine directly
+engine = None
+
+
+def _get_engine():
+    """Ленивое получение engine для обратной совместимости."""
+    global engine
+    if engine is None:
+        db_manager._ensure_engine()
+        engine = db_manager.engine
+    return engine
+
+
+# Expose engine for backwards compatibility
+engine = _get_engine()
 
 
 # ============================================================================

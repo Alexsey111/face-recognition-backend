@@ -1,6 +1,7 @@
 """
 Integration тесты для webhook системы.
 """
+
 import pytest
 import asyncio
 from datetime import datetime, timezone
@@ -18,7 +19,7 @@ async def test_full_webhook_flow(db_session):
         secret="test-secret",
         event_types=["verification.completed"],
         is_active=True,
-        max_retries=3
+        max_retries=3,
     )
     db_session.add(config)
     await db_session.commit()
@@ -28,7 +29,7 @@ async def test_full_webhook_flow(db_session):
     await webhook_service.emit_event(
         event_type="verification.completed",
         user_id="test-user-123",
-        payload={"is_match": True, "score": 0.95}
+        payload={"is_match": True, "score": 0.95},
     )
 
     # 3. Ждем асинхронной отправки
@@ -36,13 +37,18 @@ async def test_full_webhook_flow(db_session):
 
     # 4. Проверяем что лог создан
     from sqlalchemy import select
+
     result = await db_session.execute(
         select(WebhookLog).where(WebhookLog.webhook_config_id == config.id)
     )
     log = result.scalar_one_or_none()
     assert log is not None
     # Лог может быть в любом из этих статусов после попытки отправки
-    assert log.status in [WebhookStatus.SUCCESS, WebhookStatus.PENDING, WebhookStatus.RETRY]
+    assert log.status in [
+        WebhookStatus.SUCCESS,
+        WebhookStatus.PENDING,
+        WebhookStatus.RETRY,
+    ]
 
 
 @pytest.mark.asyncio
@@ -55,16 +61,14 @@ async def test_webhook_retry_on_failure(db_session):
         event_types=["test.event"],
         is_active=True,
         max_retries=2,
-        retry_delay=1
+        retry_delay=1,
     )
     db_session.add(config)
     await db_session.commit()
 
     webhook_service = WebhookService(db_session)
     await webhook_service.emit_event(
-        event_type="test.event",
-        user_id="test-user-123",
-        payload={"test": "data"}
+        event_type="test.event", user_id="test-user-123", payload={"test": "data"}
     )
 
     # Ждем retry attempts
@@ -72,6 +76,7 @@ async def test_webhook_retry_on_failure(db_session):
 
     # Проверяем что было несколько попыток
     from sqlalchemy import select
+
     result = await db_session.execute(
         select(WebhookLog).where(WebhookLog.webhook_config_id == config.id)
     )

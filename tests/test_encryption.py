@@ -42,18 +42,20 @@ class TestEncryptionService:
 
     def test_initialization_without_key(self, monkeypatch):
         """Тест инициализации без ключа шифрования."""
-        monkeypatch.setattr(settings, 'ENCRYPTION_KEY', '')
-        
+        monkeypatch.setattr(settings, "ENCRYPTION_KEY", "")
+
         with pytest.raises(EncryptionError):
             EncryptionService()
 
     @pytest.mark.asyncio
-    async def test_encrypt_embedding_success(self, encryption_service, sample_embedding):
+    async def test_encrypt_embedding_success(
+        self, encryption_service, sample_embedding
+    ):
         """Тест успешного шифрования эмбеддинга."""
         embedding_bytes = sample_embedding.tobytes()
-        
+
         encrypted = await encryption_service.encrypt_embedding(embedding_bytes)
-        
+
         assert encrypted is not None
         assert isinstance(encrypted, bytes)
         assert len(encrypted) > len(embedding_bytes)  # Зашифрованные данные больше
@@ -65,27 +67,28 @@ class TestEncryptionService:
             await encryption_service.encrypt(None)
 
     @pytest.mark.asyncio
-    async def test_decrypt_embedding_success(self, encryption_service, sample_embedding):
+    async def test_decrypt_embedding_success(
+        self, encryption_service, sample_embedding
+    ):
         """Тест успешного дешифрования эмбеддинга."""
         embedding_bytes = sample_embedding.tobytes()
-        
+
         # Шифруем
         encrypted = await encryption_service.encrypt_embedding(embedding_bytes)
-        
+
         # Дешифруем
         decrypted = await encryption_service.decrypt_embedding(encrypted)
-        
+
         assert decrypted == embedding_bytes
         np.testing.assert_array_equal(
-            np.frombuffer(decrypted, dtype=np.float32),
-            sample_embedding
+            np.frombuffer(decrypted, dtype=np.float32), sample_embedding
         )
 
     @pytest.mark.asyncio
     async def test_decrypt_invalid_data(self, encryption_service):
         """Тест дешифрования невалидных данных."""
         invalid_data = b"invalid_encrypted_data"
-        
+
         with pytest.raises(EncryptionError):
             await encryption_service.decrypt(invalid_data)
 
@@ -96,35 +99,39 @@ class TestEncryptionService:
             await encryption_service.decrypt(b"")
 
     @pytest.mark.asyncio
-    async def test_encrypt_decrypt_data_with_metadata(self, encryption_service, sample_data):
+    async def test_encrypt_decrypt_data_with_metadata(
+        self, encryption_service, sample_data
+    ):
         """Тест шифрования данных с метаданными."""
         metadata = {"version": "1.0", "type": "test"}
-        
+
         # Шифруем с метаданными
         encrypted = await encryption_service.encrypt(sample_data, metadata)
-        
+
         # Дешифруем
         decrypted, decrypted_metadata = await encryption_service.decrypt(encrypted)
-        
+
         assert decrypted == sample_data
         assert decrypted_metadata.get("meta") == metadata
 
     @pytest.mark.asyncio
-    async def test_encrypt_decrypt_data_without_metadata(self, encryption_service, sample_data):
+    async def test_encrypt_decrypt_data_without_metadata(
+        self, encryption_service, sample_data
+    ):
         """Тест шифрования данных без метаданных."""
         # Шифруем без метаданных
         encrypted = await encryption_service.encrypt(sample_data)
-        
+
         # Дешифруем
         decrypted, payload = await encryption_service.decrypt(encrypted)
-        
+
         assert decrypted == sample_data
         assert payload.get("meta") == {}
 
     def test_generate_key(self, encryption_service):
         """Тест генерации ключа шифрования."""
         key = encryption_service.generate_key()
-        
+
         assert key is not None
         assert isinstance(key, str)
         assert len(key) > 0
@@ -133,24 +140,24 @@ class TestEncryptionService:
         """Тест проверки валидного ключа."""
         # Генерируем валидный ключ
         valid_key = encryption_service.generate_key()
-        
+
         # Проверяем его
         is_valid = encryption_service.verify_key(valid_key)
-        
+
         assert is_valid is True
 
     def test_verify_invalid_key(self, encryption_service):
         """Тест проверки невалидного ключа."""
         invalid_key = "invalid_key_123"
-        
+
         is_valid = encryption_service.verify_key(invalid_key)
-        
+
         assert is_valid is False
 
     def test_get_encryption_info(self, encryption_service):
         """Тест получения информации о шифровании."""
         info = encryption_service.get_encryption_info()
-        
+
         assert "algorithm" in info
         assert "key_length_bits" in info
         assert info["algorithm"] == "aes-256-gcm"
@@ -172,14 +179,18 @@ class TestEncryptionService:
         test_content = b"test content for file encryption"
         input_file = tmp_path / "encrypted_file.bin"
         output_file = tmp_path / "decrypted_file.txt"
-        
+
         # Шифруем контент и записываем в файл
-        encrypted = await encryption_service.encrypt(test_content, metadata={"filename": "test.txt"})
+        encrypted = await encryption_service.encrypt(
+            test_content, metadata={"filename": "test.txt"}
+        )
         input_file.write_bytes(encrypted)
-        
+
         # Дешифруем файл
-        result_path = await encryption_service.decrypt_file(str(input_file), str(output_file))
-        
+        result_path = await encryption_service.decrypt_file(
+            str(input_file), str(output_file)
+        )
+
         # Проверяем результат
         assert result_path == str(output_file)
         assert output_file.read_bytes() == test_content
@@ -196,32 +207,32 @@ class TestEncryptionSecurity:
     async def test_encryption_consistency(self, encryption_service):
         """Тест консистентности шифрования (одинаковые данные -> разные шифротексты)."""
         data = b"same_data_for_testing"
-        
+
         # Шифруем одни и те же данные дважды
         encrypted1 = await encryption_service.encrypt(data)
         encrypted2 = await encryption_service.encrypt(data)
-        
+
         # Шифротексты должны быть разными (из-за случайности nonce)
         assert encrypted1 != encrypted2
-        
+
         # Но дешифровка должна давать одинаковый результат
         decrypted1, _ = await encryption_service.decrypt(encrypted1)
         decrypted2, _ = await encryption_service.decrypt(encrypted2)
-        
+
         assert decrypted1 == decrypted2 == data
 
     @pytest.mark.asyncio
     async def test_integrity_verification(self, encryption_service):
         """Тест проверки целостности данных (GCM authentication tag)."""
         data = b"test_data_for_integrity"
-        
+
         # Шифруем данные
         encrypted = await encryption_service.encrypt(data)
-        
+
         # Изменяем зашифрованные данные
         modified_encrypted = bytearray(encrypted)
         modified_encrypted[0] ^= 1  # Инвертируем первый бит
-        
+
         # Попытка дешифрации должна провалиться из-за неверного tag
         with pytest.raises(EncryptionError):
             await encryption_service.decrypt(bytes(modified_encrypted))
@@ -231,13 +242,13 @@ class TestEncryptionSecurity:
         """Тест целостности метаданных."""
         data = b"test_data"
         metadata = {"version": "1.0", "type": "test"}
-        
+
         # Шифруем с метаданными
         encrypted = await encryption_service.encrypt(data, metadata)
-        
+
         # Проверяем, что метаданные не изменились при дешифрации
         decrypted_data, payload = await encryption_service.decrypt(encrypted)
-        
+
         assert decrypted_data == data
         assert payload.get("meta") == metadata
 
@@ -246,7 +257,7 @@ class TestEncryptionSecurity:
         # Создаем два сервиса с одинаковым ключом
         service1 = EncryptionService()
         service2 = EncryptionService()
-        
+
         # Оба должны иметь одинаковые настройки
         assert service1.ALGORITHM == service2.ALGORITHM
         assert service1.KEY_LENGTH == service2.KEY_LENGTH

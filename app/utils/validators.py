@@ -29,6 +29,7 @@ from .exceptions import ValidationError
 # BASIC VALIDATORS
 # =============================================================================
 
+
 def validate_email(email: str) -> bool:
     if not isinstance(email, str) or not email:
         raise ValidationError("Email is required")
@@ -116,6 +117,7 @@ def validate_url(url: str) -> bool:
 # IMAGE VALIDATION
 # =============================================================================
 
+
 def validate_image_format(image_data: Union[str, bytes]) -> bool:
     detected = _detect_image_format(image_data)
 
@@ -156,6 +158,7 @@ def validate_image_size(
 # =============================================================================
 # FILE / HASH
 # =============================================================================
+
 
 def validate_file_hash(
     data: Union[str, bytes],
@@ -211,12 +214,17 @@ def validate_file_upload(
 # ML / EMBEDDINGS
 # =============================================================================
 
+
 def validate_embedding(embedding: List[float]) -> bool:
     if not isinstance(embedding, (list, tuple)):
         raise ValidationError("Embedding must be list or tuple")
 
     size = len(embedding)
-    if not FILE_LIMITS["min_embedding_size"] <= size <= FILE_LIMITS["max_embedding_size"]:
+    if (
+        not FILE_LIMITS["min_embedding_size"]
+        <= size
+        <= FILE_LIMITS["max_embedding_size"]
+    ):
         raise ValidationError(f"Invalid embedding size: {size}")
 
     for i, v in enumerate(embedding):
@@ -232,7 +240,11 @@ def validate_similarity_threshold(threshold: float) -> bool:
     if not isinstance(threshold, (int, float)) or isinstance(threshold, bool):
         raise ValidationError("Threshold must be numeric")
 
-    if not SIMILARITY_LIMITS["min_threshold"] <= threshold <= SIMILARITY_LIMITS["max_threshold"]:
+    if (
+        not SIMILARITY_LIMITS["min_threshold"]
+        <= threshold
+        <= SIMILARITY_LIMITS["max_threshold"]
+    ):
         raise ValidationError("Threshold out of bounds")
 
     return True
@@ -241,6 +253,7 @@ def validate_similarity_threshold(threshold: float) -> bool:
 # =============================================================================
 # SECURITY / SANITIZATION
 # =============================================================================
+
 
 def sanitize_string(
     text: str,
@@ -291,6 +304,7 @@ def validate_sql_safe(text: str) -> bool:
 # JSON SCHEMA VALIDATION
 # =============================================================================
 
+
 def validate_json_schema(data: Dict[str, Any], schema: Dict[str, Any]) -> bool:
     """
     Простая валидация JSON схемы для декораторов.
@@ -300,29 +314,32 @@ def validate_json_schema(data: Dict[str, Any], schema: Dict[str, Any]) -> bool:
     for key, expected_type in schema.items():
         if key not in data:
             raise ValidationError(f"Missing required field: {key}")
-    
+
         actual_value = data[key]
-        
+
         # Обработка Union типов
         if isinstance(expected_type, list):
             if not any(isinstance(actual_value, t) for t in expected_type):
                 raise ValidationError(f"Field {key} has invalid type")
             continue
-        
+
         # Обработка Optional типов (Union с None)
-        if isinstance(expected_type, type) and expected_type.__name__ == 'Union':
+        if isinstance(expected_type, type) and expected_type.__name__ == "Union":
             continue
-        
+
         # Простая проверка типа
         if not isinstance(actual_value, expected_type):
-            raise ValidationError(f"Field {key} must be of type {expected_type.__name__}")
-    
+            raise ValidationError(
+                f"Field {key} must be of type {expected_type.__name__}"
+            )
+
     return True
 
 
 # =============================================================================
 # HELPERS
 # =============================================================================
+
 
 def _detect_image_format(image_data: Union[str, bytes]) -> str:
     try:
@@ -368,12 +385,13 @@ def _detect_by_magic(data: bytes) -> str:
 # CLASS-BASED VALIDATORS (for backward compatibility)
 # =============================================================================
 
+
 class Validators:
     """
     Класс-обертка для всех валидаторов.
     Предоставляет статические методы для валидации данных.
     """
-    
+
     # Basic validators
     validate_email = staticmethod(validate_email)
     validate_username = staticmethod(validate_username)
@@ -381,19 +399,19 @@ class Validators:
     validate_uuid = staticmethod(validate_uuid)
     validate_date = staticmethod(validate_date)
     validate_url = staticmethod(validate_url)
-    
+
     # Image validation
     validate_image_format = staticmethod(validate_image_format)
     validate_image_size = staticmethod(validate_image_size)
-    
+
     # File validation
     validate_file_hash = staticmethod(validate_file_hash)
     validate_file_upload = staticmethod(validate_file_upload)
-    
+
     # ML / Embeddings
     validate_embedding = staticmethod(validate_embedding)
     validate_similarity_threshold = staticmethod(validate_similarity_threshold)
-    
+
     # Security
     sanitize_string = staticmethod(sanitize_string)
     sanitize_html = staticmethod(sanitize_html)

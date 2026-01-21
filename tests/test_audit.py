@@ -1,4 +1,5 @@
 """Tests for audit logging functionality."""
+
 import json
 import logging
 from datetime import datetime, timezone

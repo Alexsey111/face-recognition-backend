@@ -24,7 +24,7 @@ logger = get_logger(__name__)
 
 class CleanupScheduler:
     """Планировщик для задач очистки данных."""
-    
+
     def __init__(self):
         self.scheduler: Optional[AsyncIOScheduler] = None
         self.started: bool = False
@@ -36,26 +36,27 @@ class CleanupScheduler:
             return
         self.scheduler = AsyncIOScheduler(timezone=timezone.utc)
         from .cleanup import CleanupTasks  # Ленивый импорт
+
         self.scheduler.add_job(
             CleanupTasks.cleanup_old_verification_sessions,
             IntervalTrigger(hours=12),
             id="cleanup_verification_sessions",
             name="Cleanup Old Verification Sessions",
-            replace_existing=True
+            replace_existing=True,
         )
         self.scheduler.add_job(
             CleanupTasks.cleanup_old_logs,
             IntervalTrigger(hours=24),
             id="cleanup_old_logs",
             name="Cleanup Old Audit Logs",
-            replace_existing=True
+            replace_existing=True,
         )
         self.scheduler.add_job(
             CleanupTasks.run_full_cleanup,
             CronTrigger(day_of_week="sun", hour=2, minute=0),
             id="full_cleanup",
             name="Full System Cleanup",
-            replace_existing=True
+            replace_existing=True,
         )
         self.scheduler.start()
         self.started = True
@@ -72,7 +73,7 @@ class CleanupScheduler:
 class WebhookScheduler:
     """
     Планировщик для задач webhook.
-    
+
     Задачи:
     - Очистка старых логов webhook (ежедневно в 03:00)
     - Логирование статистики webhook (каждые 30 минут)
@@ -81,7 +82,7 @@ class WebhookScheduler:
     - Health check конфигураций с деактивацией проблемных (каждый час)
     - Обновление статистики конфигураций (каждые 15 минут)
     """
-    
+
     def __init__(self):
         self.scheduler: Optional[AsyncIOScheduler] = None
         self.started: bool = False
@@ -97,21 +98,21 @@ class WebhookScheduler:
             CronTrigger(hour=3, minute=0),
             id="webhook_log_cleanup",
             name="Cleanup Old Webhook Logs",
-            replace_existing=True
+            replace_existing=True,
         )
         self.scheduler.add_job(
             self._log_webhook_statistics,
             IntervalTrigger(minutes=30),
             id="webhook_stats_logging",
             name="Log Webhook Statistics",
-            replace_existing=True
+            replace_existing=True,
         )
         self.scheduler.add_job(
             self._check_stale_webhooks,
             IntervalTrigger(minutes=5),
             id="webhook_stale_check",
             name="Check Stale Webhooks",
-            replace_existing=True
+            replace_existing=True,
         )
 
         # Retry failed webhooks каждые 5 минут
@@ -121,7 +122,7 @@ class WebhookScheduler:
             id="webhook_retry",
             name="Retry Failed Webhooks",
             replace_existing=True,
-            misfire_grace_time=60
+            misfire_grace_time=60,
         )
 
         # Health check каждый час
@@ -131,7 +132,7 @@ class WebhookScheduler:
             id="webhook_health",
             name="Webhook Health Check",
             replace_existing=True,
-            misfire_grace_time=300
+            misfire_grace_time=300,
         )
 
         # Обновление статистики каждые 15 минут
@@ -141,7 +142,7 @@ class WebhookScheduler:
             id="webhook_stats",
             name="Update Webhook Statistics",
             replace_existing=True,
-            misfire_grace_time=60
+            misfire_grace_time=60,
         )
 
         self.scheduler.start()
@@ -157,6 +158,7 @@ class WebhookScheduler:
             from sqlalchemy import delete, and_
             from datetime import timedelta
             from ..db.models import WebhookLog, WebhookStatus
+
             logger.info("Starting webhook logs cleanup")
             async with get_async_db_manager().get_session() as db:
                 cutoff_date_success = datetime.now(timezone.utc) - timedelta(days=30)
@@ -164,7 +166,7 @@ class WebhookScheduler:
                     delete(WebhookLog).where(
                         and_(
                             WebhookLog.status == WebhookStatus.SUCCESS,
-                            WebhookLog.created_at < cutoff_date_success
+                            WebhookLog.created_at < cutoff_date_success,
                         )
                     )
                 )
@@ -172,8 +174,10 @@ class WebhookScheduler:
                 result_failed = await db.execute(
                     delete(WebhookLog).where(
                         and_(
-                            WebhookLog.status.in_([WebhookStatus.FAILED, WebhookStatus.EXPIRED]),
-                            WebhookLog.created_at < cutoff_date_failed
+                            WebhookLog.status.in_(
+                                [WebhookStatus.FAILED, WebhookStatus.EXPIRED]
+                            ),
+                            WebhookLog.created_at < cutoff_date_failed,
                         )
                     )
                 )
@@ -196,6 +200,7 @@ class WebhookScheduler:
             from sqlalchemy import select, func, and_
             from ..db.models import WebhookLog, WebhookConfig, WebhookStatus
             from datetime import timedelta
+
             async with get_async_db_manager().get_session() as db:
                 one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
                 result_total = await db.execute(
@@ -208,7 +213,7 @@ class WebhookScheduler:
                     select(func.count(WebhookLog.id)).where(
                         and_(
                             WebhookLog.created_at >= one_hour_ago,
-                            WebhookLog.status == WebhookStatus.SUCCESS
+                            WebhookLog.status == WebhookStatus.SUCCESS,
                         )
                     )
                 )
@@ -217,7 +222,7 @@ class WebhookScheduler:
                     select(func.count(WebhookLog.id)).where(
                         and_(
                             WebhookLog.created_at >= one_hour_ago,
-                            WebhookLog.status == WebhookStatus.FAILED
+                            WebhookLog.status == WebhookStatus.FAILED,
                         )
                     )
                 )
@@ -226,7 +231,7 @@ class WebhookScheduler:
                     select(func.count(WebhookLog.id)).where(
                         and_(
                             WebhookLog.created_at >= one_hour_ago,
-                            WebhookLog.status == WebhookStatus.PENDING
+                            WebhookLog.status == WebhookStatus.PENDING,
                         )
                     )
                 )
@@ -235,7 +240,7 @@ class WebhookScheduler:
                     select(func.count(WebhookLog.id)).where(
                         and_(
                             WebhookLog.created_at >= one_hour_ago,
-                            WebhookLog.status == WebhookStatus.RETRY
+                            WebhookLog.status == WebhookStatus.RETRY,
                         )
                     )
                 )
@@ -244,7 +249,7 @@ class WebhookScheduler:
                     select(func.avg(WebhookLog.processing_time)).where(
                         and_(
                             WebhookLog.created_at >= one_hour_ago,
-                            WebhookLog.processing_time.isnot(None)
+                            WebhookLog.processing_time.isnot(None),
                         )
                     )
                 )
@@ -255,7 +260,11 @@ class WebhookScheduler:
                     )
                 )
                 active_configs = result_active_configs.scalar() or 0
-                success_rate = (success_webhooks / total_webhooks * 100) if total_webhooks > 0 else 0
+                success_rate = (
+                    (success_webhooks / total_webhooks * 100)
+                    if total_webhooks > 0
+                    else 0
+                )
                 logger.info(
                     f"Webhook Stats (last hour): "
                     f"Total={total_webhooks}, "
@@ -279,6 +288,7 @@ class WebhookScheduler:
             from sqlalchemy import update, and_
             from datetime import timedelta
             from ..db.models import WebhookLog, WebhookStatus
+
             async with get_async_db_manager().get_session() as db:
                 stale_cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
                 result = await db.execute(
@@ -286,13 +296,13 @@ class WebhookScheduler:
                     .where(
                         and_(
                             WebhookLog.status == WebhookStatus.PENDING,
-                            WebhookLog.created_at < stale_cutoff
+                            WebhookLog.created_at < stale_cutoff,
                         )
                     )
                     .values(
                         status=WebhookStatus.EXPIRED,
                         error_message="Webhook expired - stuck in PENDING status",
-                        last_attempt_at=datetime.now(timezone.utc)
+                        last_attempt_at=datetime.now(timezone.utc),
                     )
                 )
                 await db.commit()
@@ -321,13 +331,15 @@ class WebhookScheduler:
 
                 result = await db.execute(
                     select(WebhookLog, WebhookConfig)
-                    .join(WebhookConfig, WebhookConfig.id == WebhookLog.webhook_config_id)
+                    .join(
+                        WebhookConfig, WebhookConfig.id == WebhookLog.webhook_config_id
+                    )
                     .where(
                         and_(
                             WebhookLog.status == WebhookStatus.RETRY,
                             WebhookLog.next_retry_at.isnot(None),
                             WebhookLog.next_retry_at <= now,
-                            WebhookConfig.is_active == True
+                            WebhookConfig.is_active == True,
                         )
                     )
                     .limit(100)
@@ -356,7 +368,9 @@ class WebhookScheduler:
                             )
                             await db.commit()
                             failed += 1
-                            logger.warning(f"Webhook {log.id} exceeded max retries, marking as failed")
+                            logger.warning(
+                                f"Webhook {log.id} exceeded max retries, marking as failed"
+                            )
                             continue
 
                         # Запускаем retry асинхронно
@@ -367,7 +381,7 @@ class WebhookScheduler:
                                 config=config,
                                 log_id=log.id,
                                 signature=log.signature,
-                                max_retries_override=config.max_retries - log.attempts
+                                max_retries_override=config.max_retries - log.attempts,
                             )
                         )
 
@@ -412,15 +426,17 @@ class WebhookScheduler:
 
                     stats_result = await db.execute(
                         select(
-                            func.count(WebhookLog.id).label('total'),
+                            func.count(WebhookLog.id).label("total"),
                             func.sum(
-                                func.cast(WebhookLog.status == WebhookStatus.SUCCESS, type_=db.bind.dialect.NUMERIC)
-                            ).label('success')
-                        )
-                        .where(
+                                func.cast(
+                                    WebhookLog.status == WebhookStatus.SUCCESS,
+                                    type_=db.bind.dialect.NUMERIC,
+                                )
+                            ).label("success"),
+                        ).where(
                             and_(
                                 WebhookLog.webhook_config_id == config.id,
-                                WebhookLog.created_at >= last_24h
+                                WebhookLog.created_at >= last_24h,
                             )
                         )
                     )
@@ -445,13 +461,15 @@ class WebhookScheduler:
                         await db.commit()
 
                         deactivated += 1
-                        warnings.append({
-                            "config_id": str(config.id),
-                            "user_id": str(config.user_id),
-                            "fail_rate": f"{fail_rate * 100:.1f}%",
-                            "total_attempts": total,
-                            "action": "deactivated"
-                        })
+                        warnings.append(
+                            {
+                                "config_id": str(config.id),
+                                "user_id": str(config.user_id),
+                                "fail_rate": f"{fail_rate * 100:.1f}%",
+                                "total_attempts": total,
+                                "action": "deactivated",
+                            }
+                        )
 
                         logger.warning(
                             f"Deactivated webhook config {config.id} due to high fail rate: "
@@ -460,13 +478,15 @@ class WebhookScheduler:
 
                     # Предупреждение при fail rate > 50%
                     elif fail_rate > 0.5:
-                        warnings.append({
-                            "config_id": str(config.id),
-                            "user_id": str(config.user_id),
-                            "fail_rate": f"{fail_rate * 100:.1f}%",
-                            "total_attempts": total,
-                            "action": "warning"
-                        })
+                        warnings.append(
+                            {
+                                "config_id": str(config.id),
+                                "user_id": str(config.user_id),
+                                "fail_rate": f"{fail_rate * 100:.1f}%",
+                                "total_attempts": total,
+                                "action": "warning",
+                            }
+                        )
 
                         logger.warning(
                             f"Webhook config {config.id} has high fail rate: "
@@ -500,16 +520,21 @@ class WebhookScheduler:
                     # Считаем статистику из логов
                     stats_result = await db.execute(
                         select(
-                            func.count(WebhookLog.id).label('total'),
+                            func.count(WebhookLog.id).label("total"),
                             func.sum(
-                                func.cast(WebhookLog.status == WebhookStatus.SUCCESS, type_=db.bind.dialect.NUMERIC)
-                            ).label('success'),
+                                func.cast(
+                                    WebhookLog.status == WebhookStatus.SUCCESS,
+                                    type_=db.bind.dialect.NUMERIC,
+                                )
+                            ).label("success"),
                             func.sum(
-                                func.cast(WebhookLog.status == WebhookStatus.FAILED, type_=db.bind.dialect.NUMERIC)
-                            ).label('failed'),
-                            func.max(WebhookLog.created_at).label('last_sent')
-                        )
-                        .where(WebhookLog.webhook_config_id == config.id)
+                                func.cast(
+                                    WebhookLog.status == WebhookStatus.FAILED,
+                                    type_=db.bind.dialect.NUMERIC,
+                                )
+                            ).label("failed"),
+                            func.max(WebhookLog.created_at).label("last_sent"),
+                        ).where(WebhookLog.webhook_config_id == config.id)
                     )
 
                     stats = stats_result.first()
@@ -522,7 +547,7 @@ class WebhookScheduler:
                             total_sent=stats.total or 0,
                             successful_sent=stats.success or 0,
                             failed_sent=stats.failed or 0,
-                            last_sent_at=stats.last_sent
+                            last_sent_at=stats.last_sent,
                         )
                     )
 
@@ -592,7 +617,7 @@ def get_scheduler_status() -> Dict[str, Any]:
     """
     Получение статуса всех планировщиков.
     Полезно для health checks и мониторинга.
-    
+
     Returns:
         Dict с информацией о статусе планировщиков
     """
@@ -600,20 +625,28 @@ def get_scheduler_status() -> Dict[str, Any]:
     return {
         "cleanup_scheduler": {
             "running": cleanup_scheduler.started if cleanup_scheduler else False,
-            "jobs": len(cleanup_scheduler.scheduler.get_jobs()) if cleanup_scheduler and cleanup_scheduler.scheduler else 0
+            "jobs": (
+                len(cleanup_scheduler.scheduler.get_jobs())
+                if cleanup_scheduler and cleanup_scheduler.scheduler
+                else 0
+            ),
         },
         "webhook_scheduler": {
             "running": webhook_scheduler.started if webhook_scheduler else False,
-            "jobs": len(webhook_scheduler.scheduler.get_jobs()) if webhook_scheduler and webhook_scheduler.scheduler else 0
+            "jobs": (
+                len(webhook_scheduler.scheduler.get_jobs())
+                if webhook_scheduler and webhook_scheduler.scheduler
+                else 0
+            ),
         },
-        "timestamp": datetime.now(timezone.utc).isoformat()
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
 def get_scheduled_jobs() -> Dict[str, list]:
     """
     Получение списка всех запланированных задач.
-    
+
     Returns:
         Dict со списками задач для каждого планировщика
     """
@@ -622,22 +655,30 @@ def get_scheduled_jobs() -> Dict[str, list]:
     webhook_jobs = []
     if cleanup_scheduler and cleanup_scheduler.scheduler:
         for job in cleanup_scheduler.scheduler.get_jobs():
-            cleanup_jobs.append({
-                "id": job.id,
-                "name": job.name,
-                "next_run_time": job.next_run_time.isoformat() if job.next_run_time else None,
-                "trigger": str(job.trigger)
-            })
+            cleanup_jobs.append(
+                {
+                    "id": job.id,
+                    "name": job.name,
+                    "next_run_time": (
+                        job.next_run_time.isoformat() if job.next_run_time else None
+                    ),
+                    "trigger": str(job.trigger),
+                }
+            )
     if webhook_scheduler and webhook_scheduler.scheduler:
         for job in webhook_scheduler.scheduler.get_jobs():
-            webhook_jobs.append({
-                "id": job.id,
-                "name": job.name,
-                "next_run_time": job.next_run_time.isoformat() if job.next_run_time else None,
-                "trigger": str(job.trigger)
-            })
+            webhook_jobs.append(
+                {
+                    "id": job.id,
+                    "name": job.name,
+                    "next_run_time": (
+                        job.next_run_time.isoformat() if job.next_run_time else None
+                    ),
+                    "trigger": str(job.trigger),
+                }
+            )
     return {
         "cleanup_jobs": cleanup_jobs,
         "webhook_jobs": webhook_jobs,
-        "total_jobs": len(cleanup_jobs) + len(webhook_jobs)
+        "total_jobs": len(cleanup_jobs) + len(webhook_jobs),
     }

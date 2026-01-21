@@ -86,7 +86,9 @@ class ReferenceService:
         )
 
         if not validation_result.is_valid:
-            raise ValidationError(f"Image validation failed: {validation_result.error_message}")
+            raise ValidationError(
+                f"Image validation failed: {validation_result.error_message}"
+            )
 
         # 2. Генерация embedding
         embedding_result = await self.ml_service.generate_embedding(
@@ -129,7 +131,7 @@ class ReferenceService:
                     "user_id": user_id,
                     "label": label,
                     "quality_score": embedding_result["quality_score"],
-                }
+                },
             )
             file_url = upload_result.get("file_url")
 
@@ -353,14 +355,13 @@ class ReferenceService:
         )
 
         if not validation_result.is_valid:
-            raise ValidationError(f"Image validation failed: {validation_result.error_message}")
+            raise ValidationError(
+                f"Image validation failed: {validation_result.error_message}"
+            )
 
         # 2. Получение references для сравнения
         if reference_ids:
-            references = [
-                await self.get_reference(rid)
-                for rid in reference_ids
-            ]
+            references = [await self.get_reference(rid) for rid in reference_ids]
             references = [ref for ref in references if ref is not None]
         elif user_id:
             references = await self.get_all_references(user_id, include_inactive=False)
@@ -406,17 +407,25 @@ class ReferenceService:
                 if comparison_result.get("success"):
                     similarity = comparison_result["similarity_score"]
 
-                    results.append({
-                        "reference_id": reference.id,
-                        "user_id": reference.user_id,
-                        "label": reference.label,
-                        "similarity_score": similarity,
-                        "distance": comparison_result.get("distance", 1.0 - similarity),
-                        "is_match": similarity >= threshold,
-                        "quality_score": reference.quality_score,
-                        "version": reference.version,
-                        "created_at": reference.created_at.isoformat() if reference.created_at else None,
-                    })
+                    results.append(
+                        {
+                            "reference_id": reference.id,
+                            "user_id": reference.user_id,
+                            "label": reference.label,
+                            "similarity_score": similarity,
+                            "distance": comparison_result.get(
+                                "distance", 1.0 - similarity
+                            ),
+                            "is_match": similarity >= threshold,
+                            "quality_score": reference.quality_score,
+                            "version": reference.version,
+                            "created_at": (
+                                reference.created_at.isoformat()
+                                if reference.created_at
+                                else None
+                            ),
+                        }
+                    )
 
             except Exception as e:
                 logger.warning(f"Failed to compare with reference {reference.id}: {e}")
@@ -483,10 +492,7 @@ class ReferenceService:
         Returns:
             Номер следующей версии
         """
-        stmt = (
-            select(func.max(Reference.version))
-            .where(Reference.user_id == user_id)
-        )
+        stmt = select(func.max(Reference.version)).where(Reference.user_id == user_id)
         result = await self.db.execute(stmt)
         max_version = result.scalar()
 
@@ -541,8 +547,10 @@ class ReferenceService:
         inactive_references = [ref for ref in references if not ref.is_active]
 
         avg_quality = (
-            sum(ref.quality_score or 0 for ref in active_references) / len(active_references)
-            if active_references else 0.0
+            sum(ref.quality_score or 0 for ref in active_references)
+            / len(active_references)
+            if active_references
+            else 0.0
         )
 
         return {
@@ -551,6 +559,10 @@ class ReferenceService:
             "inactive_references": len(inactive_references),
             "average_quality_score": avg_quality,
             "latest_version": references[0].version if references else 0,
-            "oldest_reference": references[-1].created_at.isoformat() if references else None,
-            "newest_reference": references[0].created_at.isoformat() if references else None,
+            "oldest_reference": (
+                references[-1].created_at.isoformat() if references else None
+            ),
+            "newest_reference": (
+                references[0].created_at.isoformat() if references else None
+            ),
         }

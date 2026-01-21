@@ -41,15 +41,21 @@ class UploadRequest(BaseModel):
     image_data: str = Field(
         ...,
         description="Изображение в формате base64 или URL",
-        json_schema_extra={"example": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ..."}
+        json_schema_extra={
+            "example": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQ..."
+        },
     )
     user_id: Optional[str] = Field(
-        None, description="Идентификатор пользователя", json_schema_extra={"example": "user_123"}
+        None,
+        description="Идентификатор пользователя",
+        json_schema_extra={"example": "user_123"},
     )
     metadata: Optional[Dict[str, Any]] = Field(
         None,
         description="Дополнительные метаданные",
-        json_schema_extra={"example": {"source": "mobile_app", "device_id": "device_456"}}
+        json_schema_extra={
+            "example": {"source": "mobile_app", "device_id": "device_456"}
+        },
     )
     reference_id: Optional[str] = Field(
         None, description="ID эталонного изображения для сравнения"
@@ -83,7 +89,9 @@ class VerifyRequest(BaseModel):
     """
 
     session_id: str = Field(
-        ..., description="ID сессии верификации", json_schema_extra={"example": "verify_session_123"}
+        ...,
+        description="ID сессии верификации",
+        json_schema_extra={"example": "verify_session_123"},
     )
     image_data: str = Field(
         ..., description="Изображение для верификации в формате base64 или URL"
@@ -115,7 +123,9 @@ class LivenessRequest(BaseModel):
     """
 
     session_id: str = Field(
-        ..., description="ID сессии проверки живости", json_schema_extra={"example": "liveness_session_456"}
+        ...,
+        description="ID сессии проверки живости",
+        json_schema_extra={"example": "liveness_session_456"},
     )
     image_data: str = Field(
         ..., description="Изображение для проверки живости в формате base64 или URL"
@@ -123,12 +133,18 @@ class LivenessRequest(BaseModel):
     challenge_type: Optional[str] = Field(
         "passive",
         description="Тип проверки: passive, active, blink, smile, turn_head, video_blink, video_smile, video_head_turn",
-        json_schema_extra={"example": "passive"}
+        json_schema_extra={"example": "passive"},
     )
     challenge_data: Optional[Dict[str, Any]] = Field(
         None,
         description="Данные для активной проверки (движения, повороты головы)",
-        json_schema_extra={"example": {"rotation_x": 15, "rotation_y": 10, "instruction": "Turn head slightly"}}
+        json_schema_extra={
+            "example": {
+                "rotation_x": 15,
+                "rotation_y": 10,
+                "instruction": "Turn head slightly",
+            }
+        },
     )
 
     @field_validator("challenge_type")
@@ -136,8 +152,14 @@ class LivenessRequest(BaseModel):
     def validate_challenge_type(cls, v):
         """Валидация типа проверки живости."""
         allowed_types = [
-            "passive", "active", "blink", "smile", "turn_head",
-            "video_blink", "video_smile", "video_head_turn"
+            "passive",
+            "active",
+            "blink",
+            "smile",
+            "turn_head",
+            "video_blink",
+            "video_smile",
+            "video_head_turn",
         ]
         if v not in allowed_types:
             raise ValueError(f"Challenge type must be one of: {allowed_types}")
@@ -157,25 +179,19 @@ class VideoLivenessRequest(BaseModel):
     Модель для запроса проверки живости по видео.
     """
 
-    session_id: str = Field(
-        ..., description="ID сессии проверки живости"
-    )
+    session_id: str = Field(..., description="ID сессии проверки живости")
     video_data: str = Field(
         ..., description="Видео для проверки живости в формате base64 или URL"
     )
     challenge_type: str = Field(
         "video_blink",
-        description="Тип анализа видео: video_blink, video_smile, video_head_turn"
+        description="Тип анализа видео: video_blink, video_smile, video_head_turn",
     )
     frame_count: int = Field(
-        10,
-        ge=3,
-        le=30,
-        description="Количество кадров для анализа (3-30)"
+        10, ge=3, le=30, description="Количество кадров для анализа (3-30)"
     )
     challenge_data: Optional[Dict[str, Any]] = Field(
-        None,
-        description="Дополнительные данные для анализа видео"
+        None, description="Дополнительные данные для анализа видео"
     )
 
     @field_validator("challenge_type")
@@ -197,22 +213,13 @@ class BatchEmbeddingRequest(BaseModel):
         ...,
         description="Список изображений в формате base64 или URL",
         min_length=1,
-        max_length=100
+        max_length=100,
     )
     batch_size: int = Field(
-        8,
-        ge=1,
-        le=32,
-        description="Размер батча для обработки (1-32)"
+        8, ge=1, le=32, description="Размер батча для обработки (1-32)"
     )
-    user_id: Optional[str] = Field(
-        None,
-        description="ID пользователя для ассоциации"
-    )
-    metadata: Optional[Dict[str, Any]] = Field(
-        None,
-        description="Метаданные для батча"
-    )
+    user_id: Optional[str] = Field(None, description="ID пользователя для ассоциации")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Метаданные для батча")
 
     @field_validator("images")
     @classmethod
@@ -233,26 +240,18 @@ class BatchVerificationRequest(BaseModel):
         ...,
         description="Список изображений для верификации",
         min_length=1,
-        max_length=100
+        max_length=100,
     )
     reference_embedding: List[float] = Field(
         ...,
         description="Эталонный эмбеддинг для сравнения",
         min_length=128,
-        max_length=512
+        max_length=512,
     )
     threshold: float = Field(
-        0.8,
-        ge=0.0,
-        le=1.0,
-        description="Порог схожести для положительной верификации"
+        0.8, ge=0.0, le=1.0, description="Порог схожести для положительной верификации"
     )
-    batch_size: int = Field(
-        8,
-        ge=1,
-        le=32,
-        description="Размер батча для обработки"
-    )
+    batch_size: int = Field(8, ge=1, le=32, description="Размер батча для обработки")
 
     @field_validator("images")
     @classmethod
@@ -270,7 +269,9 @@ class BatchVerificationRequest(BaseModel):
         # Проверяем что все значения в разумном диапазоне
         for i, value in enumerate(v):
             if not isinstance(value, (int, float)) or abs(value) > 10:
-                raise ValueError(f"Embedding value {i} must be a number with |value| <= 10")
+                raise ValueError(
+                    f"Embedding value {i} must be a number with |value| <= 10"
+                )
         return v
 
 
@@ -279,23 +280,17 @@ class AdvancedAntiSpoofingRequest(BaseModel):
     Модель для продвинутой проверки anti-spoofing.
     """
 
-    session_id: str = Field(
-        ..., description="ID сессии проверки"
-    )
-    image_data: str = Field(
-        ..., description="Изображение для анализа"
-    )
+    session_id: str = Field(..., description="ID сессии проверки")
+    image_data: str = Field(..., description="Изображение для анализа")
     analysis_type: str = Field(
         "comprehensive",
-        description="Тип анализа: comprehensive, depth, texture, certified"
+        description="Тип анализа: comprehensive, depth, texture, certified",
     )
     certification_level: Optional[str] = Field(
-        None,
-        description="Уровень сертификации: basic, standard, premium"
+        None, description="Уровень сертификации: basic, standard, premium"
     )
     include_reasoning: bool = Field(
-        True,
-        description="Включить детальное объяснение reasoning"
+        True, description="Включить детальное объяснение reasoning"
     )
 
     @field_validator("analysis_type")
@@ -314,7 +309,9 @@ class AdvancedAntiSpoofingRequest(BaseModel):
         if v is not None:
             allowed_levels = ["basic", "standard", "premium"]
             if v not in allowed_levels:
-                raise ValueError(f"Certification level must be one of: {allowed_levels}")
+                raise ValueError(
+                    f"Certification level must be one of: {allowed_levels}"
+                )
         return v
 
 
@@ -327,10 +324,14 @@ class ReferenceCreateRequest(BaseModel):
         ..., description="Изображение для создания эталона в формате base64 или URL"
     )
     user_id: str = Field(
-        ..., description="Идентификатор пользователя", json_schema_extra={"example": "user_123"}
+        ...,
+        description="Идентификатор пользователя",
+        json_schema_extra={"example": "user_123"},
     )
     label: Optional[str] = Field(
-        None, description="Метка для эталона", json_schema_extra={"example": "reference_photo_1"}
+        None,
+        description="Метка для эталона",
+        json_schema_extra={"example": "reference_photo_1"},
     )
     metadata: Optional[Dict[str, Any]] = Field(
         None, description="Дополнительные метаданные"
@@ -358,15 +359,12 @@ class ReferenceUpdateRequest(BaseModel):
     )
     label: Optional[str] = Field(None, description="Новая метка эталона")
     metadata: Optional[Dict[str, Any]] = Field(
-        None,
-        description="Обновленные метаданные"
+        None, description="Обновленные метаданные"
     )
     quality_threshold: Optional[float] = Field(
         None, ge=0.0, le=1.0, description="Новый порог качества"
     )
-    is_active: Optional[bool] = Field(
-        None, description="Активен ли эталон"
-    )
+    is_active: Optional[bool] = Field(None, description="Активен ли эталон")
 
     @field_validator("image_data")
     @classmethod
@@ -383,10 +381,14 @@ class AdminStatsRequest(BaseModel):
     """
 
     date_from: Optional[str] = Field(
-        None, description="Начальная дата в формате YYYY-MM-DD", json_schema_extra={"example": "2024-01-01"}
+        None,
+        description="Начальная дата в формате YYYY-MM-DD",
+        json_schema_extra={"example": "2024-01-01"},
     )
     date_to: Optional[str] = Field(
-        None, description="Конечная дата в формате YYYY-MM-DD", json_schema_extra={"example": "2024-01-31"}
+        None,
+        description="Конечная дата в формате YYYY-MM-DD",
+        json_schema_extra={"example": "2024-01-31"},
     )
     include_user_stats: bool = Field(
         False, description="Включить статистику по пользователям"
@@ -433,7 +435,7 @@ class UserCreate(BaseModel):
                 "email": "user@example.com",
                 "password": "SecurePass123!",
                 "full_name": "John Doe",
-                "phone": "+1234567890"
+                "phone": "+1234567890",
             }
         }
     }
@@ -448,10 +450,7 @@ class UserLogin(BaseModel):
 
     model_config = {
         "json_schema_extra": {
-            "example": {
-                "email": "user@example.com",
-                "password": "SecurePass123!"
-            }
+            "example": {"email": "user@example.com", "password": "SecurePass123!"}
         }
     }
 
@@ -496,7 +495,7 @@ class CompareRequest(BaseModel):
             raise ValueError("reference_ids list cannot be empty")
         return v
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def check_user_or_reference_ids(self):
         """Проверка, что указан либо user_id, либо reference_ids."""
         if not self.user_id and not self.reference_ids:

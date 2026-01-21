@@ -25,6 +25,7 @@ logger = get_logger(__name__)
 # Logging Middleware
 # =============================================================================
 
+
 class LoggingMiddleware(BaseHTTPMiddleware):
     """
     Middleware для логирования HTTP запросов и ответов.
@@ -154,6 +155,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
 # =============================================================================
 # Structured Event Logger (Business / Security / Performance)
 # =============================================================================
+
 
 class RequestLogger:
     """

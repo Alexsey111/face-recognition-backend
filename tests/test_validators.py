@@ -10,7 +10,7 @@ from unittest.mock import Mock
 
 from app.utils.validators import (
     validate_email,
-    validate_username, 
+    validate_username,
     validate_password,
     validate_image_format,
     validate_image_size,
@@ -24,7 +24,7 @@ from app.utils.validators import (
     sanitize_string,
     sanitize_html,
     validate_sql_safe,
-    _detect_image_format
+    _detect_image_format,
 )
 from app.utils.exceptions import ValidationError
 
@@ -38,9 +38,9 @@ class TestEmailValidation:
             "user@example.com",
             "test.email@domain.co.uk",
             "user123@test-domain.org",
-            "name.surname@subdomain.domain.com"
+            "name.surname@subdomain.domain.com",
         ]
-        
+
         for email in valid_emails:
             assert validate_email(email) is True
 
@@ -48,12 +48,12 @@ class TestEmailValidation:
         """Тест невалидного email."""
         # Обновленный список с учетом реального поведения валидатора
         invalid_emails = [
-            "",                    # Пустой email
-            "@domain.com",         # Нет локальной части  
-            "user@"                # Нет домена
+            "",  # Пустой email
+            "@domain.com",  # Нет локальной части
+            "user@",  # Нет домена
             # "user@domain..com" убираем - проходит валидацию (проблема в regex)
         ]
-        
+
         for email in invalid_emails:
             with pytest.raises(ValidationError):
                 validate_email(email)
@@ -63,7 +63,7 @@ class TestEmailValidation:
         # None значение
         with pytest.raises(ValidationError):
             validate_email(None)
-        
+
         # Не строка
         with pytest.raises(ValidationError):
             validate_email(123)
@@ -79,9 +79,9 @@ class TestUsernameValidation:
             "test_user",
             "User-Name",
             "user_name_123",
-            "a" * 50  # Максимальная длина
+            "a" * 50,  # Максимальная длина
         ]
-        
+
         for username in valid_usernames:
             assert validate_username(username) is True
 
@@ -95,9 +95,9 @@ class TestUsernameValidation:
             "user!name",  # Неразрешенный символ
             "user.name",  # Точка не разрешена
             "user#name",  # Неразрешенный символ
-            "a" * 51  # Слишком длинный
+            "a" * 51,  # Слишком длинный
         ]
-        
+
         for username in invalid_usernames:
             with pytest.raises(ValidationError):
                 validate_username(username)
@@ -112,10 +112,10 @@ class TestPasswordValidation:
         valid_passwords = [
             "Password123!",
             "MyP@ssw0rd",
-            "C0mpl3x!Pass"
+            "C0mpl3x!Pass",
             # Убираем длинный пароль - он вызывает проблемы
         ]
-        
+
         for password in valid_passwords:
             assert validate_password(password) is True
 
@@ -128,9 +128,9 @@ class TestPasswordValidation:
             "NOLOWERCASE123!",  # Нет строчной буквы
             "NoNumbers!",  # Нет цифр
             "NoSpecialChars123",  # Нет спецсимволов
-            "a" * 129  # Слишком длинный
+            "a" * 129,  # Слишком длинный
         ]
-        
+
         for password in invalid_passwords:
             with pytest.raises(ValidationError):
                 validate_password(password)
@@ -144,7 +144,7 @@ class TestPasswordValidation:
             ("NoSpecial123", False),  # Нет спецсимволов
             ("ValidPass123!", True),  # Все требования выполнены
         ]
-        
+
         for password, should_be_valid in test_cases:
             if should_be_valid:
                 assert validate_password(password) is True
@@ -162,21 +162,16 @@ class TestImageValidation:
             "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwA/8A",
             "test_image.jpg",
             "path/to/image.png",
-            "image.webp"
+            "image.webp",
         ]
-        
+
         for image_data in valid_images:
             assert validate_image_format(image_data) is True
 
     def test_invalid_image_formats(self):
         """Тест невалидных форматов изображений."""
-        invalid_images = [
-            "",
-            "document.pdf",
-            "video.mp4",
-            "archive.zip"
-        ]
-        
+        invalid_images = ["", "document.pdf", "video.mp4", "archive.zip"]
+
         for image_data in invalid_images:
             with pytest.raises(ValidationError):
                 validate_image_format(image_data)
@@ -190,9 +185,9 @@ class TestImageValidation:
             ("image.jpg", "JPEG"),
             ("IMAGE.PNG", "PNG"),
             ("photo.webp", "WEBP"),
-            ("unknown.xyz", "UNKNOWN")
+            ("unknown.xyz", "UNKNOWN"),
         ]
-        
+
         for image_data, expected_format in test_cases:
             assert _detect_image_format(image_data) == expected_format
 
@@ -201,10 +196,10 @@ class TestImageValidation:
         # Создаем тестовые данные разного размера
         small_data = b"small_data"
         large_data = b"x" * (15 * 1024 * 1024)  # 15MB
-        
+
         # Маленькие данные должны проходить валидацию
         assert validate_image_size(small_data, max_size=10 * 1024 * 1024) is True
-        
+
         # Большие данные должны проваливаться
         with pytest.raises(ValidationError, match="Image is too large"):
             validate_image_size(large_data, max_size=10 * 1024 * 1024)
@@ -213,13 +208,16 @@ class TestImageValidation:
         """Тест валидации размера base64 изображения."""
         # Создаем base64 данные
         image_data = "data:image/jpeg;base64," + base64.b64encode(b"x" * 1024).decode()
-        
+
         # Должно пройти валидацию для 1KB
         assert validate_image_size(image_data, max_size=10 * 1024) is True
-        
+
         # Создаем слишком большие данные
-        large_base64 = "data:image/jpeg;base64," + base64.b64encode(b"x" * (15 * 1024 * 1024)).decode()
-        
+        large_base64 = (
+            "data:image/jpeg;base64,"
+            + base64.b64encode(b"x" * (15 * 1024 * 1024)).decode()
+        )
+
         with pytest.raises(ValidationError, match="Image is too large"):
             validate_image_size(large_base64, max_size=10 * 1024 * 1024)
 
@@ -232,9 +230,9 @@ class TestUUIDValidation:
         valid_uuids = [
             "123e4567-e89b-12d3-a456-426614174000",
             "550e8400-e29b-41d4-a716-446655440000",
-            "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+            "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
         ]
-        
+
         for uuid_str in valid_uuids:
             assert validate_uuid(uuid_str) is True
 
@@ -245,9 +243,9 @@ class TestUUIDValidation:
             "invalid-uuid",
             "123e4567-e89b-12d3-a456-42661417400",  # Слишком короткий
             "123e4567-e89b-12d3-a456-4266141740000",  # Слишком длинный
-            "gggggggg-e89b-12d3-a456-426614174000"  # Неверные символы
+            "gggggggg-e89b-12d3-a456-426614174000",  # Неверные символы
         ]
-        
+
         for uuid_str in invalid_uuids:
             with pytest.raises(ValidationError):
                 validate_uuid(uuid_str)
@@ -262,9 +260,9 @@ class TestDateValidation:
             "2023-12-25",
             "2000-01-01",
             "1999-12-31",
-            "2024-02-29"  # Високосный год
+            "2024-02-29",  # Високосный год
         ]
-        
+
         for date_str in valid_dates:
             assert validate_date(date_str) is True
 
@@ -279,7 +277,7 @@ class TestDateValidation:
             "not-a-date",  # Не дата
             "2023/12/25",  # Неверный формат
         ]
-        
+
         for date_str in invalid_dates:
             with pytest.raises(ValidationError):
                 validate_date(date_str)
@@ -301,9 +299,9 @@ class TestURLValidation:
             "http://localhost:8000",
             "https://api.example.com/v1/users",
             "http://192.168.1.1:8080",
-            "https://subdomain.domain.co.uk/path?param=value"
+            "https://subdomain.domain.co.uk/path?param=value",
         ]
-        
+
         for url in valid_urls:
             assert validate_url(url) is True
 
@@ -317,7 +315,7 @@ class TestURLValidation:
             "://example.com",  # Нет протокола
             "http://",  # Только протокол
         ]
-        
+
         for url in invalid_urls:
             with pytest.raises(ValidationError):
                 validate_url(url)
@@ -330,23 +328,25 @@ class TestHashValidation:
         """Тест валидного SHA256 хеша."""
         data = b"test_data"
         import hashlib
+
         expected_hash = hashlib.sha256(data).hexdigest()
-        
+
         assert validate_file_hash(data, expected_hash, "sha256") is True
 
     def test_valid_hash_md5(self):
         """Тест валидного MD5 хеша."""
         data = b"test_data"
         import hashlib
+
         expected_hash = hashlib.md5(data).hexdigest()
-        
+
         assert validate_file_hash(data, expected_hash, "md5") is True
 
     def test_invalid_hash(self):
         """Тест невалидного хеша."""
         data = b"test_data"
         wrong_hash = "wrong_hash_value"
-        
+
         with pytest.raises(ValidationError, match="Hash mismatch"):
             validate_file_hash(data, wrong_hash)
 
@@ -355,15 +355,16 @@ class TestHashValidation:
         # Тестовые данные в base64
         base64_data = base64.b64encode(b"test_data").decode()
         import hashlib
+
         expected_hash = hashlib.sha256(b"test_data").hexdigest()
-        
+
         assert validate_file_hash(base64_data, expected_hash) is True
 
     def test_unsupported_hash_algorithm(self):
         """Тест неподдерживаемого алгоритма хеширования."""
         data = b"test_data"
         hash_value = "some_hash"
-        
+
         with pytest.raises(ValidationError, match="Unsupported hash algorithm"):
             validate_file_hash(data, hash_value, "unsupported")
 
@@ -375,7 +376,7 @@ class TestStringSanitization:
         """Тест базовой санитизации."""
         dirty_string = '<script>alert("xss")</script>Hello World!'
         clean_string = sanitize_string(dirty_string)
-        
+
         assert "<script>" not in clean_string
         assert "Hello World!" in clean_string
 
@@ -383,14 +384,14 @@ class TestStringSanitization:
         """Тест санитизации с ограничением длины."""
         long_string = "a" * 100
         clean_string = sanitize_string(long_string, max_length=50)
-        
+
         assert len(clean_string) == 50
 
     def test_sanitize_with_allowed_chars(self):
         """Тест санитизации с разрешенными символами."""
         string = "abc123!@#xyz"
         clean_string = sanitize_string(string, allowed_chars="abc123")
-        
+
         # Функция сохраняет только символы из allowed_chars
         # Все остальные символы удаляются
         assert clean_string == "abc123"
@@ -475,14 +476,14 @@ class TestEmbeddingValidation:
     def test_embedding_with_nan(self):
         """Тест эмбеддинга с NaN."""
         embedding = [0.1] * 128
-        embedding[50] = float('nan')
+        embedding[50] = float("nan")
         with pytest.raises(ValidationError, match="Invalid float at index 50"):
             validate_embedding(embedding)
 
     def test_embedding_with_infinity(self):
         """Тест эмбеддинга с бесконечностью."""
         embedding = [0.1] * 128
-        embedding[50] = float('inf')
+        embedding[50] = float("inf")
         with pytest.raises(ValidationError, match="Invalid float at index 50"):
             validate_embedding(embedding)
 
@@ -503,7 +504,7 @@ class TestSimilarityThresholdValidation:
         """Тест слишком низкого порога."""
         # Валидатор принимает значения от 0.0 до 1.0, поэтому 0.1 валиден
         assert validate_similarity_threshold(0.1) is True
-        
+
         # Отрицательные значения выходят за границы
         with pytest.raises(ValidationError, match="Threshold out of bounds"):
             validate_similarity_threshold(-0.1)
@@ -521,7 +522,7 @@ class TestHTMLSanitization:
         """Тест базовой HTML санитизации."""
         dirty_html = "<script>alert('xss')</script><p>Hello</p>"
         clean_html = sanitize_html(dirty_html)
-        
+
         # Функция удаляет все HTML теги и экранирует оставшиеся символы
         assert "<script>" not in clean_html
         assert "<p>" not in clean_html
@@ -531,7 +532,7 @@ class TestHTMLSanitization:
         """Тест экранирования кавычек."""
         html_with_quotes = '<a href="test">Link</a>'
         clean_html = sanitize_html(html_with_quotes)
-        
+
         # Функция удаляет все HTML теги, включая кавычки
         assert "Link" in clean_html
         # Кавычки удаляются вместе с тегом

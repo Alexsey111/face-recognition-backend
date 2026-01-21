@@ -88,7 +88,9 @@ class VerifyService:
         start_time = time.monotonic()
         request_id = session_id or str(uuid.uuid4())
 
-        logger.info(f"Starting face verification for user {user_id}, request {request_id}")
+        logger.info(
+            f"Starting face verification for user {user_id}, request {request_id}"
+        )
 
         try:
             with track_processing("verification"):
@@ -113,7 +115,9 @@ class VerifyService:
                 else:
                     # Получаем из БД
                     if reference_id:
-                        reference = await ReferenceCRUD.get_reference_by_id(self.db, reference_id)
+                        reference = await ReferenceCRUD.get_reference_by_id(
+                            self.db, reference_id
+                        )
                     else:
                         reference = await self._get_user_reference(user_id)
 
@@ -124,8 +128,10 @@ class VerifyService:
                         )
 
                     # Расшифровка reference embedding
-                    reference_embedding_decrypted = await self.encryption_service.decrypt_embedding(
-                        reference.embedding_encrypted
+                    reference_embedding_decrypted = (
+                        await self.encryption_service.decrypt_embedding(
+                            reference.embedding_encrypted
+                        )
                     )
 
                 # 4. ML верификация
@@ -209,9 +215,15 @@ class VerifyService:
                     "face_detected": ml_result.get("face_detected", True),
                     "face_quality": quality_score,
                     "liveness_score": liveness_score,
-                    "liveness_passed": liveness_score >= 0.5 if liveness_score > 0 else None,
+                    "liveness_passed": (
+                        liveness_score >= 0.5 if liveness_score > 0 else None
+                    ),
                     "reference_id": ref_id,
-                    "reference_version": reference_version if reference_version else (reference.version if reference else None),
+                    "reference_version": (
+                        reference_version
+                        if reference_version
+                        else (reference.version if reference else None)
+                    ),
                     "metadata": {
                         "ml_model_version": ml_result.get("model_version"),
                         "detection_confidence": ml_result.get("detection_confidence"),
@@ -244,7 +256,7 @@ class VerifyService:
                         "confidence_level": confidence_level,
                         "threshold_used": dynamic_threshold,
                         "processing_time": processing_time,
-                    }
+                    },
                 )
 
                 return result
@@ -365,7 +377,7 @@ class VerifyService:
         if filters:
             sessions = self._apply_filters(sessions, filters)
 
-        return sessions[offset:offset + limit]
+        return sessions[offset : offset + limit]
 
     # =========================================================================
     # Динамический threshold
@@ -499,7 +511,9 @@ class VerifyService:
             logger.info(f"Webhook sent for verification {verification_id}")
 
         except Exception as e:
-            logger.warning(f"Failed to send webhook for verification {verification_id}: {e}")
+            logger.warning(
+                f"Failed to send webhook for verification {verification_id}: {e}"
+            )
 
     # =========================================================================
     # Вспомогательные методы
@@ -607,6 +621,7 @@ class VerifyService:
 
     def _sanitize_ml_result(self, ml_result: Dict[str, Any]) -> Dict[str, Any]:
         """Преобразование numpy типов в Python типы."""
+
         def sanitize(value):
             if hasattr(value, "item"):  # numpy scalar
                 return value.item()

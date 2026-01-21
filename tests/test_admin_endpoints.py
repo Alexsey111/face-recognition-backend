@@ -249,7 +249,9 @@ class TestAdminStatsEndpoint:
         )
 
     @pytest.mark.asyncio
-    async def test_get_admin_stats_include_performance(self, async_client, auth_headers):
+    async def test_get_admin_stats_include_performance(
+        self, async_client, auth_headers
+    ):
         """Test admin stats with performance metrics.
 
         Note: Currently returns 500 due to missing db_service methods.
@@ -263,7 +265,9 @@ class TestAdminStatsEndpoint:
         assert response.status_code in [200, 500]
 
     @pytest.mark.asyncio
-    async def test_get_admin_stats_invalid_date_format(self, async_client, auth_headers):
+    async def test_get_admin_stats_invalid_date_format(
+        self, async_client, auth_headers
+    ):
         """Test admin stats with invalid date format."""
         response = await async_client.get(
             "/api/v1/admin/stats?date_from=invalid-date",
@@ -271,7 +275,9 @@ class TestAdminStatsEndpoint:
         )
 
     @pytest.mark.asyncio
-    async def test_get_admin_stats_invalid_date_format(self, async_client, auth_headers):
+    async def test_get_admin_stats_invalid_date_format(
+        self, async_client, auth_headers
+    ):
         """Test admin stats with invalid date format."""
         response = await async_client.get(
             "/api/v1/admin/stats?date_from=invalid-date",
@@ -346,7 +352,9 @@ class TestAuditLogsEndpoint:
             )
 
         # Verify it's the expected ValidationError
-        assert "Invalid datetime format" in str(exc_info.value) or "ValidationError" in str(type(exc_info.value))
+        assert "Invalid datetime format" in str(
+            exc_info.value
+        ) or "ValidationError" in str(type(exc_info.value))
 
     @pytest.mark.asyncio
     async def test_audit_logs_zero_offset(self, async_client, auth_headers):
@@ -485,7 +493,9 @@ class TestAdminEndpointRateLimiting:
         """Test that multiple requests return consistent structure."""
         responses = []
         for _ in range(3):
-            response = await async_client.get("/api/v1/admin/stats", headers=auth_headers)
+            response = await async_client.get(
+                "/api/v1/admin/stats", headers=auth_headers
+            )
             responses.append(response)
 
 
@@ -516,7 +526,9 @@ class TestAdminEndpointResponseFormats:
     @pytest.mark.asyncio
     async def test_audit_logs_response_format(self, async_client, auth_headers):
         """Test audit logs response has correct format."""
-        response = await async_client.get("/api/v1/admin/audit-logs", headers=auth_headers)
+        response = await async_client.get(
+            "/api/v1/admin/audit-logs", headers=auth_headers
+        )
 
         # Currently returns 500 - endpoint requires proper db_service implementation
         if response.status_code == 200:
@@ -578,7 +590,9 @@ class TestAdminEndpointResponseFormats:
         Note: Currently returns 500 due to missing db_service methods.
         """
         # Use future date to get no results
-        future_date = (datetime.now(timezone.utc) + timedelta(days=365)).strftime("%Y-%m-%d %H:%M:%S")
+        future_date = (datetime.now(timezone.utc) + timedelta(days=365)).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
 
         response = await async_client.get(
             f"/api/v1/admin/errors?date_from={future_date}&date_to={future_date}",

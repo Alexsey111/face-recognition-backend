@@ -33,6 +33,7 @@ logger = get_logger(__name__)
 # GET LIST
 # ======================================================================
 
+
 @router.get("/reference", response_model=ReferenceListResponse)
 async def get_references(
     user_id: Optional[str] = Query(None),
@@ -51,10 +52,10 @@ async def get_references(
     Получение списка references с фильтрацией и пагинацией.
     """
     request_id = str(uuid.uuid4())
-    
+
     try:
         reference_service = ReferenceService(db)
-        
+
         # Получение всех references (с фильтрацией на уровне сервиса)
         if user_id:
             all_references = await reference_service.get_all_references(
@@ -65,6 +66,7 @@ async def get_references(
             # Если user_id не указан, получаем все через прямой запрос
             from sqlalchemy import select
             from ..db.models import Reference
+
             result = await db.execute(select(Reference))
             all_references = list(result.scalars().all())
 
@@ -82,7 +84,7 @@ async def get_references(
                 continue
             if quality_max is not None and (ref.quality_score or 0) > quality_max:
                 continue
-            
+
             filtered.append(ref)
 
         # Сортировка
@@ -93,10 +95,10 @@ async def get_references(
             "usage_count": lambda r: r.usage_count or 0,
             "label": lambda r: r.label or "",
         }
-        
+
         if sort_by not in sort_key_map:
             raise ValidationError(f"Invalid sort field: {sort_by}")
-        
+
         filtered.sort(key=sort_key_map[sort_by], reverse=(sort_order == "desc"))
 
         # Пагинация
@@ -143,6 +145,7 @@ async def get_references(
 # GET ONE
 # ======================================================================
 
+
 @router.get("/reference/{reference_id}", response_model=ReferenceResponse)
 async def get_reference(
     reference_id: str,
@@ -153,7 +156,7 @@ async def get_reference(
     Получение конкретного reference по ID.
     """
     request_id = str(uuid.uuid4())
-    
+
     try:
         reference_service = ReferenceService(db)
         ref = await reference_service.get_reference(reference_id)
@@ -185,9 +188,10 @@ async def get_reference(
 # CREATE
 # ======================================================================
 
+
 @router.post("/reference", response_model=ReferenceResponse)
 async def create_reference(
-    request: ReferenceCreateRequest, 
+    request: ReferenceCreateRequest,
     http_request: Request,
     cache: CacheService = Depends(get_cache_service),
     db: AsyncSession = Depends(get_async_db),
@@ -201,7 +205,7 @@ async def create_reference(
     """
     request_id = str(uuid.uuid4())
     user_id = request.user_id
-    
+
     try:
         reference_service = ReferenceService(db)
 
@@ -222,7 +226,9 @@ async def create_reference(
         embedding = None
         if ref.embedding_encrypted:
             encryption_service = EncryptionService()
-            embedding = await encryption_service.decrypt_embedding(ref.embedding_encrypted)
+            embedding = await encryption_service.decrypt_embedding(
+                ref.embedding_encrypted
+            )
             logger.debug(f"Decrypted embedding for user {user_id}")
 
         if embedding is not None:
@@ -237,8 +243,10 @@ async def create_reference(
                 version=ref.version,
                 metadata={
                     "quality_score": ref.quality_score,
-                    "created_at": ref.created_at.isoformat() if ref.created_at else None
-                }
+                    "created_at": (
+                        ref.created_at.isoformat() if ref.created_at else None
+                    ),
+                },
             )
             logger.info(f"📦 Cached new reference (v{ref.version}) for user {user_id}")
 
@@ -269,6 +277,7 @@ async def create_reference(
 # UPDATE
 # ======================================================================
 
+
 @router.put("/reference/{reference_id}", response_model=ReferenceResponse)
 async def update_reference(
     reference_id: str,
@@ -283,7 +292,7 @@ async def update_reference(
     """
     request_id = str(uuid.uuid4())
     user_id = None
-    
+
     try:
         reference_service = ReferenceService(db)
 
@@ -306,7 +315,9 @@ async def update_reference(
         if user_id and request.is_active is False:
             # Если reference деактивирован, инвалидируем кэш
             await cache.invalidate_reference(user_id)
-            logger.info(f"🗑️ Invalidated reference cache for user {user_id} (deactivated)")
+            logger.info(
+                f"🗑️ Invalidated reference cache for user {user_id} (deactivated)"
+            )
 
         return ReferenceResponse(
             success=True,
@@ -333,9 +344,10 @@ async def update_reference(
 # DELETE
 # ======================================================================
 
+
 @router.delete("/reference/{reference_id}", response_model=BaseResponse)
 async def delete_reference(
-    reference_id: str, 
+    reference_id: str,
     http_request: Request,
     cache: CacheService = Depends(get_cache_service),
     db: AsyncSession = Depends(get_async_db),
@@ -346,7 +358,7 @@ async def delete_reference(
     """
     request_id = str(uuid.uuid4())
     user_id = None
-    
+
     try:
         reference_service = ReferenceService(db)
 
@@ -387,6 +399,7 @@ async def delete_reference(
 # COMPARE
 # ======================================================================
 
+
 @router.post("/compare", response_model=dict)
 async def compare_with_references(
     request: ReferenceCompare,
@@ -397,7 +410,7 @@ async def compare_with_references(
     Сравнение лица с несколькими references.
     """
     request_id = str(uuid.uuid4())
-    
+
     try:
         reference_service = ReferenceService(db)
 
@@ -417,7 +430,11 @@ async def compare_with_references(
             "request_id": request_id,
             "results": results,
             "total_matches": len(results),
-            "timestamp": http_request.state.timestamp if hasattr(http_request.state, 'timestamp') else None,
+            "timestamp": (
+                http_request.state.timestamp
+                if hasattr(http_request.state, "timestamp")
+                else None
+            ),
         }
 
     except ValidationError as e:
@@ -432,6 +449,7 @@ async def compare_with_references(
 # STATISTICS (BONUS)
 # ======================================================================
 
+
 @router.get("/reference/stats/{user_id}", response_model=dict)
 async def get_reference_statistics(
     user_id: str,
@@ -442,7 +460,7 @@ async def get_reference_statistics(
     Получение статистики по references пользователя.
     """
     request_id = str(uuid.uuid4())
-    
+
     try:
         reference_service = ReferenceService(db)
         stats = await reference_service.get_reference_statistics(user_id)

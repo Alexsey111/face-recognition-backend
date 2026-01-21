@@ -91,7 +91,9 @@ class LivenessService:
         start_time = time.monotonic()
         request_id = session_id or str(uuid.uuid4())
 
-        logger.info(f"Starting liveness check: type={challenge_type}, request={request_id}")
+        logger.info(
+            f"Starting liveness check: type={challenge_type}, request={request_id}"
+        )
 
         # 1. Валидация challenge_type
         if challenge_type not in self.SUPPORTED_CHALLENGES:
@@ -101,7 +103,10 @@ class LivenessService:
             )
 
         # 2. Проверка требований к challenge_data
-        if challenge_type in ("active", "blink", "smile", "turn_head") and not challenge_data:
+        if (
+            challenge_type in ("active", "blink", "smile", "turn_head")
+            and not challenge_data
+        ):
             raise ValidationError(
                 f"challenge_data is required for challenge_type={challenge_type}"
             )
@@ -215,8 +220,8 @@ class LivenessService:
             combined_confidence = (ml_score * 0.3) + (certified_score * 0.7)
 
             liveness_detected = (
-                certified_result.get("is_real", False) and
-                combined_confidence >= settings.LIVENESS_CONFIDENCE_THRESHOLD
+                certified_result.get("is_real", False)
+                and combined_confidence >= settings.LIVENESS_CONFIDENCE_THRESHOLD
             )
 
             return {
@@ -371,13 +376,27 @@ class LivenessService:
             "confidence": ml_result.get("confidence", 0.0),
             "anti_spoofing_score": ml_result.get("anti_spoofing_score", 0.0),
             "analysis_type": analysis_type,
-            "depth_analysis": ml_result.get("analysis_results", {}).get("depth_analysis"),
-            "texture_analysis": ml_result.get("analysis_results", {}).get("texture_analysis"),
-            "certified_analysis": ml_result.get("analysis_results", {}).get("certified_analysis"),
-            "reasoning_result": ml_result.get("analysis_results", {}).get("reasoning_result") if include_reasoning else None,
+            "depth_analysis": ml_result.get("analysis_results", {}).get(
+                "depth_analysis"
+            ),
+            "texture_analysis": ml_result.get("analysis_results", {}).get(
+                "texture_analysis"
+            ),
+            "certified_analysis": ml_result.get("analysis_results", {}).get(
+                "certified_analysis"
+            ),
+            "reasoning_result": (
+                ml_result.get("analysis_results", {}).get("reasoning_result")
+                if include_reasoning
+                else None
+            ),
             "component_scores": ml_result.get("component_scores"),
-            "certification_level": ml_result.get("analysis_results", {}).get("certified_analysis", {}).get("certification_level"),
-            "certification_passed": ml_result.get("analysis_results", {}).get("certified_analysis", {}).get("is_certified_passed", False),
+            "certification_level": ml_result.get("analysis_results", {})
+            .get("certified_analysis", {})
+            .get("certification_level"),
+            "certification_passed": ml_result.get("analysis_results", {})
+            .get("certified_analysis", {})
+            .get("is_certified_passed", False),
             "face_detected": ml_result.get("face_detected", False),
             "recommendations": ml_result.get("recommendations", []),
         }
@@ -468,7 +487,9 @@ class LivenessService:
             magnitude = np.abs(fft_shift)
 
             # Высокая частота в FFT может указывать на moiré
-            high_freq_ratio = np.sum(magnitude > np.percentile(magnitude, 95)) / magnitude.size
+            high_freq_ratio = (
+                np.sum(magnitude > np.percentile(magnitude, 95)) / magnitude.size
+            )
             if high_freq_ratio > 0.05:
                 flags.append("moire_detected")
 

@@ -22,6 +22,7 @@ from PIL import Image, ImageFile, UnidentifiedImageError
 # DecompressionBombError был добавлен в Pillow 10.3.0
 try:
     from PIL import DecompressionBombError
+
     _HAS_DECOMPRESSION_BOMB_ERROR = True
 except ImportError:
     _HAS_DECOMPRESSION_BOMB_ERROR = False
@@ -120,8 +121,7 @@ class ValidationService:
         try:
             # Попытка загрузить модель из директории моделей проекта
             base_models_path = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                "models"
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "models"
             )
 
             # Стандартные пути к файлам модели
@@ -130,21 +130,29 @@ class ValidationService:
 
             # Проверяем наличие файлов модели
             if os.path.exists(prototxt_path) and os.path.exists(caffemodel_path):
-                self._mask_net = cv2.dnn.readNetFromCaffe(prototxt_path, caffemodel_path)
+                self._mask_net = cv2.dnn.readNetFromCaffe(
+                    prototxt_path, caffemodel_path
+                )
                 logger.info("Mask detection model loaded from project models directory")
                 return
 
             # Альтернативные пути для fall-back модели
             alt_prototxt = os.path.join(base_models_path, "deploy.prototxt")
-            alt_caffemodel = os.path.join(base_models_path, "res10_300x300_ssd_iter_140000.caffemodel")
+            alt_caffemodel = os.path.join(
+                base_models_path, "res10_300x300_ssd_iter_140000.caffemodel"
+            )
 
             if os.path.exists(alt_prototxt) and os.path.exists(alt_caffemodel):
                 self._mask_net = cv2.dnn.readNetFromCaffe(alt_prototxt, alt_caffemodel)
-                logger.info("Face detection model loaded (mask detection requires additional training)")
+                logger.info(
+                    "Face detection model loaded (mask detection requires additional training)"
+                )
                 return
 
             # Если модель не найдена, используем резервный метод на основе анализа ключевых точек
-            logger.warning("Mask detection model files not found, using fallback method")
+            logger.warning(
+                "Mask detection model files not found, using fallback method"
+            )
             self._mask_net = None
 
         except Exception as e:
@@ -240,7 +248,7 @@ class ValidationService:
             return ValidationResult(
                 False,
                 error_message="Изображение слишком большое по количеству пикселей. "
-                            "Пожалуйста, уменьшите размер до 4096x4096 или меньше."
+                "Пожалуйста, уменьшите размер до 4096x4096 или меньше.",
             )
         except Exception as e:
             logger.exception("Image validation failed")
@@ -276,7 +284,7 @@ class ValidationService:
                 return MaskDetectionResult(
                     is_mask_detected=False,
                     confidence=0.0,
-                    errors=["Failed to decode image for mask detection"]
+                    errors=["Failed to decode image for mask detection"],
                 )
 
             # Если координаты лиц не переданы, детектируем лица повторно
@@ -291,17 +299,14 @@ class ValidationService:
                 return MaskDetectionResult(
                     is_mask_detected=False,
                     confidence=0.0,
-                    errors=["No faces detected for mask analysis"]
+                    errors=["No faces detected for mask analysis"],
                 )
 
             # Используем DNN модель для детекции масок
             if self._mask_net is not None:
                 (h, w) = img.shape[:2]
                 blob = cv2.dnn.blobFromImage(
-                    cv2.resize(img, (300, 300)),
-                    1.0,
-                    (300, 300),
-                    (104.0, 177.0, 123.0)
+                    cv2.resize(img, (300, 300)), 1.0, (300, 300), (104.0, 177.0, 123.0)
                 )
                 self._mask_net.setInput(blob)
                 detections = self._mask_net.forward()
@@ -317,8 +322,12 @@ class ValidationService:
                         # Проверяем, находится ли обнаруженное лицо в пределах
                         # известных координат лиц
                         for fx, fy, fw, fh in face_coords:
-                            if (startX >= fx and startY >= fy and
-                                endX <= fx + fw and endY <= fy + fh):
+                            if (
+                                startX >= fx
+                                and startY >= fy
+                                and endX <= fx + fw
+                                and endY <= fy + fh
+                            ):
                                 if confidence > 0.65:  # Порог для маски
                                     face_with_mask += 1
                                 else:
@@ -328,9 +337,9 @@ class ValidationService:
 
             else:
                 # Резервный метод: анализ нижней части лица
-                for (x, y, face_w, face_h) in face_coords:
+                for x, y, face_w, face_h in face_coords:
                     # Выделяем область нижней части лица (рот, нос)
-                    face_roi = img[y + face_h // 2:y + face_h, x:x + face_w]
+                    face_roi = img[y + face_h // 2 : y + face_h, x : x + face_w]
 
                     if face_roi.size == 0:
                         face_without_mask += 1
@@ -341,18 +350,18 @@ class ValidationService:
 
                     # Маска для диапазона цветов кожи
                     skin_mask = cv2.inRange(
-                        hsv_roi,
-                        np.array([0, 20, 70]),
-                        np.array([20, 170, 255])
+                        hsv_roi, np.array([0, 20, 70]), np.array([20, 170, 255])
                     )
 
                     # Анализируем видимость кожи в нижней части лица
-                    skin_ratio = cv2.countNonZero(skin_mask) / (face_roi.shape[0] * face_roi.shape[1])
+                    skin_ratio = cv2.countNonZero(skin_mask) / (
+                        face_roi.shape[0] * face_roi.shape[1]
+                    )
 
                     # Если мало видимой кожи - возможно маска
                     if skin_ratio < 0.35:
                         face_with_mask += 1
-                        total_confidence += (1.0 - skin_ratio)
+                        total_confidence += 1.0 - skin_ratio
                     else:
                         face_without_mask += 1
                         total_confidence += skin_ratio
@@ -365,7 +374,7 @@ class ValidationService:
                 confidence=min(avg_confidence, 1.0),
                 face_with_mask=face_with_mask,
                 face_without_mask=face_without_mask,
-                errors=errors if errors else None
+                errors=errors if errors else None,
             )
 
         except Exception as e:
@@ -373,7 +382,7 @@ class ValidationService:
             return MaskDetectionResult(
                 is_mask_detected=False,
                 confidence=0.0,
-                errors=[f"Mask detection error: {str(e)}"]
+                errors=[f"Mask detection error: {str(e)}"],
             )
 
     async def _decode_image_data(
@@ -456,16 +465,16 @@ class ValidationService:
         noise = np.std(gray)
         noise_score = max(0.0, 1 - noise / 64)
 
-        score = (
-            sharpness * 0.4
-            + brightness_score * 0.3
-            + noise_score * 0.3
-        )
+        score = sharpness * 0.4 + brightness_score * 0.3 + noise_score * 0.3
         return float(np.clip(score, 0.0, 1.0))
 
-    async def _detect_face_basic(self, image_data: bytes) -> Tuple[bool, Optional[List[Tuple[int, int, int, int]]]]:
+    async def _detect_face_basic(
+        self, image_data: bytes
+    ) -> Tuple[bool, Optional[List[Tuple[int, int, int, int]]]]:
         def _sync_face_detection():
-            img = cv2.imdecode(np.frombuffer(image_data, np.uint8), cv2.IMREAD_GRAYSCALE)
+            img = cv2.imdecode(
+                np.frombuffer(image_data, np.uint8), cv2.IMREAD_GRAYSCALE
+            )
             if img is None:
                 return False, None
             faces = self._face_cascade.detectMultiScale(
@@ -519,9 +528,12 @@ class ValidationService:
         Returns:
             Dict с 'score' (0-1, выше = более похоже на real) и 'flags' (список обнаруженных признаков)
         """
+
         def _sync_analyze():
             try:
-                img = cv2.imdecode(np.frombuffer(image_data, np.uint8), cv2.IMREAD_COLOR)
+                img = cv2.imdecode(
+                    np.frombuffer(image_data, np.uint8), cv2.IMREAD_COLOR
+                )
                 if img is None:
                     return {"score": 0.5, "flags": ["decode_failed"], "details": {}}
 
@@ -538,17 +550,24 @@ class ValidationService:
                 # Ищем высокочастотные паттерны в центральной области
                 center_h, center_w = h // 2, w // 2
                 center_region = magnitude[
-                    max(0, center_h - 50):min(h, center_h + 50),
-                    max(0, center_w - 50):min(w, center_w + 50)
+                    max(0, center_h - 50) : min(h, center_h + 50),
+                    max(0, center_w - 50) : min(w, center_w + 50),
                 ]
-                moire_score = np.std(center_region) / np.mean(center_region) if np.mean(center_region) > 0 else 0
+                moire_score = (
+                    np.std(center_region) / np.mean(center_region)
+                    if np.mean(center_region) > 0
+                    else 0
+                )
                 details["moire_score"] = round(moire_score, 3)
                 if moire_score > 0.8:
                     flags.append("moire_pattern")
 
                 # 2. Screen glare detection (блики от экрана)
                 gray_float = gray.astype(np.float32) / 255.0
-                luminance = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)[:, :, 0].astype(np.float32) / 255.0
+                luminance = (
+                    cv2.cvtColor(img, cv2.COLOR_BGR2LAB)[:, :, 0].astype(np.float32)
+                    / 255.0
+                )
 
                 # Ищем области с очень высокой яркостью
                 high_lum_mask = luminance > 0.95
@@ -581,8 +600,10 @@ class ValidationService:
 
                 # 5. Noise inconsistency analysis
                 # Вычисляем локальную дисперсию шума
-                noise_std_local = cv2.blur(gray.astype(np.float32)**2, (15, 15)) - \
-                                 cv2.blur(gray.astype(np.float32), (15, 15))**2
+                noise_std_local = (
+                    cv2.blur(gray.astype(np.float32) ** 2, (15, 15))
+                    - cv2.blur(gray.astype(np.float32), (15, 15)) ** 2
+                )
                 noise_std_local = np.sqrt(np.maximum(noise_std_local, 0))
 
                 # Фото экрана часто имеет uniform noise
@@ -604,7 +625,10 @@ class ValidationService:
                 # Аномально высокая корреляция между каналами
                 rg_corr = np.corrcoef(r.flatten(), g.flatten())[0, 1]
                 bg_corr = np.corrcoef(b.flatten(), g.flatten())[0, 1]
-                details["channel_correlation"] = {"rg": round(rg_corr, 3), "bg": round(bg_corr, 3)}
+                details["channel_correlation"] = {
+                    "rg": round(rg_corr, 3),
+                    "bg": round(bg_corr, 3),
+                }
 
                 if rg_corr > 0.95 and bg_corr > 0.95:
                     flags.append("screen_capture_pattern")
@@ -634,6 +658,10 @@ class ValidationService:
 
             except Exception as e:
                 logger.warning(f"Spoof analysis failed: {e}")
-                return {"score": 0.5, "flags": ["analysis_error"], "details": {"error": str(e)}}
+                return {
+                    "score": 0.5,
+                    "flags": ["analysis_error"],
+                    "details": {"error": str(e)},
+                }
 
         return await asyncio.to_thread(_sync_analyze)

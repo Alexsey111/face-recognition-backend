@@ -32,7 +32,9 @@ def _is_async(func: Callable) -> bool:
 
 
 def _make_cache_key(func: Callable, args: tuple, kwargs: dict) -> str:
-    return f"{func.__module__}.{func.__name__}:{repr(args)}:{repr(sorted(kwargs.items()))}"
+    return (
+        f"{func.__module__}.{func.__name__}:{repr(args)}:{repr(sorted(kwargs.items()))}"
+    )
 
 
 # =============================================================================

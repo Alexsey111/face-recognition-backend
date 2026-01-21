@@ -41,6 +41,7 @@ router = APIRouter(tags=["Liveness"])
 # MAIN LIVENESS CHECK
 # ======================================================================
 
+
 @router.post("/liveness", response_model=LivenessResponse)
 async def check_liveness(
     request: LivenessRequest,
@@ -51,10 +52,10 @@ async def check_liveness(
     Основная проверка живости лица.
     """
     request_id = str(uuid.uuid4())
-    
+
     try:
         logger.info(f"Starting liveness check: {request.challenge_type}")
-        
+
         liveness_service = LivenessService(db)
 
         # Проверка через сервис
@@ -83,6 +84,7 @@ async def check_liveness(
 # SESSION MANAGEMENT
 # ======================================================================
 
+
 @router.post("/liveness/session", response_model=SessionResponse)
 async def create_liveness_session(
     request: VerificationSessionCreate,
@@ -93,13 +95,13 @@ async def create_liveness_session(
     Создание сессии проверки живости.
     """
     request_id = str(uuid.uuid4())
-    
+
     try:
         # Используем VerifyService для создания сессии (можно вынести в отдельный SessionService)
         from ..services.verify_service import VerifyService
-        
+
         verify_service = VerifyService(db)
-        
+
         session = await verify_service.create_verification_session(
             user_id=request.user_id,
             reference_id=request.reference_id,
@@ -160,6 +162,7 @@ async def check_liveness_in_session(
 # ACTIVE LIVENESS
 # ======================================================================
 
+
 @router.post("/liveness/active", response_model=ActiveLivenessResponse)
 async def check_active_liveness(
     request: LivenessRequest,
@@ -170,7 +173,7 @@ async def check_active_liveness(
     Активная проверка живости с челленджами.
     """
     request_id = str(uuid.uuid4())
-    
+
     try:
         liveness_service = LivenessService(db)
 
@@ -207,6 +210,7 @@ async def check_active_liveness(
 # VIDEO LIVENESS
 # ======================================================================
 
+
 @router.post("/liveness/video", response_model=VideoLivenessResponse)
 async def analyze_video_liveness(
     request: VideoLivenessRequest,
@@ -217,12 +221,13 @@ async def analyze_video_liveness(
     Анализ видео для проверки живости.
     """
     request_id = str(uuid.uuid4())
-    
+
     try:
         liveness_service = LivenessService(db)
 
         # Декодируем video_data (если base64)
         import base64
+
         if request.video_data.startswith("data:video/"):
             header, encoded = request.video_data.split(",", 1)
             video_bytes = base64.b64decode(encoded)
@@ -266,7 +271,10 @@ async def analyze_video_liveness(
 # ADVANCED ANTI-SPOOFING
 # ======================================================================
 
-@router.post("/liveness/anti-spoofing/advanced", response_model=AdvancedAntiSpoofingResponse)
+
+@router.post(
+    "/liveness/anti-spoofing/advanced", response_model=AdvancedAntiSpoofingResponse
+)
 async def advanced_anti_spoofing_check(
     request: AdvancedAntiSpoofingRequest,
     http_request: Request,
@@ -276,7 +284,7 @@ async def advanced_anti_spoofing_check(
     Продвинутая anti-spoofing проверка.
     """
     request_id = str(uuid.uuid4())
-    
+
     try:
         liveness_service = LivenessService(db)
 
@@ -299,7 +307,11 @@ async def advanced_anti_spoofing_check(
             texture_analysis=result.get("texture_analysis"),
             certified_analysis=result.get("certified_analysis"),
             reasoning_result=result.get("reasoning_result"),
-            reasoning_summary=result.get("reasoning_result", {}).get("reasoning_summary") if request.include_reasoning else None,
+            reasoning_summary=(
+                result.get("reasoning_result", {}).get("reasoning_summary")
+                if request.include_reasoning
+                else None
+            ),
             component_scores=result.get("component_scores"),
             certification_level=result.get("certification_level"),
             certification_passed=result.get("certification_passed", False),
@@ -321,6 +333,7 @@ async def advanced_anti_spoofing_check(
 # CHALLENGES
 # ======================================================================
 
+
 @router.get("/liveness/challenges", response_model=dict)
 async def get_available_challenges(http_request: Request):
     """
@@ -332,8 +345,7 @@ async def get_available_challenges(http_request: Request):
         return {
             "success": True,
             "challenges": {
-                name: {"description": desc}
-                for name, desc in challenges.items()
+                name: {"description": desc} for name, desc in challenges.items()
             },
             "default_challenge": "passive",
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -372,6 +384,7 @@ async def generate_challenge(
 # GET RESULT BY SESSION ID
 # ======================================================================
 
+
 @router.get("/liveness/{session_id}", response_model=dict)
 async def get_liveness_result(
     session_id: str,
@@ -382,7 +395,7 @@ async def get_liveness_result(
     Получение результата liveness по session_id.
     """
     request_id = str(uuid.uuid4())
-    
+
     try:
         from ..db.crud import VerificationSessionCRUD
 
@@ -407,8 +420,12 @@ async def get_liveness_result(
             "face_detected": session.face_detected,
             "face_quality_score": session.face_quality_score,
             "processing_time": session.processing_time,
-            "created_at": session.created_at.isoformat() if session.created_at else None,
-            "completed_at": session.completed_at.isoformat() if session.completed_at else None,
+            "created_at": (
+                session.created_at.isoformat() if session.created_at else None
+            ),
+            "completed_at": (
+                session.completed_at.isoformat() if session.completed_at else None
+            ),
             "error_code": session.error_code,
             "error_message": session.error_message,
             "request_id": request_id,
@@ -430,6 +447,7 @@ async def get_liveness_result(
 # BATCH EMBEDDINGS (BONUS)
 # ======================================================================
 
+
 @router.post("/liveness/batch/embeddings", response_model=BatchEmbeddingResponse)
 async def batch_generate_embeddings(
     request: BatchEmbeddingRequest,
@@ -441,11 +459,11 @@ async def batch_generate_embeddings(
     """
     request_id = str(uuid.uuid4())
     batch_id = str(uuid.uuid4())
-    
+
     try:
         from ..services.ml_service import MLService
         from ..services.validation_service import ValidationService
-        
+
         ml_service = MLService()
         validation_service = ValidationService()
 
@@ -457,7 +475,7 @@ async def batch_generate_embeddings(
                 max_size=settings.MAX_UPLOAD_SIZE,
                 allowed_formats=settings.ALLOWED_IMAGE_FORMATS,
             )
-            
+
             if validation_result.is_valid:
                 validated_images.append(validation_result.image_data)
             else:
@@ -482,28 +500,34 @@ async def batch_generate_embeddings(
 
         for i, (validated, ml_result) in enumerate(zip(validated_images, ml_results)):
             if validated is None:
-                results.append({
-                    "image_index": i,
-                    "success": False,
-                    "error": "Image validation failed",
-                })
+                results.append(
+                    {
+                        "image_index": i,
+                        "success": False,
+                        "error": "Image validation failed",
+                    }
+                )
                 failed += 1
             else:
                 if ml_result.get("success"):
-                    results.append({
-                        "image_index": i,
-                        "success": True,
-                        "embedding": ml_result.get("embedding", []),
-                        "quality_score": ml_result.get("quality_score"),
-                        "face_detected": ml_result.get("face_detected", False),
-                    })
+                    results.append(
+                        {
+                            "image_index": i,
+                            "success": True,
+                            "embedding": ml_result.get("embedding", []),
+                            "quality_score": ml_result.get("quality_score"),
+                            "face_detected": ml_result.get("face_detected", False),
+                        }
+                    )
                     successful += 1
                 else:
-                    results.append({
-                        "image_index": i,
-                        "success": False,
-                        "error": ml_result.get("error", "Unknown error"),
-                    })
+                    results.append(
+                        {
+                            "image_index": i,
+                            "success": False,
+                            "error": ml_result.get("error", "Unknown error"),
+                        }
+                    )
                     failed += 1
 
         return BatchEmbeddingResponse(
@@ -515,7 +539,9 @@ async def batch_generate_embeddings(
             processing_time=0.0,
             results=results,
             performance_metrics={
-                "success_rate": successful / len(request.images) if request.images else 0,
+                "success_rate": (
+                    successful / len(request.images) if request.images else 0
+                ),
             },
             request_id=request_id,
         )

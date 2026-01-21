@@ -13,6 +13,7 @@ class UserModel(BaseModel):
     """
     Базовая модель пользователя.
     """
+
     model_config = ConfigDict(from_attributes=True)
 
     id: str = Field(
@@ -32,7 +33,9 @@ class UserModel(BaseModel):
     updated_at: Optional[datetime] = Field(
         None, description="Дата последнего обновления"
     )
-    last_verified_at: Optional[datetime] = Field(None, description="Последняя верификация")
+    last_verified_at: Optional[datetime] = Field(
+        None, description="Последняя верификация"
+    )
 
     # Статистика использования
     total_uploads: int = Field(default=0, description="Общее количество загрузок")
@@ -52,6 +55,7 @@ class UserCreate(BaseModel):
     Модель для создания пользователя.
     Принимает открытый пароль, который хешируется сервисом.
     """
+
     email: EmailStr = Field(..., description="Email адрес")
     password: str = Field(..., min_length=8, description="Пароль (будет хеширован)")
     phone: Optional[str] = Field(None, description="Телефон")
@@ -67,16 +71,20 @@ class UserUpdate(BaseModel):
     """
     Модель для обновления пользователя.
     """
+
     phone: Optional[str] = Field(None, description="Телефон")
     full_name: Optional[str] = Field(None, max_length=255, description="Полное имя")
     is_active: Optional[bool] = Field(None, description="Активен ли пользователь")
-    settings: Optional[Dict[str, Any]] = Field(None, description="Настройки пользователя")
+    settings: Optional[Dict[str, Any]] = Field(
+        None, description="Настройки пользователя"
+    )
 
 
 class UserResponse(BaseModel):
     """
     Модель ответа с данными пользователя.
     """
+
     model_config = ConfigDict(from_attributes=True)
 
     id: str = Field(..., description="Уникальный ID пользователя")
@@ -87,17 +95,22 @@ class UserResponse(BaseModel):
     is_verified: bool = Field(..., description="Верифицирован ли пользователь")
     created_at: datetime = Field(..., description="Дата создания")
     updated_at: Optional[datetime] = Field(None, description="Дата обновления")
-    last_verified_at: Optional[datetime] = Field(None, description="Последняя верификация")
+    last_verified_at: Optional[datetime] = Field(
+        None, description="Последняя верификация"
+    )
     total_uploads: int = Field(..., description="Общее количество загрузок")
     total_verifications: int = Field(..., description="Общее количество верификаций")
     successful_verifications: int = Field(..., description="Успешные верификации")
-    settings: Optional[Dict[str, Any]] = Field(None, description="Настройки пользователя")
+    settings: Optional[Dict[str, Any]] = Field(
+        None, description="Настройки пользователя"
+    )
 
 
 class UserListResponse(BaseModel):
     """
     Модель для списка пользователей.
     """
+
     users: List[UserModel] = Field(..., description="Список пользователей")
     total_count: int = Field(..., description="Общее количество пользователей")
     page: int = Field(..., description="Номер страницы")

@@ -9,9 +9,13 @@ import uuid
 
 # Импортируем модели из правильного места (как мы определили в прошлом шаге)
 from app.db.models import (
-    User, Reference, VerificationSession, AuditLog,
-    VerificationStatus
+    User,
+    Reference,
+    VerificationSession,
+    AuditLog,
+    VerificationStatus,
 )
+
 # Импортируем Pydantic схемы из правильного места
 from app.models.user import UserCreate, UserUpdate
 
@@ -21,18 +25,19 @@ logger = logging.getLogger(__name__)
 # User CRUD (Async)
 # ============================================================================
 
+
 class UserCRUD:
     @staticmethod
     async def get_user(db: AsyncSession, user_id: str) -> Optional[User]:
         """Get user by ID asynchronously"""
         result = await db.execute(select(User).where(User.id == user_id))
         return result.scalar_one_or_none()
-    
+
     @staticmethod
     async def get_user_by_email(db: AsyncSession, email: str) -> Optional[User]:
         result = await db.execute(select(User).where(User.email == email))
         return result.scalar_one_or_none()
-    
+
     @staticmethod
     async def get_user_by_phone(db: AsyncSession, phone: str) -> Optional[User]:
         """Get user by phone number"""
@@ -40,7 +45,9 @@ class UserCRUD:
         return result.scalar_one_or_none()
 
     @staticmethod
-    async def get_all_users(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[User]:
+    async def get_all_users(
+        db: AsyncSession, skip: int = 0, limit: int = 100
+    ) -> List[User]:
         result = await db.execute(select(User).offset(skip).limit(limit))
         return list(result.scalars().all())
 
@@ -54,20 +61,21 @@ class UserCRUD:
     async def create_user(db: AsyncSession, user_data: UserCreate) -> User:
         """
         Create a new user with hashed password.
-        
+
         Args:
             db: Database session
             user_data: User creation data
-            
+
         Returns:
             Created User instance
         """
         try:
             # ✅ ИСПРАВЛЕНО: Используем async метод hash_password
             from app.services.auth_service import AuthService
+
             auth_service = AuthService()
             password_hash = await auth_service.hash_password(user_data.password)
-            
+
             new_user = User(
                 id=str(uuid.uuid4()),
                 email=user_data.email,
@@ -75,7 +83,7 @@ class UserCRUD:
                 phone=user_data.phone,
                 full_name=user_data.full_name,
                 is_active=True,
-                created_at=datetime.now(timezone.utc)
+                created_at=datetime.now(timezone.utc),
             )
             db.add(new_user)
             await db.commit()
@@ -90,21 +98,23 @@ class UserCRUD:
             await db.rollback()
             logger.error(f"❌ Error creating user: {e}")
             raise
-    
+
     @staticmethod
-    async def update_user(db: AsyncSession, user_id: str, user_update: UserUpdate) -> Optional[User]:
+    async def update_user(
+        db: AsyncSession, user_id: str, user_update: UserUpdate
+    ) -> Optional[User]:
         try:
             # Получаем пользователя
             user = await UserCRUD.get_user(db, user_id)
             if not user:
                 return None
-            
+
             # Pydantic v2 syntax: model_dump вместо dict
             update_data = user_update.model_dump(exclude_unset=True)
-            
+
             for field, value in update_data.items():
                 setattr(user, field, value)
-            
+
             await db.commit()
             await db.refresh(user)
             return user
@@ -120,7 +130,7 @@ class UserCRUD:
             user = await UserCRUD.get_user(db, user_id)
             if not user:
                 return None
-            
+
             user.is_active = False
             await db.commit()
             await db.refresh(user)
@@ -138,7 +148,7 @@ class UserCRUD:
             stmt = delete(User).where(User.id == user_id)
             result = await db.execute(stmt)
             await db.commit()
-            
+
             if result.rowcount > 0:
                 logger.info(f"✅ User deleted: {user_id}")
                 return True
@@ -148,19 +158,25 @@ class UserCRUD:
             logger.error(f"❌ Error deleting user: {e}")
             raise
 
+
 # ============================================================================
 # Reference CRUD (Async)
 # ============================================================================
 
+
 class ReferenceCRUD:
     @staticmethod
-    async def get_reference_by_id(db: AsyncSession, reference_id: str) -> Optional[Reference]:
+    async def get_reference_by_id(
+        db: AsyncSession, reference_id: str
+    ) -> Optional[Reference]:
         """Get reference by ID"""
         result = await db.execute(select(Reference).where(Reference.id == reference_id))
         return result.scalar_one_or_none()
 
     @staticmethod
-    async def get_latest_reference(db: AsyncSession, user_id: str) -> Optional[Reference]:
+    async def get_latest_reference(
+        db: AsyncSession, user_id: str
+    ) -> Optional[Reference]:
         """Get latest reference for user (optimized)"""
         stmt = (
             select(Reference)
@@ -173,9 +189,7 @@ class ReferenceCRUD:
 
     @staticmethod
     async def get_recent_references(
-        db: AsyncSession,
-        user_id: str,
-        limit: int = 10
+        db: AsyncSession, user_id: str, limit: int = 10
     ) -> List[Reference]:
         """Get recent references for user"""
         stmt = (
@@ -188,16 +202,12 @@ class ReferenceCRUD:
         return list(result.scalars().all())
 
     @staticmethod
-    async def get_reference_by_version(db: AsyncSession, user_id: str, version: str) -> Optional[Reference]:
+    async def get_reference_by_version(
+        db: AsyncSession, user_id: str, version: str
+    ) -> Optional[Reference]:
         """Get reference by specific version"""
-        stmt = (
-            select(Reference)
-            .where(
-                and_(
-                    Reference.user_id == user_id,
-                    Reference.embedding_version == version
-                )
-            )
+        stmt = select(Reference).where(
+            and_(Reference.user_id == user_id, Reference.embedding_version == version)
         )
         result = await db.execute(stmt)
         return result.scalar_one_or_none()
@@ -211,25 +221,25 @@ class ReferenceCRUD:
         is_active: bool = None,
         quality_min: float = None,
         quality_max: float = None,
-        label_contains: str = None
+        label_contains: str = None,
     ) -> List[Reference]:
         """Get references for user with pagination and filtering"""
         query = select(Reference).where(Reference.user_id == user_id)
-        
+
         if is_active is not None:
             query = query.where(Reference.is_active == is_active)
-        
+
         if quality_min is not None:
             query = query.where(Reference.quality_score >= quality_min)
-            
+
         if quality_max is not None:
             query = query.where(Reference.quality_score <= quality_max)
-            
+
         if label_contains:
             query = query.where(Reference.label.contains(label_contains))
-        
+
         query = query.order_by(desc(Reference.created_at)).offset(skip).limit(limit)
-        
+
         result = await db.execute(query)
         return list(result.scalars().all())
 
@@ -240,23 +250,27 @@ class ReferenceCRUD:
         is_active: bool = None,
         quality_min: float = None,
         quality_max: float = None,
-        label_contains: str = None
+        label_contains: str = None,
     ) -> int:
         """Count references with same filters"""
-        query = select(func.count()).select_from(Reference).where(Reference.user_id == user_id)
-        
+        query = (
+            select(func.count())
+            .select_from(Reference)
+            .where(Reference.user_id == user_id)
+        )
+
         if is_active is not None:
             query = query.where(Reference.is_active == is_active)
-        
+
         if quality_min is not None:
             query = query.where(Reference.quality_score >= quality_min)
-            
+
         if quality_max is not None:
             query = query.where(Reference.quality_score <= quality_max)
-            
+
         if label_contains:
             query = query.where(Reference.label.contains(label_contains))
-        
+
         result = await db.execute(query)
         return result.scalar() or 0
 
@@ -272,7 +286,7 @@ class ReferenceCRUD:
         image_format: str,
         version: str = None,
         file_url: str = None,
-        face_landmarks: dict = None
+        face_landmarks: dict = None,
     ) -> Reference:
         """Create reference for user"""
         try:
@@ -284,12 +298,13 @@ class ReferenceCRUD:
                 raise ValueError("image_filename is required")
             if quality_score is not None and not (0.0 <= quality_score <= 1.0):
                 raise ValueError("quality_score must be between 0.0 and 1.0")
-                
+
             # Используем переданную версию или вычисляем, если не передана
             if version is None:
                 result = await db.execute(
-                    select(func.max(Reference.embedding_version))
-                    .where(Reference.user_id == user_id)
+                    select(func.max(Reference.embedding_version)).where(
+                        Reference.user_id == user_id
+                    )
                 )
                 max_version = result.scalar() or "0"
                 version_num = int(max_version) + 1 if max_version != "0" else 1
@@ -315,9 +330,9 @@ class ReferenceCRUD:
                 file_url=file_url or f"file://{image_filename}",
                 face_landmarks=face_landmarks,
                 embedding_version=version,
-                previous_reference_id=previous_id
+                previous_reference_id=previous_id,
             )
-            
+
             db.add(new_ref)
             await db.commit()
             await db.refresh(new_ref)
@@ -331,20 +346,22 @@ class ReferenceCRUD:
             raise
 
     @staticmethod
-    async def update_reference(db: AsyncSession, reference_id: str, **kwargs) -> Optional[Reference]:
+    async def update_reference(
+        db: AsyncSession, reference_id: str, **kwargs
+    ) -> Optional[Reference]:
         """Update reference"""
         try:
             stmt = select(Reference).where(Reference.id == reference_id)
             result = await db.execute(stmt)
             ref = result.scalar_one_or_none()
-            
+
             if not ref:
                 return None
-            
+
             for field, value in kwargs.items():
                 if hasattr(ref, field):
                     setattr(ref, field, value)
-            
+
             await db.commit()
             await db.refresh(ref)
             logger.info(f"✅ Reference updated: {reference_id}")
@@ -361,7 +378,7 @@ class ReferenceCRUD:
             stmt = delete(Reference).where(Reference.id == reference_id)
             result = await db.execute(stmt)
             await db.commit()
-            
+
             if result.rowcount > 0:
                 logger.info(f"✅ Reference deleted: {reference_id}")
                 return True
@@ -370,9 +387,11 @@ class ReferenceCRUD:
             await db.rollback()
             logger.error(f"❌ Error deleting reference: {e}")
             raise
-    
+
     @staticmethod
-    async def find_duplicate_embedding(db: AsyncSession, embedding_hash: str) -> Optional[Reference]:
+    async def find_duplicate_embedding(
+        db: AsyncSession, embedding_hash: str
+    ) -> Optional[Reference]:
         """✅ ДОБАВЛЕНО: Поиск дубликатов по хешу"""
         result = await db.execute(
             select(Reference).where(Reference.embedding_hash == embedding_hash)
@@ -384,6 +403,7 @@ class ReferenceCRUD:
 # Verification Session CRUD (Async)
 # ============================================================================
 
+
 class VerificationSessionCRUD:
     @staticmethod
     async def create_session(
@@ -392,25 +412,25 @@ class VerificationSessionCRUD:
         session_id: str,
         image_filename: str,
         image_size_mb: float,
-        expires_at: datetime = None
+        expires_at: datetime = None,
     ) -> VerificationSession:
         """✅ ИСПРАВЛЕНО: Используем timezone-aware datetime"""
         try:
             # ✅ ИСПРАВЛЕНО: Всегда используем timezone.utc
             if expires_at is None:
                 expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
-            
+
             # ✅ ДОБАВЛЕНО: Проверка, что expires_at timezone-aware
             if expires_at.tzinfo is None:
                 expires_at = expires_at.replace(tzinfo=timezone.utc)
-                
+
             session = VerificationSession(
                 user_id=user_id,
                 session_id=session_id,
                 image_filename=image_filename,
                 image_size_mb=image_size_mb,
                 expires_at=expires_at,
-                status=VerificationStatus.PENDING
+                status=VerificationStatus.PENDING,
             )
             db.add(session)
             await db.commit()
@@ -423,49 +443,63 @@ class VerificationSessionCRUD:
             raise
 
     @staticmethod
-    async def get_session_by_sid(db: AsyncSession, session_id: str) -> Optional[VerificationSession]:
-        result = await db.execute(select(VerificationSession).where(VerificationSession.session_id == session_id))
+    async def get_session_by_sid(
+        db: AsyncSession, session_id: str
+    ) -> Optional[VerificationSession]:
+        result = await db.execute(
+            select(VerificationSession).where(
+                VerificationSession.session_id == session_id
+            )
+        )
         return result.scalar_one_or_none()
 
     @staticmethod
-    async def get_session(db: AsyncSession, session_id: str) -> Optional[VerificationSession]:
+    async def get_session(
+        db: AsyncSession, session_id: str
+    ) -> Optional[VerificationSession]:
         """Alias for get_session_by_sid"""
         return await VerificationSessionCRUD.get_session_by_sid(db, session_id)
 
     @staticmethod
     async def get_user_sessions(
         db: AsyncSession,
-        user_id: str, 
+        user_id: str,
         skip: int = 0,
         limit: int = 100,
         status: str = None,
         session_type: str = None,
         date_from: datetime = None,
-        date_to: datetime = None
+        date_to: datetime = None,
     ) -> List[VerificationSession]:
         """Get sessions for user with pagination and filtering"""
-        query = select(VerificationSession).where(VerificationSession.user_id == user_id)
-        
+        query = select(VerificationSession).where(
+            VerificationSession.user_id == user_id
+        )
+
         if status:
             query = query.where(VerificationSession.status == status)
-            
+
         if session_type:
             query = query.where(VerificationSession.session_type == session_type)
-            
+
         if date_from:
             # ✅ ДОБАВЛЕНО: Проверка timezone
             if date_from.tzinfo is None:
                 date_from = date_from.replace(tzinfo=timezone.utc)
             query = query.where(VerificationSession.created_at >= date_from)
-            
+
         if date_to:
             # ✅ ДОБАВЛЕНО: Проверка timezone
             if date_to.tzinfo is None:
                 date_to = date_to.replace(tzinfo=timezone.utc)
             query = query.where(VerificationSession.created_at <= date_to)
-        
-        query = query.order_by(desc(VerificationSession.created_at)).offset(skip).limit(limit)
-        
+
+        query = (
+            query.order_by(desc(VerificationSession.created_at))
+            .offset(skip)
+            .limit(limit)
+        )
+
         result = await db.execute(query)
         return list(result.scalars().all())
 
@@ -476,32 +510,38 @@ class VerificationSessionCRUD:
         status: str = None,
         session_type: str = None,
         date_from: datetime = None,
-        date_to: datetime = None
+        date_to: datetime = None,
     ) -> int:
         """Count sessions with same filters"""
-        query = select(func.count()).select_from(VerificationSession).where(VerificationSession.user_id == user_id)
-        
+        query = (
+            select(func.count())
+            .select_from(VerificationSession)
+            .where(VerificationSession.user_id == user_id)
+        )
+
         if status:
             query = query.where(VerificationSession.status == status)
-            
+
         if session_type:
             query = query.where(VerificationSession.session_type == session_type)
-            
+
         if date_from:
             if date_from.tzinfo is None:
                 date_from = date_from.replace(tzinfo=timezone.utc)
             query = query.where(VerificationSession.created_at >= date_from)
-            
+
         if date_to:
             if date_to.tzinfo is None:
                 date_to = date_to.replace(tzinfo=timezone.utc)
             query = query.where(VerificationSession.created_at <= date_to)
-        
+
         result = await db.execute(query)
         return result.scalar() or 0
 
     @staticmethod
-    async def update_session(db: AsyncSession, session_id: str, **kwargs) -> Optional[VerificationSession]:
+    async def update_session(
+        db: AsyncSession, session_id: str, **kwargs
+    ) -> Optional[VerificationSession]:
         """Update session"""
         try:
             stmt = (
@@ -512,7 +552,7 @@ class VerificationSessionCRUD:
             )
             await db.execute(stmt)
             await db.commit()
-            
+
             return await VerificationSessionCRUD.get_session_by_sid(db, session_id)
         except Exception as e:
             await db.rollback()
@@ -527,7 +567,7 @@ class VerificationSessionCRUD:
         similarity_score: float,
         confidence: float,
         threshold: float = None,
-        **kwargs
+        **kwargs,
     ) -> Optional[VerificationSession]:
         """✅ ИСПРАВЛЕНО: Timezone-aware datetime"""
         try:
@@ -539,14 +579,14 @@ class VerificationSessionCRUD:
                 "confidence": confidence,
                 "completed_at": datetime.now(timezone.utc),  # ✅ timezone-aware
             }
-            
+
             # Добавляем threshold_used, если передан threshold
             if threshold is not None:
                 update_values["threshold_used"] = threshold
-            
+
             # Добавляем остальные kwargs
             update_values.update(kwargs)
-            
+
             stmt = (
                 update(VerificationSession)
                 .where(VerificationSession.session_id == session_id)
@@ -555,7 +595,7 @@ class VerificationSessionCRUD:
             )
             await db.execute(stmt)
             await db.commit()
-            
+
             return await VerificationSessionCRUD.get_session_by_sid(db, session_id)
         except Exception as e:
             await db.rollback()
@@ -567,7 +607,7 @@ class VerificationSessionCRUD:
         db: AsyncSession,
         session_id: str,
         error_code: str = None,
-        error_message: str = None
+        error_message: str = None,
     ) -> Optional[VerificationSession]:
         """✅ ИСПРАВЛЕНО: Timezone-aware datetime"""
         try:
@@ -578,7 +618,7 @@ class VerificationSessionCRUD:
                     status=VerificationStatus.FAILED,
                     error_code=error_code,
                     error_message=error_message,
-                    completed_at=datetime.now(timezone.utc)  # ✅ timezone-aware
+                    completed_at=datetime.now(timezone.utc),  # ✅ timezone-aware
                 )
                 .execution_options(synchronize_session="fetch")
             )
@@ -591,36 +631,40 @@ class VerificationSessionCRUD:
             raise
 
     @staticmethod
-    async def get_active_sessions(db: AsyncSession, user_id: str = None) -> List[VerificationSession]:
+    async def get_active_sessions(
+        db: AsyncSession, user_id: str = None
+    ) -> List[VerificationSession]:
         """Get active/pending sessions"""
         query = select(VerificationSession).where(
-            VerificationSession.status.in_(['pending', 'processing'])
+            VerificationSession.status.in_(["pending", "processing"])
         )
-        
+
         if user_id:
             query = query.where(VerificationSession.user_id == user_id)
-        
+
         query = query.order_by(desc(VerificationSession.created_at)).limit(50)
-        
+
         result = await db.execute(query)
         return list(result.scalars().all())
-    
+
     @staticmethod
     async def cleanup_old_sessions(db: AsyncSession, days: int = 30) -> int:
         """✅ ИСПРАВЛЕНО: Timezone-aware datetime"""
         try:
-            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)  # ✅ timezone-aware
-            
+            cutoff_date = datetime.now(timezone.utc) - timedelta(
+                days=days
+            )  # ✅ timezone-aware
+
             stmt = delete(VerificationSession).where(
                 and_(
                     VerificationSession.created_at < cutoff_date,
-                    VerificationSession.status.in_(['success', 'failed', 'expired'])
+                    VerificationSession.status.in_(["success", "failed", "expired"]),
                 )
             )
-            
+
             result = await db.execute(stmt)
             await db.commit()
-            
+
             deleted_count = result.rowcount
             logger.info(f"✅ Cleaned up {deleted_count} old sessions")
             return deleted_count
@@ -628,18 +672,18 @@ class VerificationSessionCRUD:
             await db.rollback()
             logger.error(f"❌ Error cleaning up sessions: {e}")
             raise
-    
+
     @staticmethod
     async def bulk_fail_sessions(
         db: AsyncSession,
         session_ids: List[str],
         error_code: str = "BULK_FAIL",
-        error_message: str = "Sessions failed in bulk operation"
+        error_message: str = "Sessions failed in bulk operation",
     ) -> int:
         """✅ ИСПРАВЛЕНО: Timezone-aware datetime"""
         if not session_ids:
             return 0
-            
+
         stmt = (
             update(VerificationSession)
             .where(VerificationSession.session_id.in_(session_ids))
@@ -647,18 +691,20 @@ class VerificationSessionCRUD:
                 status=VerificationStatus.FAILED,
                 error_code=error_code,
                 error_message=error_message,
-                completed_at=datetime.now(timezone.utc)  # ✅ timezone-aware
+                completed_at=datetime.now(timezone.utc),  # ✅ timezone-aware
             )
             .execution_options(synchronize_session="fetch")
         )
-        
+
         result = await db.execute(stmt)
         await db.commit()
         return result.rowcount
 
+
 # ============================================================================
 # Audit Log CRUD (Async)
 # ============================================================================
+
 
 class AuditLogCRUD:
     @staticmethod
@@ -674,7 +720,7 @@ class AuditLogCRUD:
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
         success: bool = True,
-        error_message: Optional[str] = None
+        error_message: Optional[str] = None,
     ) -> Optional[AuditLog]:
         """Fire-and-forget style logging"""
         try:
@@ -689,7 +735,7 @@ class AuditLogCRUD:
                 ip_address=ip_address,
                 user_agent=user_agent,
                 success=success,
-                error_message=error_message
+                error_message=error_message,
             )
             db.add(log)
             await db.commit()
@@ -701,28 +747,35 @@ class AuditLogCRUD:
             return None
 
     @staticmethod
-    async def get_logs(db: AsyncSession, user_id: Optional[str] = None, action: Optional[str] = None, limit: int = 100) -> List[AuditLog]:
+    async def get_logs(
+        db: AsyncSession,
+        user_id: Optional[str] = None,
+        action: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[AuditLog]:
         """Get audit logs with filters"""
         stmt = select(AuditLog)
-        
+
         if user_id:
             stmt = stmt.where(AuditLog.user_id == user_id)
         if action:
             stmt = stmt.where(AuditLog.action == action)
-        
+
         stmt = stmt.order_by(desc(AuditLog.created_at)).limit(limit)
         result = await db.execute(stmt)
         return list(result.scalars().all())
 
     @staticmethod
-    async def get_resource_logs(db: AsyncSession, resource_type: str, resource_id: str) -> List[AuditLog]:
+    async def get_resource_logs(
+        db: AsyncSession, resource_type: str, resource_id: str
+    ) -> List[AuditLog]:
         """Get all logs for specific resource"""
         stmt = (
             select(AuditLog)
             .where(
                 and_(
                     AuditLog.resource_type == resource_type,
-                    AuditLog.resource_id == resource_id
+                    AuditLog.resource_id == resource_id,
                 )
             )
             .order_by(desc(AuditLog.created_at))

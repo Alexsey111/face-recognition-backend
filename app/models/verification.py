@@ -210,7 +210,9 @@ class SessionListResponse(BaseModel):
     status_summary: Dict[str, int] = Field(
         ...,
         description="Сводка по статусам",
-        json_schema_extra={"example": {"pending": 5, "processing": 2, "completed": 45, "failed": 3}}
+        json_schema_extra={
+            "example": {"pending": 5, "processing": 2, "completed": 45, "failed": 3}
+        },
     )
 
 
@@ -218,6 +220,7 @@ class SessionStats(BaseModel):
     """
     Модель для статистики сессий верификации.
     """
+
     model_config = ConfigDict(from_attributes=True)
 
     total_sessions: int = Field(..., description="Общее количество сессий")
@@ -233,17 +236,21 @@ class SessionStats(BaseModel):
     sessions_by_type: Dict[str, int] = Field(
         ...,
         description="Распределение по типам сессий",
-        json_schema_extra={"example": {"verification": 30, "liveness": 20, "enrollment": 5}}
+        json_schema_extra={
+            "example": {"verification": 30, "liveness": 20, "enrollment": 5}
+        },
     )
     sessions_by_status: Dict[str, int] = Field(
         ...,
         description="Распределение по статусам",
-        json_schema_extra={"example": {"completed": 45, "pending": 5, "processing": 2, "failed": 3}}
+        json_schema_extra={
+            "example": {"completed": 45, "pending": 5, "processing": 2, "failed": 3}
+        },
     )
     hourly_distribution: Dict[str, int] = Field(
         ...,
         description="Распределение по часам",
-        json_schema_extra={"example": {"00": 2, "01": 1, "02": 0, "03": 3}}
+        json_schema_extra={"example": {"00": 2, "01": 1, "02": 0, "03": 3}},
     )
 
 

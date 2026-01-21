@@ -63,12 +63,12 @@ class WebhookService:
     ) -> Dict[str, Any]:
         """
         Создание стандартизированного payload для webhook.
-        
+
         Args:
             event_type: Тип события (например, "liveness.completed")
             user_id: ID пользователя
             data: Данные события
-            
+
         Returns:
             Сформированный payload
         """
@@ -83,11 +83,11 @@ class WebhookService:
     def compute_hmac_signature(self, payload: Dict[str, Any], secret: str) -> str:
         """
         Вычисление HMAC подписи для payload.
-        
+
         Args:
             payload: Данные для подписи
             secret: Секретный ключ
-            
+
         Returns:
             HMAC подпись в формате "sha256=<digest>"
         """
@@ -102,10 +102,10 @@ class WebhookService:
     def compute_payload_hash(self, payload: Dict[str, Any]) -> str:
         """
         Вычисление хеша payload для дедупликации.
-        
+
         Args:
             payload: Данные события
-            
+
         Returns:
             SHA256 хеш payload
         """
@@ -150,12 +150,14 @@ class WebhookService:
         )
 
         configs = result.scalars().all()
-        
+
         # Фильтруем конфигурации по типу события
         configs = [c for c in configs if event_type in (c.event_types or [])]
-        
+
         if not configs:
-            logger.debug(f"No active webhook configs found for user {user_id} and event {event_type}")
+            logger.debug(
+                f"No active webhook configs found for user {user_id} and event {event_type}"
+            )
             return
 
         # Вычисляем хеш payload для дедупликации
@@ -165,13 +167,16 @@ class WebhookService:
             # Проверка на дубликаты (если включено)
             if skip_duplicates and payload_hash:
                 duplicate_check = await self.db.execute(
-                    select(WebhookLog).where(
+                    select(WebhookLog)
+                    .where(
                         WebhookLog.webhook_config_id == config.id,
                         WebhookLog.payload_hash == payload_hash,
-                        WebhookLog.created_at >= datetime.now(timezone.utc) - timedelta(hours=1)
-                    ).limit(1)
+                        WebhookLog.created_at
+                        >= datetime.now(timezone.utc) - timedelta(hours=1),
+                    )
+                    .limit(1)
                 )
-                
+
                 if duplicate_check.scalar_one_or_none():
                     logger.info(
                         f"Skipping duplicate webhook for config {config.id}, "
@@ -230,7 +235,7 @@ class WebhookService:
     ) -> None:
         """
         Отправка webhook с retry логикой.
-        
+
         Args:
             payload: Данные для отправки
             config: Конфигурация webhook
@@ -238,7 +243,9 @@ class WebhookService:
             signature: HMAC подпись
             max_retries_override: Переопределить max_retries из конфига
         """
-        max_retries = max_retries_override or config.max_retries or self.default_max_retries
+        max_retries = (
+            max_retries_override or config.max_retries or self.default_max_retries
+        )
 
         for attempt in range(1, max_retries + 1):
             start_time = time.time()
@@ -273,7 +280,7 @@ class WebhookService:
                     error=response_text,
                     max_retries=max_retries,
                 )
-                
+
                 logger.warning(
                     f"Webhook delivery failed: log={log_id}, "
                     f"attempt={attempt}/{max_retries}, status={status_code}"
@@ -288,7 +295,7 @@ class WebhookService:
                     error=str(exc),
                     max_retries=max_retries,
                 )
-                
+
                 logger.error(
                     f"Webhook delivery exception: log={log_id}, "
                     f"attempt={attempt}/{max_retries}, error={str(exc)}"
@@ -303,7 +310,9 @@ class WebhookService:
 
         # Все попытки исчерпаны
         await self._mark_log_failed(log_id)
-        logger.error(f"Webhook delivery failed after {max_retries} attempts: log={log_id}")
+        logger.error(
+            f"Webhook delivery failed after {max_retries} attempts: log={log_id}"
+        )
 
     # ------------------------------------------------------------------
     # SINGLE SEND
@@ -318,12 +327,12 @@ class WebhookService:
     ) -> tuple[bool, int, str]:
         """
         Однократная отправка webhook.
-        
+
         Args:
             payload: Данные для отправки
             config: Конфигурация webhook
             signature: HMAC подпись
-            
+
         Returns:
             Tuple (success, status_code, response_text)
         """
@@ -347,7 +356,7 @@ class WebhookService:
                     text = await response.text()
                     success = 200 <= response.status < 300
                     return success, response.status, text[:MAX_RESPONSE_LENGTH]
-                    
+
         except aiohttp.ClientError as e:
             return False, 0, f"Client error: {str(e)}"[:MAX_ERROR_LENGTH]
         except asyncio.TimeoutError:
@@ -405,11 +414,13 @@ class WebhookService:
                 .where(WebhookLog.id == str(log_id))
             )
             config = result.scalar_one_or_none()
-            
+
             if config:
                 delay_base = config.retry_delay or DEFAULT_RETRY_DELAY
-                delay_seconds = delay_base * (2 ** attempt)
-                next_retry_at = datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
+                delay_seconds = delay_base * (2**attempt)
+                next_retry_at = datetime.now(timezone.utc) + timedelta(
+                    seconds=delay_seconds
+                )
 
         await self.db.execute(
             update(WebhookLog)
@@ -445,10 +456,10 @@ class WebhookService:
     async def validate_webhook_url(self, url: str) -> Dict[str, Any]:
         """
         Валидация webhook URL путем тестовой отправки HEAD запроса.
-        
+
         Args:
             url: URL для проверки
-            
+
         Returns:
             Dict с результатом валидации
         """
@@ -456,29 +467,17 @@ class WebhookService:
             timeout = aiohttp.ClientTimeout(total=5)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.head(url, allow_redirects=True) as response:
-                    return {
-                        "valid": True,
-                        "status": response.status,
-                        "reachable": True
-                    }
+                    return {"valid": True, "status": response.status, "reachable": True}
         except aiohttp.ClientError as e:
             return {
                 "valid": False,
                 "error": f"Connection error: {str(e)}",
-                "reachable": False
+                "reachable": False,
             }
         except asyncio.TimeoutError:
-            return {
-                "valid": False,
-                "error": "Connection timeout",
-                "reachable": False
-            }
+            return {"valid": False, "error": "Connection timeout", "reachable": False}
         except Exception as exc:
-            return {
-                "valid": False,
-                "error": str(exc),
-                "reachable": False
-            }
+            return {"valid": False, "error": str(exc), "reachable": False}
 
     # ------------------------------------------------------------------
     # UTILITY METHODS

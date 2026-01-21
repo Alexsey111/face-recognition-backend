@@ -10,6 +10,7 @@ Tests cover:
 - Log with context function
 - Audit event function
 """
+
 import json
 import logging
 import sys
@@ -85,9 +86,19 @@ class TestSensitiveDataRedaction:
     def test_sensitive_keys_coverage(self):
         """Ensure all expected sensitive keys are covered."""
         expected_keys = {
-            "password", "passwd", "token", "access_token", "refresh_token",
-            "embeddings", "embedding", "image", "file", "ssn",
-            "credit_card", "api_key", "secret",
+            "password",
+            "passwd",
+            "token",
+            "access_token",
+            "refresh_token",
+            "embeddings",
+            "embedding",
+            "image",
+            "file",
+            "ssn",
+            "credit_card",
+            "api_key",
+            "secret",
         }
         assert SENSITIVE_KEYS == expected_keys
 
@@ -105,6 +116,7 @@ class TestLogContext:
         """LogContext should set request_id and user_id."""
         with LogContext(request_id="req-123", user_id="user-456") as ctx:
             from app.utils.logger import _LOG_CONTEXT
+
             context = _LOG_CONTEXT.get()
             assert context["request_id"] == "req-123"
             assert context["user_id"] == "user-456"
@@ -113,6 +125,7 @@ class TestLogContext:
         """LogContext should accept extra fields."""
         with LogContext(extra={"action": "login", "ip": "127.0.0.1"}):
             from app.utils.logger import _LOG_CONTEXT
+
             context = _LOG_CONTEXT.get()
             assert context["action"] == "login"
             assert context["ip"] == "127.0.0.1"
@@ -501,6 +514,7 @@ class TestLogFunctionCall:
             @log_function_call
             def slow_function():
                 import time
+
                 time.sleep(0.01)
                 return "done"
 
@@ -556,12 +570,14 @@ class TestGetLoggerSetup:
     def test_get_logger_returns_logger(self):
         """get_logger should return a logger instance."""
         from app.utils.logger import get_logger
+
         logger = get_logger("test_module")
         assert isinstance(logger, logging.Logger)
 
     def test_get_logger_idempotent(self):
         """get_logger should be safe to call multiple times."""
         from app.utils.logger import get_logger
+
         logger1 = get_logger("test_idempotent")
         logger2 = get_logger("test_idempotent")
         assert logger1 is logger2
@@ -569,6 +585,7 @@ class TestGetLoggerSetup:
     def test_setup_logger_configures_handlers(self):
         """setup_logger should configure handlers."""
         from app.utils.logger import setup_logger
+
         logger = setup_logger("test_setup", level="DEBUG")
         assert logger.level == logging.DEBUG
         assert len(logger.handlers) > 0
@@ -576,6 +593,7 @@ class TestGetLoggerSetup:
     def test_setup_logger_with_file(self, tmp_path):
         """setup_logger should create file handler when path provided."""
         from app.utils.logger import setup_logger
+
         log_file = tmp_path / "test.log"
         logger = setup_logger("test_file", level="DEBUG", log_file=str(log_file))
         assert logger.level == logging.DEBUG
@@ -593,6 +611,7 @@ class TestAuditLogger:
     def test_audit_logger_has_handlers(self, tmp_path):
         """Audit logger should have handlers when configured."""
         from app.utils.logger import setup_logger
+
         log_file = tmp_path / "test.log"
         setup_logger("test", log_file=str(log_file))
 
