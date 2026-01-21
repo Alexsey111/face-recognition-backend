@@ -207,6 +207,15 @@ db-reset: ## Сбросить БД и применить все миграции
 		alembic upgrade head
 	@echo "$(GREEN)[SUCCESS]$(NC) БД сброшена и миграции применены"
 
+# Модель
+download-model: ## Загрузить модель MiniFASNetV2
+	@echo "$(BLUE)[INFO]$(NC) Загрузка модели MiniFASNetV2..."
+	@source $(VENV)/bin/activate && python scripts/download_model.py
+
+download-model-force: ## Перезагрузить модель MiniFASNetV2
+	@echo "$(BLUE)[INFO]$(NC) Принудительная загрузка модели MiniFASNetV2..."
+	@source $(VENV)/bin/activate && python scripts/download_model.py --force
+
 # Мониторинг
 health: ## Проверить health status сервиса
 	@echo "$(BLUE)[INFO]$(NC) Проверка health status..."
