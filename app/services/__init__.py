@@ -1,5 +1,6 @@
 """
 Сервисы бизнес-логики.
+
 Модуль содержит основные сервисы приложения.
 """
 
@@ -12,7 +13,8 @@ from .webhook_service import WebhookService
 from .validation_service import ValidationService
 from .cache_service import CacheService
 from .auth_service import AuthService
-
+from .active_liveness_service import ActiveLivenessService 
+from .face_occlusion_detector import FaceOcclusionDetector 
 __all__ = [
     "MLService",
     "DatabaseService",
@@ -23,4 +25,7 @@ __all__ = [
     "ValidationService",
     "CacheService",
     "AuthService",
+    "ActiveLivenessService",
+    "FaceOcclusionDetector",
 ]
+

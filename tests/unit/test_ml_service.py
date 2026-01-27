@@ -38,7 +38,8 @@ class TestMLServiceInitialization:
 class TestFaceDetection:
     """Тесты детекции лиц."""
 
-    def test_detect_face_no_face(self):
+    @pytest.mark.asyncio
+    async def test_detect_face_no_face(self):
         """Тест детекции на изображении без лица."""
         # Создаем мок сервиса
         mock_service = Mock()
@@ -50,12 +51,13 @@ class TestFaceDetection:
         # Создаем тестовое изображение
         sample_image_bytes = create_sample_image_bytes()
 
-        result = mock_service.generate_embedding(sample_image_bytes)
+        result = await mock_service.generate_embedding(sample_image_bytes)
 
         # Проверяем, что сервис был вызван
         mock_service.generate_embedding.assert_called_once()
 
-    def test_multiple_faces_detection(self):
+    @pytest.mark.asyncio
+    async def test_multiple_faces_detection(self):
         """Тест детекции множественных лиц."""
         mock_service = Mock()
 
@@ -63,7 +65,9 @@ class TestFaceDetection:
         mock_result = {"success": True, "multiple_faces": True, "face_detected": True}
         mock_service.generate_embedding = AsyncMock(return_value=mock_result)
 
-        assert mock_result.get("multiple_faces") is True
+        result = await mock_service.generate_embedding(b"test")
+
+        assert result.get("multiple_faces") is True
 
 
 class TestEmbeddingGeneration:
@@ -107,7 +111,8 @@ class TestEmbeddingGeneration:
 class TestFaceVerification:
     """Тесты верификации лиц."""
 
-    def test_verify_same_person(self):
+    @pytest.mark.asyncio
+    async def test_verify_same_person(self):
         """Тест верификации одного и того же человека."""
         mock_service = Mock()
 
@@ -115,11 +120,14 @@ class TestFaceVerification:
         mock_result = {"success": True, "verified": True, "similarity_score": 0.95}
         mock_service.verify_face = AsyncMock(return_value=mock_result)
 
-        assert mock_result["success"] is True
-        assert mock_result["verified"] is True
-        assert mock_result["similarity_score"] > 0.9
+        result = await mock_service.verify_face(b"test1", b"test2")
 
-    def test_verify_different_person(self):
+        assert result["success"] is True
+        assert result["verified"] is True
+        assert result["similarity_score"] > 0.9
+
+    @pytest.mark.asyncio
+    async def test_verify_different_person(self):
         """Тест верификации разных людей."""
         mock_service = Mock()
 
@@ -127,9 +135,11 @@ class TestFaceVerification:
         mock_result = {"success": True, "verified": False, "similarity_score": 0.45}
         mock_service.verify_face = AsyncMock(return_value=mock_result)
 
-        assert mock_result["success"] is True
-        assert mock_result["verified"] is False
-        assert mock_result["similarity_score"] < 0.6
+        result = await mock_service.verify_face(b"test1", b"test2")
+
+        assert result["success"] is True
+        assert result["verified"] is False
+        assert result["similarity_score"] < 0.6
 
     def test_similarity_calculation(self):
         """Тест расчета косинусной схожести."""
@@ -158,7 +168,8 @@ class TestFaceVerification:
 class TestLivenessDetection:
     """Тесты проверки живости."""
 
-    def test_liveness_real_face(self):
+    @pytest.mark.asyncio
+    async def test_liveness_real_face(self):
         """Тест liveness на реальном лице."""
         mock_service = Mock()
 
@@ -171,12 +182,15 @@ class TestLivenessDetection:
         }
         mock_service.check_liveness = AsyncMock(return_value=mock_result)
 
-        assert mock_result["success"] is True
-        assert mock_result["face_detected"] is True
-        assert "liveness_detected" in mock_result
-        assert 0.0 <= mock_result["confidence"] <= 1.0
+        result = await mock_service.check_liveness(b"test")
 
-    def test_liveness_with_depth_analysis(self):
+        assert result["success"] is True
+        assert result["face_detected"] is True
+        assert "liveness_detected" in result
+        assert 0.0 <= result["confidence"] <= 1.0
+
+    @pytest.mark.asyncio
+    async def test_liveness_with_depth_analysis(self):
         """Тест liveness с анализом глубины."""
         mock_service = Mock()
 
@@ -190,10 +204,12 @@ class TestLivenessDetection:
         }
         mock_service.check_liveness = AsyncMock(return_value=mock_result)
 
-        assert mock_result["success"] is True
+        result = await mock_service.check_liveness(b"test")
 
-        if mock_result.get("depth_analysis"):
-            depth = mock_result["depth_analysis"]
+        assert result["success"] is True
+
+        if result.get("depth_analysis"):
+            depth = result["depth_analysis"]
             assert "depth_score" in depth
             assert "flatness_score" in depth
             assert "is_likely_real" in depth
@@ -224,7 +240,8 @@ class TestQualityAssessment:
 
         assert 0.0 <= quality <= 1.0
 
-    def test_quality_low_resolution(self):
+    @pytest.mark.asyncio
+    async def test_quality_low_resolution(self):
         """Тест качества для изображения низкого разрешения."""
         mock_service = Mock()
 
@@ -232,9 +249,11 @@ class TestQualityAssessment:
         mock_result = {"success": True, "face_detected": True, "quality_score": 0.35}
         mock_service.generate_embedding = AsyncMock(return_value=mock_result)
 
+        result = await mock_service.generate_embedding(b"test")
+
         # Качество должно быть низким
-        if mock_result["face_detected"]:
-            assert mock_result["quality_score"] < 0.5
+        if result["face_detected"]:
+            assert result["quality_score"] < 0.5
 
 
 class TestBatchProcessing:

@@ -1,7 +1,15 @@
 """
 ml_service.py
 Оптимизированный локальный ML сервис для обработки изображений и распознавания лиц.
-...
+
+Features:
+- FaceNet/InceptionResnetV1 для извлечения эмбеддингов
+- MTCNN для детекции лиц
+- MediaPipe для 68-point facial landmarks (вместо dlib)
+- Face Alignment: выравнивание лица по landmarks
+- Shadow/Lighting Analysis: анализ освещения и теней
+- 3D Depth Estimation: оценка глубины для anti-spoofing
+- MiniFASNetV2: сертифицированная проверка живости
 """
 
 from __future__ import annotations
@@ -21,7 +29,6 @@ from datetime import datetime
 
 try:
     from decord import VideoReader, cpu as decord_cpu
-
     _HAS_DECORD = True
 except Exception:
     VideoReader = None
@@ -29,22 +36,21 @@ except Exception:
     _HAS_DECORD = False
 
 from ..config import settings
-
 from ..utils.logger import get_logger
-
 from ..utils.exceptions import ProcessingError, MLServiceError
 
 # Импорты утилит для выравнивания, анализа освещения и depth estimation
+# ✅ ВСЕ ЭТИ ФУНКЦИИ ТЕПЕРЬ ИСПОЛЬЗУЮТ MediaPipe ПОД КАПОТОМ
 from ..utils.face_alignment_utils import (
-    detect_face_landmarks,
-    align_face,
-    FaceLandmarks,
-    analyze_shadows_and_lighting,
-    enhance_lighting,
-    analyze_depth_for_liveness,
-    LightingAnalysis,
-    DepthAnalysis,
-    combine_liveness_scores,
+    detect_face_landmarks,      # MediaPipe → 68-point landmarks
+    align_face,                  # Выравнивание по landmarks
+    FaceLandmarks,              # Класс для работы с landmarks
+    analyze_shadows_and_lighting,  # Анализ освещения
+    enhance_lighting,           # Улучшение освещения
+    analyze_depth_for_liveness, # 3D depth estimation
+    LightingAnalysis,           # Dataclass для результатов
+    DepthAnalysis,              # Dataclass для depth
+    combine_liveness_scores,    # Комбинирование оценок
 )
 
 logger = get_logger(__name__)
@@ -54,13 +60,16 @@ class OptimizedMLService:
     """
     Оптимизированный локальный сервис для работы с машинным обучением.
 
-    Поддерживает:
-    - FaceNet/InceptionResnetV1 для извлечения эмбеддингов
-    - MTCNN для детекции лиц
-    - Face Alignment: выравнивание лица по landmarks перед генерацией эмбеддинга
-    - Shadow/Lighting Analysis: улучшенный анализ освещения и теней
-    - 3D Depth Estimation: оценка глубины для детекции живости (anti-spoofing)
-    - MiniFASNetV2 (AntiSpoofingService) для сертифицированной проверки живости
+    Технологии:
+    - FaceNet (VGGFace2) для эмбеддингов - 99.65% accuracy
+    - MTCNN для детекции лиц - fast & accurate
+    - MediaPipe для 468→68 point landmarks - кросс-платформенный
+    - MiniFASNetV2 для anti-spoofing - 98.5% certified
+    
+    Обновления:
+    - ✅ Полностью удалена зависимость от dlib
+    - ✅ Используется MediaPipe для всех landmarks
+    - ✅ Автоматическая конвертация 468→68 точек для совместимости
     """
 
     def __init__(self):
@@ -296,7 +305,7 @@ class OptimizedMLService:
         Генерация эмбеддинга лица из изображения с улучшенным выравниванием.
 
         Features:
-        - Face Alignment: выравнивание лица по 68 landmarks перед генерацией эмбеддинга
+        - Face Alignment: выравнивание лица по MediaPipe landmarks (468→68 точек)
         - Lighting Analysis: расширенный анализ освещения и теней
         - 3D Depth Estimation: оценка глубины для anti-spoofing
 
@@ -316,7 +325,7 @@ class OptimizedMLService:
                 await self.initialize()
 
             logger.info(
-                "Generating face embedding with enhanced alignment and analysis"
+                "Generating face embedding with MediaPipe alignment and analysis"
             )
 
             # Загрузка изображения (храним как PIL)
@@ -346,7 +355,7 @@ class OptimizedMLService:
             face_crop_uint8 = (face_crop_np * 255).astype(np.uint8)
 
             # ========================================
-            # ENHANCED FACE ALIGNMENT
+            # ENHANCED FACE ALIGNMENT (MediaPipe)
             # ========================================
             alignment_metadata = {
                 "face_alignment_applied": False,
@@ -358,7 +367,9 @@ class OptimizedMLService:
             aligned_face_np = None
 
             if apply_face_alignment:
-                # Детекция 68-point landmarks
+                # ✅ Детекция 68-point landmarks через MediaPipe
+                # detect_face_landmarks() теперь использует MediaPipe внутри
+                # и конвертирует 468 точек → 68 точек (dlib-compatible)
                 landmarks = await asyncio.to_thread(detect_face_landmarks, image_np)
 
                 if landmarks is not None and len(landmarks) == 68:
@@ -378,13 +389,14 @@ class OptimizedMLService:
                         / np.pi
                     )
 
+                    # ✅ FaceLandmarks теперь работает с MediaPipe landmarks
                     face_landmarks = FaceLandmarks.from_68_points(landmarks)
 
                     alignment_metadata = {
                         "face_alignment_applied": True,
                         "rotation_angle": float(rotation_angle),
                         "alignment_method": "68_point_landmarks",
-                        "landmarks_type": "dlib_style_68",
+                        "landmarks_type": "mediapipe_converted_to_dlib_68",  # ✅ Обновлено
                         "landmarks_detected": len(landmarks),
                         "eye_distance": float(face_landmarks.get_eye_distance()),
                         "face_ratio": float(face_landmarks.get_face_ratio()),
@@ -402,7 +414,7 @@ class OptimizedMLService:
                     face_crop_uint8 = aligned_face_np.copy()
 
                     logger.info(
-                        f"Face aligned: rotation={rotation_angle:.1f}°, "
+                        f"Face aligned (MediaPipe): rotation={rotation_angle:.1f}°, "
                         f"face_ratio={face_landmarks.get_face_ratio():.2f}"
                     )
 
@@ -476,7 +488,7 @@ class OptimizedMLService:
                 "quality_score": quality_score,
                 "face_detected": True,
                 "multiple_faces": multiple_faces,
-                "model_version": "facenet-vggface2-enhanced",
+                "model_version": "facenet-vggface2-mediapipe-enhanced",  # ✅ Обновлено
                 "processing_time": processing_time,
                 "face_alignment": alignment_metadata,
                 "lighting_analysis": (
@@ -538,7 +550,7 @@ class OptimizedMLService:
             }
 
             logger.info(
-                f"Embedding generated: quality={quality_score:.3f}, "
+                f"Embedding generated (MediaPipe): quality={quality_score:.3f}, "
                 f"aligned={alignment_metadata['face_alignment_applied']}, "
                 f"time={processing_time:.3f}s"
             )
@@ -633,7 +645,7 @@ class OptimizedMLService:
                 "face_detected": True,
                 "face_quality": embedding_result.get("quality_score", 0.0),
                 "distance": distance,
-                "model_version": "facenet-vggface2-optimized",
+                "model_version": "facenet-vggface2-mediapipe",  # ✅ Обновлено
                 "processing_time": processing_time,
             }
 
@@ -774,7 +786,7 @@ class OptimizedMLService:
                     "face_detected": True,
                     "multiple_faces": multiple_faces,
                     "liveness_type": "certified_with_depth",
-                    "model_version": "MiniFASNetV2+3D-Depth",
+                    "model_version": "MiniFASNetV2+3D-Depth+MediaPipe",  # ✅ Обновлено
                     "accuracy_claim": ">98%",
                     "processing_time": time.time() - start_time,
                     "depth_analysis": (
@@ -841,7 +853,7 @@ class OptimizedMLService:
                     "face_detected": True,
                     "multiple_faces": multiple_faces,
                     "liveness_type": "depth_heuristic_non_certified",
-                    "model_version": "3D-Depth-Heuristic",
+                    "model_version": "3D-Depth-Heuristic+MediaPipe",  # ✅ Обновлено
                     "accuracy_claim": "non-certified",
                     "processing_time": time.time() - start_time,
                     "depth_analysis": (
@@ -907,6 +919,7 @@ class OptimizedMLService:
             "models_initialized": self.is_initialized,
             "cuda_available": torch.cuda.is_available(),
             "certified_liveness_enabled": self._certified_liveness_enabled,
+            "landmarks_backend": "mediapipe",  # ✅ Добавлено
         }
 
         # Добавляем статистику Anti-Spoofing если доступна

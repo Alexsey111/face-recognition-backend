@@ -1,0 +1,347 @@
+# =============================================================================
+# Face Recognition Service - High Availability Configuration
+# =============================================================================
+# 
+# This configuration provides:
+# - Horizontal scaling with 3 API replicas
+# - Load balancing across replicas
+# - Health checks with automatic restart
+# - Resource limits and monitoring
+# - Graceful shutdown handling
+#
+# Usage:
+#   docker stack deploy -c docker-compose.ha.yml face-recognition
+#   docker-compose -f docker-compose.ha.yml up -d
+#
+# For Kubernetes, use the k8s/ directory manifests
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # ========================================================================
+  # API Service - Horizontal Scaling (3 replicas)
+  # ========================================================================
+  face-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    image: face-recognition:latest
+    expose:
+      - "8000"
+    environment:
+      APP_NAME: Face Recognition Service
+      ENVIRONMENT: production
+      DEBUG: false
+      LOG_LEVEL: INFO
+      WORKERS: 2
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/face_recognition
+      DATABASE_POOL_SIZE: 20
+      REDIS_URL: redis://redis:6379/0
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_BUCKET_NAME: face-recognition
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-your-secret-key-change-in-production}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-your-encryption-key-change-in-production}
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    deploy:
+      mode: replicated
+      replicas: 3
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+    
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+      memlock:
+        soft: -1
+        hard: -1
+    
+    networks:
+      - face_recognition_network
+    
+    labels:
+      - "face-recognition.service=api"
+
+  # ========================================================================
+  # PostgreSQL - High Availability
+  # ========================================================================
+  postgres-primary:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: face_recognition
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_primary_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d face_recognition"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+      restart_policy:
+        condition: on-failure
+    networks:
+      - face_recognition_network
+    labels:
+      - "face-recognition.service=postgres-primary"
+
+  postgres-replica:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: face_recognition
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      PGDATA: /var/lib/postgresql/data/pgdata
+      REPLICATION_MODE: replica
+    volumes:
+      - postgres_replica_data:/var/lib/postgresql/data
+    command: >
+      postgres
+      -c primary_conninfo='host=postgres-primary port=5432 user=postgres password=postgres'
+      -c hot_standby=on
+    depends_on:
+      - postgres-primary
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d face_recognition"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+      restart_policy:
+        condition: on-failure
+    networks:
+      - face_recognition_network
+    labels:
+      - "face-recognition.service=postgres-replica"
+
+  # ========================================================================
+  # Redis - Master/Replica
+  # ========================================================================
+  redis-master:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --loglevel notice
+    volumes:
+      - redis_master_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+      restart_policy:
+        condition: on-failure
+    networks:
+      - face_recognition_network
+    labels:
+      - "face-recognition.service=redis-master"
+
+  redis-replica:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --replicaof redis-master 6379 --loglevel notice
+    volumes:
+      - redis_replica_data:/data
+    depends_on:
+      - redis-master
+    healthcheck:
+      test: ["CMD", "redis-cli", "-h", "redis-master", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+      restart_policy:
+        condition: on-failure
+    networks:
+      - face_recognition_network
+    labels:
+      - "face-recognition.service=redis-replica"
+
+  # ========================================================================
+  # Load Balancer (Traefik)
+  # ========================================================================
+  traefik:
+    image: traefik:v3.0
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.email=${LETSENCRYPT_EMAIL:-admin@example.com}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--metrics.prometheus=true"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_data:/letsencrypt
+    depends_on:
+      - face-api
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+    networks:
+      - face_recognition_network
+    labels:
+      - "traefik.enable=true"
+      - "face-recognition.service=traefik"
+
+  # ========================================================================
+  # Monitoring
+  # ========================================================================
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - face-api
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+      restart_policy:
+        condition: on-failure
+    networks:
+      - face_recognition_network
+    labels:
+      - "face-recognition.service=prometheus"
+
+  grafana:
+    image: grafana/grafana:10.0.0
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+      restart_policy:
+        condition: on-failure
+    networks:
+      - face_recognition_network
+    labels:
+      - "face-recognition.service=grafana"
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.47
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"
+      - "6831:6831/udp"
+      - "4317:4317"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:16686"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+      restart_policy:
+        condition: on-failure
+    networks:
+      - face_recognition_network
+    labels:
+      - "face-recognition.service=jaeger"
+
+# ========================================================================
+# Volumes
+# ========================================================================
+volumes:
+  postgres_primary_data:
+  postgres_replica_data:
+  redis_master_data:
+  redis_replica_data:
+  traefik_data:
+  prometheus_data:
+  grafana_data:
+
+# ========================================================================
+# Networks
+# ========================================================================
+networks:
+  face_recognition_network:
+    driver: overlay
+    attachable: true

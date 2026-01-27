@@ -99,11 +99,33 @@ async def check_ml_service_connection() -> tuple[bool, str]:
                         return True, "connected"
                     return False, f"status_code: {response.status}"
         else:
-            # Локальный ML сервис - всегда считаем недоступным пока не загружена модель
-            return False, "model_not_loaded"
+            # Локальный ML сервис - проверяем инициализацию
+            from ..services.ml_service import get_ml_service
+            
+            try:
+                ml_service = await get_ml_service()
+                
+                # Проверяем что модели загружены
+                if not ml_service.is_initialized:
+                    return False, "models_not_initialized"
+                
+                # Проверяем статус моделей
+                stats = ml_service.get_stats()
+                if not stats.get('models_initialized', False):
+                    return False, "models_not_loaded"
+                
+                # Все хорошо
+                device = stats.get('device', 'unknown')
+                return True, f"ready_on_{device}"
+                
+            except Exception as e:
+                logger.error(f"ML service health check error: {str(e)}")
+                return False, f"error: {str(e)[:50]}"
+                
     except Exception as e:
         logger.error(f"ML service health check failed: {str(e)}")
         return False, str(e)
+
 
 
 async def check_all_services() -> dict[str, tuple[bool, str]]:

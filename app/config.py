@@ -99,6 +99,24 @@ class Settings(BaseSettings):
     DELETE_SOURCE_AFTER_PROCESSING: bool = True
 
     # ============================================================================
+    # Политика хранения биометрических данных (GDPR/FZ-152 Compliance)
+    # ============================================================================
+    # Сроки хранения в днях (если не указано иное)
+    BIOMETRIC_RETENTION_DAYS: int = 1095  # 3 года для биометрических шаблонов
+    BIOMETRIC_INACTIVITY_DAYS: int = 1095  # 3 года неактивности перед удалением
+    RAW_PHOTO_RETENTION_DAYS: int = 30  # 30 дней для исходных фото
+    AUDIT_LOG_RETENTION_DAYS: int = 365  # 1 год для аудит логов
+    WEBHOOK_LOG_RETENTION_DAYS: int = 30  # 30 дней для webhook логов
+    
+    # GDPR Compliance: Право на удаление данных (Right to be Forgotten)
+    ENABLE_GDPR_AUTO_DELETE: bool = True
+    GDPR_DELETE_BATCH_SIZE: int = 100
+    
+    # Политика хранения для корпоративных клиентов (расширенная)
+    CORPORATE_RAW_PHOTO_RETENTION_DAYS: int = 90
+    CORPORATE_BIOMETRIC_RETENTION_DAYS: int = 1825  # 5 лет
+
+    # ============================================================================
     # ML Service Configuration
     # ============================================================================
     USE_LOCAL_ML_SERVICE: bool = True
@@ -217,13 +235,89 @@ class Settings(BaseSettings):
     MAX_IMAGE_HEIGHT: int = 4096
 
     # ============================================================================
-    # Verification thresholds
+    # Face Verification Thresholds (Accuracy Requirements: FAR<0.1%, FRR<1-3%)
+    # ============================================================================
+    # Основной порог верификации (cosine similarity)
+    # Рекомендуемые значения:
+    # - 0.60-0.70: Высокий FRR (много отказов), низкий FAR
+    # - 0.70-0.80: Баланс (рекомендуется для production)
+    # - 0.80-0.90: Низкий FRR (много совпадений), высокий FAR
+    VERIFICATION_THRESHOLD: float = Field(
+        default=0.75,
+        ge=0.0,
+        le=1.0,
+        description="Порог cosine similarity для верификации. "
+                    "Рекомендуется: 0.75 (баланс FAR/FRR)",
+    )
+
+    # Дополнительные пороги для уровней уверенности
+    CONFIDENCE_LOW: float = Field(
+        default=0.60,
+        ge=0.0,
+        le=1.0,
+        description="Низкий уровень совпадения (требуется повторная проверка)",
+    )
+    CONFIDENCE_MEDIUM: float = Field(
+        default=0.75,
+        ge=0.0,
+        le=1.0,
+        description="Средний уровень совпадения (стандартная верификация)",
+    )
+    CONFIDENCE_HIGH: float = Field(
+        default=0.90,
+        ge=0.0,
+        le=1.0,
+        description="Высокий уровень совпадения (высокая уверенность)",
+    )
+
+    # Целевые показатели точности (из ТЗ)
+    # FAR (False Accept Rate) - доля ложных срабатываний
+    TARGET_FAR: float = Field(
+        default=0.001,  # 0.1%
+        ge=0.0,
+        le=1.0,
+        description="Целевой False Accept Rate (0.1% = 1/1000)",
+    )
+
+    # FRR (False Reject Rate) - доля ложных отказов
+    TARGET_FRR: float = Field(
+        default=0.03,  # 3%
+        ge=0.0,
+        le=1.0,
+        description="Целевой False Reject Rate (1-3% = 1-3/100)",
+    )
+
+    # Расчётный порог на основе FAR/FRR
+    # Для FaceNet (casia-webface): 
+    # - При FAR=0.1% порог ~0.65-0.70
+    # - При FAR=0.01% порог ~0.75-0.80
+    # - При FAR=0.001% порог ~0.85-0.90
+    CALCULATED_THRESHOLD_FAR_001: float = Field(
+        default=0.65,
+        description="Порог для FAR=0.1% (высокая безопасность)",
+    )
+    CALCULATED_THRESHOLD_FAR_0001: float = Field(
+        default=0.75,
+        description="Порог для FAR=0.01% (баланс)",
+    )
+    CALCULATED_THRESHOLD_FAR_00001: float = Field(
+        default=0.85,
+        description="Порог для FAR=0.001% (низкая FRR)",
+    )
+
+    # Евклидово расстояние пороги (альтернативный метод)
+    EUCLIDEAN_THRESHOLD_DEFAULT: float = Field(
+        default=1.0,
+        ge=0.0,
+        description="Максимальное евклидово расстояние для совпадения (L2 norm)",
+    )
+
+    # ============================================================================
+    # Legacy Verification thresholds (backward compatibility)
     # ============================================================================
     THRESHOLD_DEFAULT: float = 0.80
     THRESHOLD_MIN: float = 0.50
     THRESHOLD_MAX: float = 0.95
-    TARGET_FAR: float = 0.001
-    TARGET_FRR: float = 0.02
 
     # ============================================================================
     # Webhooks

@@ -1,10 +1,18 @@
-# Dockerfile
-# Multi-stage production Dockerfile для Face Recognition Service
+# =============================================================================
+# Dockerfile для Face Recognition Service
+# =============================================================================
+# Поддержка GPU: Используйте nvidia/cuda base image
+#   docker build --build-arg BASE_IMAGE=nvidia/cuda:12.2-cudnn8-devel ...
+#   или docker-compose -f docker-compose.gpu.yml
+# =============================================================================
 
 # =============================================================================
 # Stage 1: Builder - установка зависимостей
 # =============================================================================
-FROM python:3.12-slim as builder
+ARG PYTHON_VERSION=3.12
+ARG BASE_IMAGE=python:${PYTHON_VERSION}-slim
+
+FROM ${BASE_IMAGE} as builder
 
 LABEL stage=builder
 
@@ -12,6 +20,8 @@ LABEL stage=builder
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
+    make \
+    cmake \
     libgl1-mesa-glx \
     libglib2.0-0 \
     libsm6 \
@@ -29,6 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpng-dev \
     libtiff-dev \
     curl \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
 # Создание виртуального окружения
@@ -45,11 +56,18 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
 # =============================================================================
 # Stage 2: Runtime - финальный образ
 # =============================================================================
-FROM python:3.12-slim as runtime
+# Для GPU используйте: docker build --build-arg BASE_IMAGE=nvidia/cuda:12.2-cudnn8-devel ...
+ARG BASE_IMAGE=python:3.12-slim
+FROM ${BASE_IMAGE} as runtime
 
 LABEL maintainer="your-team@example.com" \
       version="1.0.0" \
-      description="Face Recognition Service API"
+      description="Face Recognition Service API with GPU support"
+
+# Labels для GPU (если используется nvidia/cuda)
+ARG CUDA_VERSION=not-used
+LABEL com.nvidia.cuda.version="${CUDA_VERSION}" \
+      com.nvidia.cudnn.version="8"
 
 # Установка только runtime библиотек
 RUN apt-get update && apt-get install -y --no-install-recommends \

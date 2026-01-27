@@ -1,0 +1,73 @@
+# =============================================================================
+# Docker Compose для GPU-ускорения (CUDA)
+# =============================================================================
+# Использование: docker-compose -f docker-compose.gpu.yml up -d
+# Требования: NVIDIA Docker Toolkit (nvidia-docker2)
+# Проверка GPU: docker exec -it face-recognition nvidia-smi
+# =============================================================================
+
+version: '3.8'
+
+services:
+  face-recognition:
+    image: face-recognition-service:latest
+    container_name: face-recognition
+    runtime: nvidia  # Включает NVIDIA Container Toolkit
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - LOCAL_ML_ENABLE_CUDA=true
+      - LOCAL_ML_DEVICE=cuda
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    volumes:
+      - ./models:/app/models
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # Prometheus для метрик
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+
+  # Grafana для визуализации
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+
+volumes:
+  prometheus_data:
+  grafana_data:

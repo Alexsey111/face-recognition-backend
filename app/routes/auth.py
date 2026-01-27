@@ -55,6 +55,13 @@ async def get_current_user(
     Dependency to extract current user from JWT token.
     Returns user_id.
     """
+    # Если токен не предоставлен, возвращаем None (для auto_error=False)
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication credentials",
+        )
+
     # Создаём auth_service БЕЗ db (не нужен для verify_token)
     auth_service = AuthService()
     token = credentials.credentials
@@ -77,7 +84,7 @@ async def get_current_user(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
             )
 
-        if not user.get("is_active", True):
+        if not user.is_active:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User account is inactive",

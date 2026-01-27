@@ -25,6 +25,7 @@ from .routes import (
     auth,
     webhook,
     metrics,
+    face_recognition,
 )
 from .middleware.auth import AuthMiddleware
 from .middleware.rate_limit import RateLimitMiddleware
@@ -98,7 +99,6 @@ async def general_exception_handler(request, exc: Exception):
 # Lifespan
 # -----------------------------
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger = setup_logger()
@@ -112,6 +112,36 @@ async def lifespan(app: FastAPI):
 
     AuthService.init_redis()
     logger.info("Redis initialized")
+
+    # ============================================================================
+    # ML SERVICE INITIALIZATION 
+    # ============================================================================
+    if settings.USE_LOCAL_ML_SERVICE:
+        try:
+            from .services.ml_service import get_ml_service
+            
+            logger.info("Initializing ML service...")
+            ml_service = await get_ml_service()
+            app.state.ml_service = ml_service  # Сохраняем в app.state
+            logger.info("✅ ML service initialized successfully")
+            
+            # Опционально: вывод статистики моделей
+            stats = ml_service.get_stats()
+            logger.info(f"   Device: {stats.get('device', 'unknown')}")
+            logger.info(f"   Models initialized: {stats.get('models_initialized', False)}")
+            logger.info(f"   CUDA available: {stats.get('cuda_available', False)}")
+            if stats.get('certified_liveness_enabled'):
+                logger.info(f"   ✅ Certified liveness (MiniFASNetV2): ENABLED")
+            else:
+                logger.info(f"   ⚠️  Certified liveness: DISABLED (will use heuristics)")
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize ML service: {str(e)}")
+            logger.warning("⚠️  ML service will be unavailable. Face recognition features disabled.")
+            app.state.ml_service = None
+    else:
+        logger.info("Local ML service disabled (using external ML service)")
+        app.state.ml_service = None
 
     # Test environment DB bootstrap
     is_test_env = getattr(settings, "ENVIRONMENT", "") == "test" or bool(
@@ -145,6 +175,16 @@ async def lifespan(app: FastAPI):
 
     logger.info("Service shutting down")
 
+    # ============================================================================
+    # ML SERVICE CLEANUP 
+    # ============================================================================
+    if hasattr(app.state, 'ml_service') and app.state.ml_service:
+        try:
+            # Если есть метод cleanup/close в MLService
+            logger.info("Shutting down ML service...")
+        except Exception:
+            logger.warning("ML service cleanup failed", exc_info=True)
+
     try:
         from .tasks.scheduler import stop_schedulers
 
@@ -162,8 +202,13 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("CacheService shutdown failed", exc_info=True)
 
-    AuthService.close_redis()
-    logger.info("Redis closed")
+    # ✅ ИСПРАВЛЕНО: await для async метода
+    try:
+        await AuthService.close_redis()  # ✅ Добавили await
+        logger.info("Redis closed")
+    except Exception:
+        logger.warning("Redis close failed", exc_info=True)
+
 
 
 # -----------------------------
@@ -215,6 +260,7 @@ def create_app() -> FastAPI:
     app.include_router(reference.router, prefix="/api/v1")
     app.include_router(admin.router, prefix="/api/v1")
     app.include_router(webhook.router, prefix="/api/v1")
+    app.include_router(face_recognition.router, prefix="/api/v1")
     app.include_router(auth.router, prefix="/api/v1")
 
     app.include_router(metrics.router)
@@ -258,6 +304,7 @@ def create_test_app() -> FastAPI:
     app.include_router(admin.router, prefix="/api/v1")
     app.include_router(auth.router, prefix="/api/v1")
     app.include_router(webhook.router, prefix="/api/v1")
+    app.include_router(face_recognition.router, prefix="/api/v1")
 
     app.include_router(metrics.router)
 

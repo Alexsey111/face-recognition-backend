@@ -3,7 +3,7 @@ API роуты.
 Все endpoints приложения.
 """
 
-from . import health, verify, liveness, reference, admin, upload, metrics
+from . import health, verify, liveness, reference, admin, upload, metrics, face_recognition
 
 __all__ = [
     "health",
@@ -15,4 +15,5 @@ __all__ = [
     "auth",
     "webhook",
     "metrics",
+    "face_recognition",
 ]

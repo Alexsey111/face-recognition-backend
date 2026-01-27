@@ -64,6 +64,21 @@ from .helpers import (
 # Aliases for backward compatibility
 AppException = BaseAppException
 
+# Structured logging (must be after other imports to avoid circular imports)
+from .structured_logging import (
+    LogLevel,
+    redact_sensitive_data,
+    LogContext,
+    LoggerFactory,
+    get_logger,
+    log_with_context,
+    log_info,
+    log_error,
+    AuditLogger,
+    LogEntry,
+    create_log,
+)
+
 # Constants and validators are available but not imported by default
 # to avoid circular imports and keep imports explicit
 # from .constants import *
@@ -125,4 +140,16 @@ __all__ = [
     "retry_with_backoff",
     "Timer",
     "CacheKeyGenerator",
+    # Structured logging
+    "LogLevel",
+    "redact_sensitive_data",
+    "LogContext",
+    "LoggerFactory",
+    "get_logger",
+    "log_with_context",
+    "log_info",
+    "log_error",
+    "AuditLogger",
+    "LogEntry",
+    "create_log",
 ]

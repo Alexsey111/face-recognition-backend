@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   # ========================================================================
-  # API Service
+  # API Service - High Availability Configuration
   # ========================================================================
   api:
     build:
@@ -50,6 +50,31 @@ services:
     restart: unless-stopped
     networks:
       - face_recognition_network
+    # High Availability Configuration
+    deploy:
+      mode: replicated
+      replicas: 3
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+      placement:
+        constraints:
+          - node.role == worker
+        spread:
+          - label: face_recognition
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
 
   # ========================================================================
   # PostgreSQL Database

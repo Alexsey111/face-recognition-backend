@@ -11,6 +11,11 @@
 - Parameters: ~0.4M
 """
 
+"""
+Сертифицированный сервис Anti-Spoofing (Liveness Detection).
+Использует MiniFASNetV2 для защиты от фото/видео атак.
+"""
+
 import io
 import base64
 import time
@@ -31,155 +36,13 @@ import torch.nn.functional as F
 from ..config import settings
 from ..utils.logger import get_logger
 from ..utils.exceptions import ProcessingError, MLServiceError, ValidationError
+from ..utils.face_alignment_utils import (
+    align_face,
+    detect_face_landmarks,
+)
+from ..models.minifasnet_v2_correct import MiniFASNetV2
 
 logger = get_logger(__name__)
-
-
-# =============================================================================
-# MiniFASNetV2 Model Definition
-# =============================================================================
-
-
-class DepthwiseSeparableConv(nn.Module):
-    """Depthwise Separable Convolution block."""
-
-    def __init__(self, in_channels: int, out_channels: int, stride: int = 1):
-        super(DepthwiseSeparableConv, self).__init__()
-        self.depthwise = nn.Conv2d(
-            in_channels,
-            in_channels,
-            kernel_size=3,
-            stride=stride,
-            padding=1,
-            groups=in_channels,
-            bias=False,
-        )
-        self.pointwise = nn.Conv2d(
-            in_channels, out_channels, kernel_size=1, stride=1, padding=0, bias=False
-        )
-        self.bn = nn.BatchNorm2d(out_channels)
-        self.relu = nn.ReLU(inplace=True)
-
-    def forward(self, x):
-        x = self.depthwise(x)
-        x = self.pointwise(x)
-        x = self.bn(x)
-        x = self.relu(x)
-        return x
-
-
-class MiniFASNetV2(nn.Module):
-    """
-    MiniFASNetV2 - lightweight anti-spoofing model.
-
-    Architecture:
-    - Input: 80x80x3
-    - 5 Depthwise Separable Conv blocks with progressive downsampling
-    - Global Average Pooling
-    - FC layers for binary classification
-    - Output: 2 classes (Spoof=0, Real=1)
-
-    Parameters: ~0.4M
-    """
-
-    MODEL_VERSION = "v2.0.1"
-
-    def __init__(
-        self,
-        input_channels: int = 3,
-        embedding_size: int = 128,
-        out_classes: int = 2,
-        dropout: float = 0.0,
-    ):
-        super(MiniFASNetV2, self).__init__()
-
-        # Initial convolution
-        self.conv1 = nn.Sequential(
-            nn.Conv2d(
-                input_channels, 32, kernel_size=3, stride=2, padding=1, bias=False
-            ),
-            nn.BatchNorm2d(32),
-            nn.ReLU(inplace=True),
-        )
-
-        # Depthwise Separable blocks with downsampling
-        self.conv2_dw = DepthwiseSeparableConv(32, 64, stride=1)
-        self.conv3_dw = DepthwiseSeparableConv(64, 128, stride=2)
-        self.conv4_dw = DepthwiseSeparableConv(128, 128, stride=1)
-        self.conv5_dw = DepthwiseSeparableConv(128, 256, stride=2)
-        self.conv6_dw = DepthwiseSeparableConv(256, 256, stride=1)
-
-        # Global pooling
-        self.global_avg_pool = nn.AdaptiveAvgPool2d(1)
-
-        # Dropout for regularization
-        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-
-        # Fully connected layers
-        self.fc = nn.Sequential(
-            nn.Linear(256, embedding_size),
-            nn.BatchNorm1d(embedding_size),
-            nn.ReLU(inplace=True),
-            nn.Dropout(dropout) if dropout > 0 else nn.Identity(),
-            nn.Linear(embedding_size, out_classes),
-        )
-
-        # Initialize weights
-        self._init_weights()
-
-    def _init_weights(self):
-        """Initialize model weights using Kaiming initialization."""
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-            elif isinstance(m, (nn.BatchNorm2d, nn.BatchNorm1d)):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, 0, 0.01)
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass.
-
-        Args:
-            x: Input tensor [B, 3, 80, 80]
-
-        Returns:
-            Logits [B, 2]
-        """
-        x = self.conv1(x)  # [B, 32, 40, 40]
-        x = self.conv2_dw(x)  # [B, 64, 40, 40]
-        x = self.conv3_dw(x)  # [B, 128, 20, 20]
-        x = self.conv4_dw(x)  # [B, 128, 20, 20]
-        x = self.conv5_dw(x)  # [B, 256, 10, 10]
-        x = self.conv6_dw(x)  # [B, 256, 10, 10]
-
-        x = self.global_avg_pool(x)  # [B, 256, 1, 1]
-        x = x.view(x.size(0), -1)  # [B, 256]
-
-        x = self.dropout(x)
-        x = self.fc(x)  # [B, 2]
-
-        return x
-
-    def get_embedding(self, x: torch.Tensor) -> torch.Tensor:
-        """Extract embedding features before classification."""
-        x = self.conv1(x)
-        x = self.conv2_dw(x)
-        x = self.conv3_dw(x)
-        x = self.conv4_dw(x)
-        x = self.conv5_dw(x)
-        x = self.conv6_dw(x)
-
-        x = self.global_avg_pool(x)
-        x = x.view(x.size(0), -1)
-
-        return x
 
 
 # =============================================================================
@@ -189,9 +52,7 @@ class MiniFASNetV2(nn.Module):
 
 class AntiSpoofingService:
     """
-    Сертифицированный сервис проверки живости (Liveness Detection).
-
-    Использует MiniFASNetV2 для бинарной классификации:
+    Сертифицированный сервис проверки живости (Liveness Detection).       Использует MiniFASNetV2 для бинарной классификации:
     - Class 0: Spoof (фото, видео, экран, печать)
     - Class 1: Real (живое лицо)
 
@@ -206,7 +67,7 @@ class AntiSpoofingService:
     MODEL_INPUT_SIZE = (80, 80)
     MODEL_CHANNELS = 3
     EMBEDDING_SIZE = 128
-    NUM_CLASSES = 2
+    NUM_CLASSES = 1  # Бинарная классификация (sigmoid выход)
 
     # Processing limits
     MAX_IMAGE_SIZE_MB = 10
@@ -325,9 +186,17 @@ class AntiSpoofingService:
                     torch.cuda.synchronize()
 
             # Проверка выхода
-            if output.shape != (1, 2):
+            if output.shape[1] == 1:
+                # Binary classification: output shape should be (1, 1)
+                expected_shape = (1, 1)
+                logger.debug(f"Binary classification output: {output.shape}")
+            elif output.shape[1] == 2:
+                # Multi-class classification: output shape should be (1, 2)
+                expected_shape = (1, 2)
+                logger.debug(f"Multi-class output: {output.shape}")
+            else:
                 raise ValidationError(
-                    f"Invalid output shape: {output.shape}, expected (1, 2)"
+                    f"Invalid output shape: {output.shape}, expected (1, 1) or (1, 2)"
                 )
 
             # Проверка на NaN/Inf
@@ -346,14 +215,13 @@ class AntiSpoofingService:
             raise ValidationError(f"Model validation failed: {str(e)}")
 
     def _load_model(self) -> None:
-        """Синхронная загрузка модели с обработкой различных форматов чекпоинтов."""
+        """Синхронная загрузка модели."""
         try:
-            # Создание модели
+            # Создание модели (бинарная классификация: 1 выход)
             self.model = MiniFASNetV2(
-                input_channels=self.MODEL_CHANNELS,
                 embedding_size=self.EMBEDDING_SIZE,
-                out_classes=self.NUM_CLASSES,
-                dropout=0.0,
+                conv6_kernel=(5, 5),  # Важно: чекпоинт использует 5x5
+                num_classes=1,  # Бинарная классификация
             )
 
             # Загрузка весов
@@ -363,30 +231,32 @@ class AntiSpoofingService:
                 logger.info(f"Loading pretrained weights from: {model_path}")
                 checkpoint = torch.load(model_path, map_location=self.device)
 
-                # Определение формата чекпоинта
+                # Извлечение и нормализация state_dict
                 state_dict = self._extract_state_dict(checkpoint)
 
-                # Загрузка с валидацией
-                try:
-                    self.model.load_state_dict(state_dict, strict=True)
-                    logger.info("Model weights loaded successfully (strict mode)")
-                except RuntimeError as e:
-                    logger.warning(
-                        f"Strict loading failed: {e}. Trying flexible loading..."
-                    )
-                    missing_keys, unexpected_keys = self.model.load_state_dict(
-                        state_dict, strict=False
-                    )
+                # Показываем примеры ключей для отладки
+                if state_dict:
+                    sample_keys = list(state_dict.keys())[:5]
+                    logger.debug(f"Sample state_dict keys: {sample_keys}")
 
-                    if missing_keys:
-                        logger.warning(f"Missing keys: {missing_keys}")
-                    if unexpected_keys:
-                        logger.warning(f"Unexpected keys: {unexpected_keys}")
+                # Попытка загрузить веса
+                load_success = self._load_state_dict_with_fallback(state_dict)
+
+                if load_success:
+                    logger.info("✅ Model weights loaded successfully")
+                else:
+                    logger.warning(
+                        "⚠️ Model weights have structural mismatches. "
+                        "Some layers may use random initialization."
+                    )
 
                 # Извлечение версии модели
-                self.model_version = checkpoint.get(
-                    "version", checkpoint.get("model_version", "unknown")
-                )
+                if isinstance(checkpoint, dict):
+                    self.model_version = checkpoint.get(
+                        "version", checkpoint.get("model_version", "unknown")
+                    )
+                else:
+                    self.model_version = "checkpoint (no metadata)"
 
             else:
                 logger.warning(
@@ -411,20 +281,76 @@ class AntiSpoofingService:
             logger.error(f"Model loading failed: {str(e)}", exc_info=True)
             raise
 
-    def _extract_state_dict(self, checkpoint: Dict[str, Any]) -> Dict[str, Any]:
-        """Извлечение state_dict из различных форматов чекпоинтов."""
-        possible_keys = ["state_dict", "model", "net", "model_state_dict"]
+    def _load_state_dict_with_fallback(self, state_dict: Dict[str, Any]) -> bool:
+        """
+        Загрузка state_dict с обработкой несоответствий структуры.
 
+        Returns:
+            True если загрузка успешна, False если ничего не загрузилось
+        """
+        try:
+            # Удаляем префикс 'module.' если есть
+            new_state_dict = {}
+            for key, value in state_dict.items():
+                new_key = key[7:] if key.startswith('module.') else key
+                new_state_dict[new_key] = value
+
+            # Адаптируем prob.weight (3 класса -> 1 класс)
+            if 'prob.weight' in new_state_dict:
+                orig_weight = new_state_dict['prob.weight']
+                if orig_weight.shape[0] > 1:
+                    logger.info(f"Adapting prob.weight: {orig_weight.shape} -> [1, {orig_weight.shape[1]}]")
+                    new_state_dict['prob.weight'] = orig_weight[0:1, :].clone()
+
+            # Пытаемся загрузить в строгом режиме
+            self.model.load_state_dict(new_state_dict, strict=True)
+            logger.info("✅ Model weights loaded successfully (strict mode)")
+            return True
+
+        except RuntimeError as e:
+            logger.warning(f"Strict loading failed: {e}")
+
+            # Пробуем нестрогий режим
+            missing_keys, unexpected_keys = self.model.load_state_dict(
+                new_state_dict, strict=False
+            )
+
+            # Анализируем результаты
+            if len(missing_keys) > 0:
+                logger.warning(f"Missing keys ({len(missing_keys)}): {missing_keys[:3]}...")
+                logger.warning("These layers will use random initialization")
+
+            if len(unexpected_keys) > 0:
+                logger.warning(f"Unexpected keys ({len(unexpected_keys)}): {list(unexpected_keys)[:3]}...")
+                logger.warning("These weights from checkpoint will be ignored")
+
+            # Проверяем, загрузилось ли хоть что-то полезное
+            model_keys = set(self.model.state_dict().keys())
+            loaded_keys = set(k for k in new_state_dict.keys() if k not in unexpected_keys)
+
+            intersection = model_keys & loaded_keys
+            load_ratio = len(intersection) / len(model_keys) if model_keys else 0
+
+            if load_ratio > 0:
+                logger.info(f"Partially loaded: {load_ratio*100:.1f}% of layers")
+                return True
+            else:
+                logger.error("Failed to load any weights!")
+                return False
+
+    def _extract_state_dict(self, checkpoint: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Извлечение state_dict из различных форматов чекпоинтов.
+        """
+        # Попытка извлечь по известным ключам
+        possible_keys = ["state_dict", "model", "net", "model_state_dict"]
         for key in possible_keys:
             if key in checkpoint:
-                logger.debug(f"State dict found under key: {key}")
+                logger.debug(f"State dict found under key: '{key}'")
                 return checkpoint[key]
 
-        if all(
-            isinstance(k, str)
-            and k.startswith(("conv", "fc", "bn", "depthwise", "pointwise"))
-            for k in checkpoint.keys()
-        ):
+        # Если не найден, используем checkpoint как есть
+        if all(isinstance(k, str) and k.startswith(("conv", "fc", "bn", "module")) for k in checkpoint.keys()):
             logger.debug("Using checkpoint as state_dict directly")
             return checkpoint
 
@@ -456,16 +382,27 @@ class AntiSpoofingService:
         del dummy_input
         torch.cuda.empty_cache()
 
-    def _validate_input(self, image_data: bytes) -> None:
-        """Валидация входных данных."""
-        if not image_data or len(image_data) == 0:
-            raise ValidationError("Empty image data provided")
-
-        if len(image_data) > self.MAX_IMAGE_SIZE_BYTES:
-            raise ValidationError(
-                f"Image size exceeds maximum allowed "
-                f"({len(image_data)/1024/1024:.1f}MB > {self.MAX_IMAGE_SIZE_MB}MB)"
-            )
+    def _validate_input(self, image_data) -> None:
+        """Валидация входных данных изображения"""
+        # Проверка на None
+        if image_data is None:
+            raise ValueError("Image data is None")
+        # Проверка numpy array
+        if isinstance(image_data, np.ndarray):
+            if image_data.size == 0:
+                raise ValueError("Image array is empty")
+            if image_data.ndim not in [2, 3]:
+                raise ValueError(f"Invalid image dimensions: {image_data.ndim}, expected 2 or 3")
+        # Проверка PIL Image
+        elif hasattr(image_data, 'size'):
+            if image_data.size[0] == 0 or image_data.size[1] == 0:
+                raise ValueError("Image size is zero")
+        # Проверка bytes
+        elif isinstance(image_data, (bytes, bytearray)):
+            if len(image_data) == 0:
+                raise ValueError("Image bytes are empty")
+        else:
+            raise ValueError(f"Unsupported image data type: {type(image_data)}")
 
     def _preprocess_image(self, image_data: bytes) -> torch.Tensor:
         """
@@ -494,6 +431,136 @@ class AntiSpoofingService:
         except Exception as e:
             logger.error(f"Image preprocessing failed: {str(e)}", exc_info=True)
             raise ProcessingError(f"Failed to preprocess image: {str(e)}")
+
+    def _check_image_quality(self, image: np.ndarray) -> dict:
+        """Расширенная проверка качества изображения перед обработкой."""
+        h, w = image.shape[:2]
+
+        # === ЯРКОСТЬ ===
+        brightness = np.mean(image)
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+
+        # Процент недо/переэкспонированных пикселей
+        dark_pixels = np.sum(gray < 30) / gray.size * 100
+        bright_pixels = np.sum(gray > 225) / gray.size * 100
+
+        is_too_dark = brightness < 50 or dark_pixels > 30
+        is_too_bright = brightness > 200 or bright_pixels > 30
+
+        # === РЕЗКОСТЬ ===
+        laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+        # Адаптивный порог в зависимости от размера изображения
+        min_sharpness = max(50, 1000 / (max(h, w) / 100))
+        is_blurry = laplacian_var < min_sharpness
+
+        # === КОНТРАСТНОСТЬ ===
+        contrast = gray.std()
+        low_contrast = contrast < 30
+
+        # === ШУМ ===
+        denoised = cv2.medianBlur(gray, 5)
+        noise = np.mean((gray - denoised) ** 2)
+        noisy = noise > 50
+
+        # === РАЗРЕШЕНИЕ ===
+        min_dimension = min(h, w)
+        low_resolution = min_dimension < 240
+
+        # === ИТОГОВАЯ ОЦЕНКА ===
+        issues = sum([
+            is_too_dark,
+            is_too_bright,
+            is_blurry,
+            low_contrast,
+            noisy,
+            low_resolution
+        ])
+
+        quality_score = max(0, 100 - issues * 15)
+
+        return {
+            "brightness": round(brightness, 2),
+            "dark_pixels_pct": round(dark_pixels, 2),
+            "bright_pixels_pct": round(bright_pixels, 2),
+            "is_too_dark": is_too_dark,
+            "is_too_bright": is_too_bright,
+            "sharpness": round(laplacian_var, 2),
+            "min_sharpness_threshold": round(min_sharpness, 2),
+            "is_blurry": is_blurry,
+            "contrast": round(contrast, 2),
+            "low_contrast": low_contrast,
+            "noise_level": round(noise, 2),
+            "is_noisy": noisy,
+            "resolution": f"{w}x{h}",
+            "low_resolution": low_resolution,
+            "quality_score": quality_score,
+            "quality_ok": quality_score >= 70,
+            "issues_count": issues
+        }
+
+    def _preprocess_with_alignment(self, image: np.ndarray) -> torch.Tensor:
+        """Препроцессинг с выравниванием лица."""
+        try:
+            # 1. Проверка качества изображения
+            quality = self._check_image_quality(image)
+            if not quality["quality_ok"]:
+                logger.warning(
+                    f"Image quality issues: dark={quality['is_too_dark']}, "
+                    f"bright={quality['is_too_bright']}, blurry={quality['is_blurry']}, "
+                    f"score={quality['quality_score']}"
+                )
+
+            # 2. Детекция landmarks (68 точек в dlib-совместимом формате)
+            landmarks = detect_face_landmarks(image, return_468=False)
+
+            if landmarks is None:
+                logger.warning("Face landmarks not detected, using image as-is")
+                aligned_face = image
+            else:
+                # 3. Выравнивание с использованием 68-point landmarks
+                aligned_face, _ = align_face(image, landmarks, output_size=(112, 112))
+
+            # 4. Resize до 80x80
+            if isinstance(aligned_face, np.ndarray):
+                pil_image = Image.fromarray(aligned_face)
+            else:
+                pil_image = aligned_face
+
+            resized = pil_image.resize(self.MODEL_INPUT_SIZE, Image.BILINEAR)
+
+            # 5. Нормализация
+            normalized = self._normalize(resized)
+
+            return normalized
+
+        except Exception as e:
+            logger.error(f"Face alignment failed: {e}, using fallback preprocessing")
+            return self._preprocess_image_simple(image)
+
+    def _normalize(self, image: Image.Image) -> torch.Tensor:
+        """Нормализация изображения в тензор."""
+        img_array = np.array(image).astype(np.float32) / 255.0
+
+        mean = np.array([0.485, 0.456, 0.406])
+        std = np.array([0.229, 0.224, 0.225])
+        img_normalized = (img_array - mean) / std
+
+        img_tensor = torch.from_numpy(img_normalized.transpose(2, 0, 1)).float()
+        img_tensor = img_tensor.unsqueeze(0)
+
+        return img_tensor
+
+    def _preprocess_image_simple(self, image_data: bytes) -> torch.Tensor:
+        """Простой препроцессинг без выравнивания (fallback)."""
+        image = Image.open(io.BytesIO(image_data))
+
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+
+        tensor = self.transform(image)
+        tensor = tensor.unsqueeze(0)
+
+        return tensor.to(self.device)
 
     @contextmanager
     def _inference_context(self):
@@ -538,7 +605,18 @@ class AntiSpoofingService:
 
         try:
             self._validate_input(image_data)
-            input_tensor = self._preprocess_image(image_data)
+
+            # Конвертация bytes -> numpy array
+            if isinstance(image_data, bytes):
+                image = Image.open(io.BytesIO(image_data))
+                image_np = np.array(image)
+            elif isinstance(image_data, Image.Image):
+                image_np = np.array(image_data)
+            else:
+                image_np = image_data
+
+            # Используем препроцессинг с выравниванием
+            input_tensor = self._preprocess_with_alignment(image_np)
 
             with self._inference_context():
                 inference_start = time.time()
@@ -554,11 +632,18 @@ class AntiSpoofingService:
 
                 inference_time = time.time() - inference_start
 
-                probabilities = F.softmax(output, dim=1).cpu()
-                probs = probabilities.numpy()[0]
-
-                spoof_prob = float(probs[0])
-                real_prob = float(probs[1])
+                # Sigmoid output для бинарной классификации
+                output_cpu = output.cpu()
+                if output_cpu.shape[1] == 1:
+                    # Binary classification: sigmoid output
+                    probs = torch.sigmoid(output_cpu).numpy()[0]
+                    real_prob = float(probs[0])
+                    spoof_prob = 1.0 - real_prob
+                else:
+                    # Softmax output для multi-class
+                    probs = torch.softmax(output_cpu, dim=1).numpy()[0]
+                    real_prob = float(probs[1])
+                    spoof_prob = float(probs[0])
 
                 is_real = real_prob >= self.threshold
                 confidence = real_prob if is_real else spoof_prob
@@ -570,7 +655,7 @@ class AntiSpoofingService:
                         self.model.get_embedding(input_tensor).cpu().numpy().tolist()
                     )
 
-                del input_tensor, output, probabilities
+                del input_tensor, output
 
             processing_time = time.time() - start_time
 

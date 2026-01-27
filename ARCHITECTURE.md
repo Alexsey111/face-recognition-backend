@@ -450,107 +450,103 @@ REDIS_CONNECTION_POOL_SIZE = 10
 
 ```
 face-recognition-service/
-├── app/
-│   ├── __init__.py
-│   ├── main.py              # FastAPI приложение
-│   ├── config.py            # Конфигурация (Pydantic Settings)
-│   ├── models/              # Pydantic модели (Request/Response)
-│   │   ├── __init__.py
-│   │   ├── reference.py
-│   │   ├── request.py
-│   │   ├── response.py
-│   │   ├── user.py
-│   │   ├── verification.py
-│   │   └── webhook.py
-│   ├── routes/              # API endpoints
-│   │   ├── __init__.py
-│   │   ├── admin.py
-│   │   ├── auth.py
-│   │   ├── health.py
-│   │   ├── liveness.py
-│   │   ├── metrics.py
-│   │   ├── reference.py
-│   │   ├── upload.py
-│   │   ├── verify.py
-│   │   └── webhook.py
-│   ├── services/            # Бизнес-логика
-│   │   ├── __init__.py
-│   │   ├── anti_spoofing_service.py
-│   │   ├── auth_service.py
-│   │   ├── cache_service.py
-│   │   ├── database_service.py
-│   │   ├── encryption_service.py
-│   │   ├── ml_service.py
-│   │   ├── session_service.py
-│   │   ├── storage_service.py
-│   │   ├── validation_service.py
-│   │   └── webhook_service.py
-│   ├── middleware/          # HTTP middleware
-│   │   ├── __init__.py
-│   │   ├── auth.py
-│   │   ├── cors.py
-│   │   ├── error_handler.py
-│   │   ├── logging.py
-│   │   ├── metrics.py
-│   │   ├── rate_limit.py
-│   │   └── request_logging.py
-│   ├── utils/               # Утилиты
-│   │   ├── __init__.py
-│   │   ├── constants.py
-│   │   ├── decorators.py
-│   │   ├── depth_estimator.py
-│   │   ├── exceptions.py
-│   │   ├── face_aligner.py
-│   │   ├── face_alignment_utils.py
-│   │   ├── file_utils.py
-│   │   ├── helpers.py
-│   │   ├── lighting_analyzer.py
-│   │   ├── logger.py
-│   │   ├── security.py
-│   │   ├── structured_logging.py
-│   │   └── validators.py
-│   └── db/                  # Database слой
-│       ├── __init__.py
-│       ├── crud.py
-│       ├── database.py
-│       └── models.py
-├── alembic/                 # Database миграции
-│   ├── env.py
-│   └── versions/
-│       ├── 001_initial_migration.py
-│       └── 002_webhook_tables.py
-├── tests/                   # Тесты
-│   ├── conftest.py
-│   ├── README.md
-│   ├── test_*.py           # Functional tests
-│   ├── unit/               # Unit tests
-│   └── integration/        # Integration tests
-├── docs/                    # Документация
-│   └── PERFORMANCE.md
-├── .env.example            # Пример переменных окружения
-├── .gitignore
-├── Alembic.ini
-├── API.md                   # API документация
-├── ARCHITECTURE.md          # Этот файл
-├── ARCHITECTURE_COMPLIANCE.md
-├── DEPLOYMENT.md            # Гайд по деплою
-├── DEVELOPMENT.md           # Гайд по разработке
-├── Dockerfile
-├── Dockerfile.dev
-├── docker-compose.yml
-├── docker-compose.dev.yml
-├── docker-compose.test.yml
-├── docker-compose.monitoring.yml
-├── Makefile
-├── MIGRATION_PLAN.md
-├── pyproject.toml
-├── pytest.ini
-├── README.md
-├── requirements.txt
-├── requirements-dev.txt
-├── SECURITY.md
-├── TZ_IMPROVEMENTS.md
-└── PROJECT_STRUCTURE.md
+└── app/
+    └── models/
+        ├── __init__.py                 # Инициализация пакета моделей
+        │
+        ├── face.py                     # Модели для распознавания лиц
+        │   ├── FaceDetectionResult     # Результат детекции лица
+        │   ├── FaceLandmarks           # Ключевые точки лица
+        │   ├── FaceEmbedding           # Эмбеддинг лица
+        │   ├── FaceEmbeddingComparison # Сравнение эмбеддингов
+        │   ├── FaceQualityAssessment   # Оценка качества лица
+        │   ├── LightingAnalysis        # Анализ освещения
+        │   ├── DepthAnalysis           # Анализ глубины (3D)
+        │   ├── LivenessDetectionResult # Проверка живости
+        │   ├── ActiveLivenessChallenge # Активный челлендж
+        │   ├── FaceAlignmentResult     # Выравнивание лица
+        │   ├── ComprehensiveFaceAnalysis  # Полный анализ
+        │   ├── BatchFaceProcessingRequest # Пакетная обработка
+        │   ├── BatchFaceProcessingResult  # Результат пакета
+        │   └── SpoofingIndicators      # Индикаторы спуфинга
+        │
+        ├── reference.py                # Модели для эталонов
+        │   ├── ReferenceModel          # Базовый эталон
+        │   ├── ReferenceCreate         # Создание эталона
+        │   ├── ReferenceUpdate         # Обновление эталона
+        │   ├── ReferenceSearch         # Поиск эталонов
+        │   ├── ReferenceCompare        # Сравнение с эталонами
+        │   ├── ReferenceCompareResult  # Результат сравнения
+        │   ├── ReferenceListResponse   # Список эталонов
+        │   └── ReferenceStats          # Статистика эталонов
+        │
+        ├── request.py                  # Модели запросов
+        │   ├── UploadRequest           # Загрузка изображения
+        │   ├── VerifyRequest           # Запрос верификации
+        │   ├── LivenessRequest         # Проверка живости
+        │   ├── VideoLivenessRequest    # Видео проверка живости
+        │   ├── BatchEmbeddingRequest   # Пакетный эмбеддинг
+        │   ├── BatchVerificationRequest# Пакетная верификация
+        │   ├── AdvancedAntiSpoofingRequest
+        │   ├── ReferenceCreateRequest  # Создание эталона
+        │   ├── ReferenceUpdateRequest  # Обновление эталона
+        │   ├── AdminStatsRequest       # Статистика админа
+        │   ├── TokenRefreshRequest     # Обновление токена
+        │   ├── UserCreate/UserLogin    # Создание/логин пользователя
+        │   └── CompareRequest          # Запрос сравнения
+        │
+        ├── response.py                 # Модели ответов
+        │   ├── BaseResponse            # Базовый ответ
+        │   ├── ErrorResponse           # Ответ с ошибкой
+        │   ├── UploadResponse          # Ответ загрузки
+        │   ├── VerifyResponse          # Ответ верификации
+        │   ├── LivenessResponse        # Ответ живости
+        │   ├── VideoLivenessResponse   # Видео живость
+        │   ├── BatchEmbeddingResponse  # Пакет эмбеддингов
+        │   ├── BatchVerificationResponse
+        │   ├── AdvancedAntiSpoofingResponse
+        │   ├── ChallengeResponse       # Challenge-response
+        │   ├── ActiveLivenessResponse  # Активная живость
+        │   ├── ReferenceResponse       # Ответ эталона
+        │   ├── ReferenceListResponse   # Список эталонов
+        │   ├── HealthResponse          # Проверка здоровья
+        │   ├── StatusResponse          # Детальный статус
+        │   ├── AdminStatsResponse      # Статистика админа
+        │   ├── AuthResponse            # Ответ аутентификации
+        │   ├── TokenResponse           # Ответ токена
+        │   ├── SessionResponse         # Ответ сессии
+        │   └── PaginatedResponse       # Пагинированный ответ
+        │
+        ├── user.py                     # Модели пользователя
+        │   ├── UserModel               # Базовый пользователь
+        │   ├── UserCreate              # Создание пользователя
+        │   ├── UserUpdate              # Обновление пользователя
+        │   ├── UserResponse            # Ответ пользователя
+        │   └── UserListResponse        # Список пользователей
+        │
+        ├── verification.py             # Модели верификации
+        │   ├── VerificationSessionModel
+        │   ├── VerificationSessionCreate
+        │   ├── VerificationSessionUpdate
+        │   ├── VerificationRequest     # Запрос верификации
+        │   ├── VerificationResult      # Результат верификации
+        │   ├── LivenessResult          # Результат живости
+        │   ├── SessionListResponse     # Список сессий
+        │   ├── SessionStats            # Статистика сессий
+        │   └── SessionSearch           # Поиск сессий
+        │
+        └── webhook.py                  # Модели webhook
+            ├── WebhookEventType        # Типы событий
+            ├── WebhookStatus           # Статусы webhook
+            ├── WebhookConfigBase/Create/Update/Response
+            ├── WebhookLogBase/Create/Update/Response
+            ├── WebhookPayload          # Payload webhook
+            ├── WebhookVerificationData # Данные верификации
+            ├── WebhookLivenessData     # Данные живости
+            ├── WebhookTestRequest/Response
+            ├── WebhookStatistics       # Статистика
+            ├── WebhookRetryRequest     # Повторная отправка
+            └── WebhookBulkAction       # Массовые операции
 ```
 
 ---

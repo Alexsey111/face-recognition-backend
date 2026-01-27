@@ -458,3 +458,44 @@ class WebhookLog(Base):
 
     def __repr__(self):
         return f"<WebhookLog(config_id={self.webhook_config_id}, event={self.event_type}, status={self.status})>"
+
+
+# ====================================================================
+# Biometric Templates Model (для BiometricStorage)
+# ====================================================================
+
+
+class BiometricTemplate(Base):
+    __tablename__ = "biometric_templates"
+    __comment__ = "Encrypted biometric embeddings with versioning"
+    __table_args__ = (
+        # Все индексы создаются только в миграциях
+    )
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+
+    # Encrypted embedding data
+    encrypted_data = Column(LargeBinary, nullable=False)
+
+    # Metadata
+    embedding_dim = Column(Integer, nullable=False)
+    model_type = Column(String(50), nullable=False)  # FaceNet, ArcFace, etc.
+    version = Column(Integer, default=1, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    template_metadata = Column(JSON, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    # Нет внешних relationships для безопасности
+
+    def __repr__(self):
+        return (
+            f"<BiometricTemplate(id={self.id}, user_id={self.user_id}, "
+            f"dim={self.embedding_dim}, version={self.version})>"
+        )

@@ -82,7 +82,7 @@ class ReferenceService:
         validation_result = await self.validation_service.validate_image(
             image_data,
             max_size=settings.MAX_UPLOAD_SIZE,
-            allowed_formats=settings.ALLOWED_IMAGE_FORMATS,
+            allowed_formats=settings.allowed_image_formats_list,
         )
 
         if not validation_result.is_valid:

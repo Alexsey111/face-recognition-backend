@@ -230,6 +230,60 @@ class EncryptionService:
         data, _ = await self.decrypt(encrypted_embedding)
         return data
 
+    def encrypt_data_sync(self, data: bytes) -> bytes:
+        """
+        Синхронное шифрование данных (без async).
+        
+        Used by BiometricEncryption for synchronous operations.
+        """
+        import base64
+        import json
+        import secrets
+        from datetime import datetime, timezone
+
+        # Pack data into JSON payload
+        payload = {
+            "v": self.SUPPORTED_VERSION,
+            "alg": self.ALGORITHM,
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "meta": {"type": "face_embedding"},
+            "data": base64.b64encode(data).decode("ascii"),
+        }
+        payload_bytes = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+
+        # Generate nonce
+        nonce = secrets.token_bytes(self.NONCE_LENGTH)
+
+        # Encrypt payload
+        encrypted = self._aesgcm.encrypt(nonce, payload_bytes, None)
+
+        return nonce + encrypted
+
+    def decrypt_data_sync(self, token: bytes) -> Tuple[bytes, dict]:
+        """
+        Синхронная расшифровка данных (без async).
+        
+        Used by BiometricEncryption for synchronous operations.
+        """
+        import base64
+        import json
+
+        if len(token) < self.NONCE_LENGTH + self.TAG_LENGTH:
+            raise EncryptionError("Invalid token format: too short")
+
+        # Extract nonce and encrypted data
+        nonce = token[: self.NONCE_LENGTH]
+        encrypted_data = token[self.NONCE_LENGTH:]
+
+        # Decrypt payload
+        decrypted_bytes = self._aesgcm.decrypt(nonce, encrypted_data, None)
+
+        # Unpack payload
+        payload = json.loads(decrypted_bytes.decode("utf-8"))
+        data = base64.b64decode(payload["data"])
+
+        return data, payload
+
     async def encrypt_data(
         self, data: bytes, metadata: Optional[Dict[str, Any]] = None
     ) -> bytes:

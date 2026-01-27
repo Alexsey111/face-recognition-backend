@@ -341,6 +341,116 @@ async def update_reference(
 
 
 # ======================================================================
+# UPDATE-REFERENCE (отдельный endpoint для обновления эталонного фото)
+# ======================================================================
+
+
+@router.put("/update-reference", response_model=ReferenceResponse)
+async def update_reference_image(
+    reference_id: str,
+    request: ReferenceCreateRequest,
+    http_request: Request,
+    cache: CacheService = Depends(get_cache_service),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """
+    Обновление эталонного изображения (reference).
+
+    Заменяет существующее reference image на новое с автоматическим:
+    - Пересозданием эмбеддинга
+    - Инвалидацией кэша
+    - Инкрементом версии
+    
+    **Path Parameters:**
+    - `reference_id`: ID существующего reference для обновления
+    
+    **Body:** ReferenceCreateRequest (image_data, label, metadata)
+    
+    **Возвращает:** Обновлённый ReferenceResponse с новой версией
+    
+    **Пример использования:**
+    ```bash
+    curl -X PUT /api/v1/update-reference \\
+         -H "Content-Type: application/json" \\
+         -d '{"reference_id": "ref-123", "image_data": "base64...", "label": "new_photo"}'
+    ```
+    """
+    request_id = str(uuid.uuid4())
+
+    try:
+        reference_service = ReferenceService(db)
+
+        # Проверяем существование reference
+        existing_ref = await reference_service.get_reference(reference_id)
+        if not existing_ref:
+            raise NotFoundError(f"Reference {reference_id} not found")
+
+        user_id = existing_ref.user_id
+
+        # Удаляем старый reference
+        await reference_service.delete_reference(reference_id, soft_delete=True)
+
+        # Создаём новый reference с тем же user_id
+        new_ref = await reference_service.create_reference(
+            user_id=user_id,
+            image_data=request.image_data,
+            label=request.label or existing_ref.label,
+            quality_threshold=request.quality_threshold,
+            metadata=request.metadata or {},
+            store_original=settings.STORE_ORIGINAL_IMAGES,
+        )
+
+        logger.info(f"Reference updated: {reference_id} -> {new_ref.id} (v{new_ref.version})")
+
+        # ==================== Cache Invalidation & Warm-up ====================
+        # Инвалидируем старый кэш
+        await cache.invalidate_reference(user_id)
+        logger.info(f"🗑️ Invalidated reference cache for user {user_id}")
+
+        # Получаем и кэшируем новый embedding
+        if new_ref.embedding_encrypted:
+            encryption_service = EncryptionService()
+            embedding = await encryption_service.decrypt_embedding(new_ref.embedding_encrypted)
+
+            if embedding is not None:
+                await cache.cache_reference_embedding(
+                    user_id=user_id,
+                    embedding=embedding,
+                    version=new_ref.version,
+                    metadata={
+                        "quality_score": new_ref.quality_score,
+                        "created_at": new_ref.created_at.isoformat() if new_ref.created_at else None,
+                    },
+                )
+                logger.info(f"📦 Cached new reference (v{new_ref.version}) for user {user_id}")
+
+        # Инвалидируем user stats
+        await cache.invalidate_user_stats(user_id)
+
+        return ReferenceResponse(
+            success=True,
+            reference_id=new_ref.id,
+            user_id=new_ref.user_id,
+            label=new_ref.label,
+            file_url=new_ref.file_url,
+            created_at=new_ref.created_at,
+            quality_score=new_ref.quality_score,
+            metadata=new_ref.metadata,
+            request_id=request_id,
+        )
+
+    except NotFoundError as e:
+        logger.warning(f"Reference not found: {e}")
+        raise
+    except ValidationError as e:
+        logger.warning(f"Validation error: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Error updating reference: {e}")
+        raise
+
+
+# ======================================================================
 # DELETE
 # ======================================================================
 

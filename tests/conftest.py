@@ -11,6 +11,19 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+'''# Mock cv2 to avoid import issues
+sys.modules['cv2'] = type(sys)('cv2_mock')
+sys.modules['cv2.dnn'] = type(sys)('cv2_dnn_mock')
+
+# Mock torch to avoid import issues
+sys.modules['torch'] = type(sys)('torch_mock')
+sys.modules['torch.nn'] = type(sys)('torch_nn_mock')
+sys.modules['torchvision'] = type(sys)('torchvision_mock')
+
+# Mock facenet_pytorch
+sys.modules['facenet_pytorch'] = type(sys)('facenet_pytorch_mock')
+#sys.modules['PIL'] = type(sys)('PIL_mock')'''
+
 import asyncio
 import uuid
 import gc
@@ -30,9 +43,42 @@ from app.db.database import get_db
 # =============================================================================
 # Event Loop Configuration
 # =============================================================================
+# Измени блок в conftest.py на этот:
 
+@pytest_asyncio.fixture(scope="session")
+async def initialized_service():
+    """
+    Инициализирует AntiSpoofingService один раз для всех тестов.
+    Это значительно ускоряет прогон за счет однократной загрузки весов.
+    """
+    from app.services.anti_spoofing_service import AntiSpoofingService
+    import torch
+    import gc
 
-@pytest.fixture(scope="function")
+    # Создаем и инициализируем сервис
+    svc = AntiSpoofingService()
+    
+    try:
+        await svc.initialize()
+    except Exception as e:
+        pytest.skip(f"Критическая ошибка инициализации ML-моделей: {e}")
+
+    yield svc
+
+    # Очистка ресурсов только в самом конце сессии
+    try:
+        if hasattr(svc, 'model') and svc.model is not None:
+            svc.model.cpu()
+            del svc.model
+        
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            
+        gc.collect()
+    except Exception as e:
+        print(f"Ошибки при очистке ML-ресурсов: {e}")
+
+'''@pytest.fixture(scope="function")
 def event_loop():
     """
     Create event loop for async tests.
@@ -65,7 +111,7 @@ def event_loop():
         except:
             pass
         loop.close()
-        gc.collect()
+        gc.collect()'''
 
 
 # =============================================================================

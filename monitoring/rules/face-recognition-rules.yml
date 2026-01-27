@@ -1,0 +1,107 @@
+# Face Recognition Service Alert Rules
+
+groups:
+  - name: face-recognition-alerts
+    rules:
+      # API Down Alert
+      - alert: FaceRecognitionAPIDown
+        expr: up{job="face-recognition-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Face Recognition API is down"
+          description: "The Face Recognition API has been down for more than 2 minutes."
+
+      # High Error Rate
+      - alert: FaceRecognitionHighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate detected"
+          description: "More than 5% of requests are returning 5xx errors."
+
+      # High Latency
+      - alert: FaceRecognitionHighLatency
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API latency detected"
+          description: "P95 latency exceeds 2 seconds."
+
+      # Liveness Detection Failed
+      - alert: LivenessDetectionHighFailure
+        expr: rate(liveness_check_total{result="failed"}[5m]) / rate(liveness_check_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High liveness detection failure rate"
+          description: "More than 10% of liveness checks are failing."
+
+      # Face Verification Issues
+      - alert: FaceVerificationHighFailure
+        expr: rate(face_verification_total{match="error"}[5m]) / rate(face_verification_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High face verification failure rate"
+          description: "More than 5% of face verifications are failing with errors."
+
+      # Database Connection Pool Exhausted
+      - alert: DatabaseConnectionPoolExhausted
+        expr: database_connections_active / database_connections_max > 0.9
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Database connection pool is near capacity"
+          description: "More than 90% of database connections are in use."
+
+      # Redis Memory High
+      - alert: RedisMemoryHigh
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Redis memory usage is high"
+          description: "More than 90% of Redis memory is in use."
+
+      # Model Loading Failed
+      - alert: ModelLoadingFailed
+        expr: changes(face_recognition_model_loaded[5m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "ML model failed to load"
+          description: "The ML model has failed to load."
+
+  - name: face-recognition-recording
+    rules:
+      # Request rate per service
+      - record: face_recognition:http_requests:rate5m
+        expr: sum by (instance) (rate(http_requests_total[5m]))
+
+      # Error rate per service
+      - record: face_recognition:http_errors:rate5m
+        expr: sum by (instance, status) (rate(http_requests_total{status=~"5.."}[5m]))
+
+      # P95 latency
+      - record: face_recognition:http_latency_p95:seconds
+        expr: histogram_quantile(0.95, sum by (instance, le) (rate(http_request_duration_seconds_bucket[5m])))
+
+      # Liveness check success rate
+      - record: face_recognition:liveness_success:rate5m
+        expr: sum by (instance) (rate(liveness_check_total{result="passed"}[5m])) 
+              / sum by (instance) (rate(liveness_check_total[5m]))
+
+      # Face verification match rate
+      - record: face_recognition:verification_match:rate5m
+        expr: sum by (instance) (rate(face_verification_total{match="true"}[5m])) 
+              / sum by (instance) (rate(face_verification_total[5m]))

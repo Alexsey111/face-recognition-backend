@@ -1,0 +1,72 @@
+# =============================================================================
+# Prometheus Configuration for Face Recognition Service
+# =============================================================================
+# Сбор метрик: CPU, Memory, GPU, API latency, Request count
+#
+# Использование:
+#   docker run -p 9090:9090 -v prometheus.gpu.yml:/etc/prometheus/prometheus.yml prom/prometheus
+# =============================================================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# Правила алертинга
+rule_files:
+  - /etc/prometheus/alert_rules.yml
+
+# scrape_configs определяется в основном prometheus.yml
+# Здесь добавляем правила для GPU метрик
+
+# =============================================================================
+# Alert Rules для GPU
+# =============================================================================
+groups:
+  - name: gpu_alerts
+    rules:
+      - alert: GPUHighTemperature
+        expr: gpu_temperature_celsius > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "GPU temperature is too high"
+          description: "GPU temperature is {{ $value }}°C, which may cause throttling"
+      
+      - alert: GPUMemoryHigh
+        expr: gpu_memory_utilization_percent > 90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "GPU memory usage is high"
+          description: "GPU memory utilization is {{ $value }}%"
+      
+      - alert: GPUUnhealthy
+        expr: service_gpu_enabled == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "GPU is not available"
+          description: "The service cannot access GPU for inference"
+
+  - name: performance_alerts
+    rules:
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, rate(api_request_duration_seconds_bucket[5m])) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High API latency"
+          description: "95th percentile latency is {{ $value }}s"
+      
+      - alert: HighErrorRate
+        expr: rate(api_requests_total{status=~"5.."}[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate"
+          description: "5xx error rate is {{ $value }}/s"
