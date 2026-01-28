@@ -970,6 +970,10 @@ curl http://localhost:8000/api/v1/health
 # Get reference
 curl http://localhost:8000/api/v1/reference \
   -H "Authorization: Bearer YOUR_TOKEN"
+
+# Delete reference
+curl -X DELETE http://localhost:8000/api/v1/reference \
+  -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
 ### Go Example
@@ -1000,15 +1004,20 @@ func main() {
     var loginResp map[string]interface{}
     json.NewDecoder(resp.Body).Decode(&loginResp)
     
-    token := loginResp["access_token"].(string)
+    fmt.Println("Login successful, token:", loginResp["access_token"])
     
-    // Verify face
-    req, _ = http.NewRequest("POST", BASE_URL+"/verify", 
-        bytes.NewBufferString(`{"file_key": "uploads/user_1/image.jpg"}`))
-    req.Header.Set("Authorization", "Bearer "+token)
+    // Verify Face with HEIC support
+    verifyFace("uploads/user_1/image.jpg", loginResp["access_token"].(string))
+}
+
+func verifyFace(fileKey string, token string) {
+    client := &http.Client{}
+    body, _ := json.Marshal(map[string]string{"file_key": fileKey})
+    req, _ := http.NewRequest("POST", BASE_URL+"/verify", bytes.NewBuffer(body))
     req.Header.Set("Content-Type", "application/json")
+    req.Header.Set("Authorization", "Bearer "+token)
     
-    resp, _ = client.Do(req)
+    resp, _ := client.Do(req)
     defer resp.Body.Close()
     
     var verifyResp map[string]interface{}
@@ -1020,61 +1029,312 @@ func main() {
 }
 ```
 
-## Versioning
+---
 
-All errors follow RFC 7807 format:
+## Image Format Support
+
+### Supported Formats
+
+The service supports the following image formats:
+
+| Format | Extensions | Description | Auto-conversion |
+|--------|------------|-------------|-----------------|
+| JPEG   | .jpg, .jpeg | Standard format | - |
+| PNG    | .png | Format with transparency | - |
+| **HEIC** | **.heic, .heif** | **Apple format (iOS/macOS)** | **✓ Yes → JPEG** |
+| WebP   | .webp | Google format | - |
+
+### HEIC (High Efficiency Image Container)
+
+HEIC is a modern image compression format used by Apple starting with iOS 11.
+
+**Processing Features:**
+- ✅ Automatic format detection via magic bytes
+- ✅ Conversion to JPEG with quality preservation (95%)
+- ✅ Transparency handling (RGB conversion with white background)
+- ✅ HEIF variant support
+- ⚠️ Slight processing time increase (~100-200ms)
+
+### Upload Endpoints with HEIC Support
+
+#### POST /api/v1/upload/validate
+
+Validate uploaded image.
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/upload/validate" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -F "file=@photo.heic"
+```
+
+**Response:**
 
 ```json
 {
-  "type": "https://api.example.com/errors/validation",
-  "title": "Validation Error",
-  "status": 422,
-  "detail": "Invalid email format",
-  "instance": "/api/v1/auth/register"
+  "status": "success",
+  "message": "Изображение валидно",
+  "image_info": {
+    "width": 3024,
+    "height": 4032,
+    "format": "HEIC",
+    "mime_type": "image/heic",
+    "size_mb": 2.45
+  },
+  "converted_from_heic": true,
+  "dimensions": "3024x4032"
 }
 ```
 
-### Common Error Codes
+#### GET /api/v1/upload/supported-formats
 
-| Code | Description |
-|------|-------------|
-| 400 | Bad Request |
-| 401 | Unauthorized |
-| 403 | Forbidden |
-| 404 | Not Found |
-| 409 | Conflict |
-| 422 | Unprocessable Entity |
-| 429 | Too Many Requests |
-| 500 | Internal Server Error |
-| 503 | Service Unavailable |
+Get list of supported formats.
 
-## Rate Limiting
-
-| Tier | Requests | Window |
-|------|----------|--------|
-| Free | 100 | per minute |
-| Basic | 1,000 | per minute |
-| Pro | 10,000 | per minute |
-
-Rate limit headers included in response:
-
-```http
-X-RateLimit-Limit: 100
-X-RateLimit-Remaining: 95
-X-RateLimit-Reset: 1705825200
+```bash
+curl "http://localhost:8000/api/v1/upload/supported-formats" \
+  -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-## Versioning
+**Response:**
 
-API versioning is handled via URL path: `/api/v1/`
+```json
+{
+  "supported_extensions": [".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp"],
+  "max_file_size_mb": 10,
+  "max_dimension": 4096,
+  "min_dimension": 160,
+  "formats": {
+    "JPEG": {
+      "extensions": [".jpg", ".jpeg"],
+      "description": "Standard format"
+    },
+    "PNG": {
+      "extensions": [".png"],
+      "description": "Format with transparency support"
+    },
+    "HEIC": {
+      "extensions": [".heic", ".heif"],
+      "description": "Apple format (auto-converted to JPEG)"
+    },
+    "WebP": {
+      "extensions": [".webp"],
+      "description": "Google format"
+    }
+  }
+}
+```
 
-Breaking changes will result in new version (v2, v3, etc.) with deprecation notice.
+#### POST /api/v1/upload/convert-heic
 
-## Postman Collection
+Convert HEIC/HEIF to JPEG.
 
-Import Postman collection from `docs/face-recognition-api.postman.json` for testing all endpoints.
+```bash
+curl -X POST "http://localhost:8000/api/v1/upload/convert-heic" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -F "file=@photo.heic"
+```
 
----
+**Response:**
 
-**Last updated:** January 2026
-**Version:** 1.0.0
+```json
+{
+  "status": "success",
+  "message": "Конвертация завершена",
+  "jpeg_size_bytes": 524288,
+  "jpeg_size_mb": 0.5,
+  "dimensions": "1920x1080",
+  "jpeg_base64": "/9j/4AAQSkZJRgABAQEAYABgAAD..."
+}
+```
+
+### Limitations
+
+| Parameter | Value |
+|-----------|-------|
+| Maximum file size | 10 MB |
+| Maximum resolution | 4096x4096 px |
+| Minimum resolution | 160x160 px (for face recognition) |
+| JPEG quality during conversion | 95% |
+
+### Technical Details
+
+#### Format Detection by Magic Bytes
+
+| Format | Magic Bytes |
+|--------|-------------|
+| JPEG   | `FF D8 FF E0` or `FF D8 FF E1` |
+| PNG    | `89 50 4E 47 0D 0A 1A 0A` |
+| HEIC   | `ftypheic` or `ftypmif1` (offset 4) |
+| HEIF   | `ftypheif` (offset 4) |
+| WebP   | `RIFF....WEBP` |
+
+#### HEIC → JPEG Conversion
+
+```python
+def convert_heic_to_jpeg(file_data: bytes, quality: int = 95) -> bytes:
+    image = Image.open(io.BytesIO(file_data))
+    # Transparency handling
+    if image.mode in ('RGBA', 'LA', 'P'):
+        background = Image.new('RGB', image.size, (255, 255, 255))
+        background.paste(image, mask=image.split()[-1])
+        image = background
+    # Save as JPEG
+    return image_to_bytes(image, format='JPEG', quality=quality)
+```
+
+### Integration with Other Endpoints
+
+HEIC files are automatically converted in the following endpoints:
+
+- `POST /api/v1/upload/{session_id}/file` - File upload
+- `POST /api/v1/verify` - Face verification
+- `POST /api/v1/liveness` - Liveness check
+- `POST /api/v1/reference` - Create reference
+
+### Testing HEIC Support
+
+```bash
+# Validate HEIC file
+curl -X POST "http://localhost:8000/api/v1/upload/validate" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -F "file=@iphone_photo.heic"
+
+# Convert HEIC to JPEG
+curl -X POST "http://localhost:8000/api/v1/upload/convert-heic" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -F "file=@iphone_photo.heic" \
+  -o converted.jpg
+
+# Use HEIC in verification
+curl -X POST "http://localhost:8000/api/v1/verify" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"file_key": "path/to/heic/file.heic"}'
+```
+## Используемые модели машинного обучения
+
+### Краткий обзор
+
+Сервис использует следующие модели машинного обучения в едином pipeline обработки:
+
+| Задача | Модель | Точность | Скорость (GPU) |
+|--------|--------|----------|----------------|
+| Face Detection | MTCNN | 95% precision | 10ms |
+| Face Verification | FaceNet (Inception-ResNet-v1) | 99.65% (LFW) | 5ms |
+| Anti-Spoofing | MiniFASNetV2 | 98.95% (ACER) | 2ms |
+
+**Полная документация:** См. [MODELS.md](./MODELS.md)
+
+### Pipeline обработки
+
+```
+Input Image → Face Detection (MTCNN) → Face Alignment → 
+├─→ Anti-Spoofing (MiniFASNetV2) → is_live
+└─→ Embedding Extraction (FaceNet) → 512-dim vector → Comparison
+```
+
+### Конфигурация моделей
+
+Параметры моделей настраиваются через `config.py`:
+
+```python
+# Face Verification
+VERIFICATION_THRESHOLD = 0.6  # Standard (FAR < 0.1%, FRR < 1-3%)
+FACENET_VERSION = "1.0.0"
+EMBEDDING_SIZE = 512
+
+# Liveness Detection
+LIVENESS_THRESHOLD = 0.5  # Balanced
+MINIFASNET_VERSION = "2.0.1"
+
+# Face Detection
+FACE_DETECTOR = "mtcnn"  # or "retinaface"
+MIN_FACE_SIZE = 20
+```
+
+### Метрики производительности
+
+#### Latency breakdown (полный pipeline, 1024×1024 image)
+
+| Этап | CPU (ms) | GPU (ms) |
+|------|----------|----------|
+| Image loading & decode | 10 | 10 |
+| Face detection (MTCNN) | 100 | 10 |
+| Face alignment | 5 | 5 |
+| Liveness check (MiniFASNet) | 15 | 2 |
+| Embedding extraction (FaceNet) | 50 | 5 |
+| Comparison | 1 | 0.5 |
+| **Total** | **~201ms** | **~53ms** |
+
+#### Throughput
+
+| Конфигурация | Запросов/сек |
+|--------------|--------------|
+| Single CPU | 5 |
+| Single GPU | 18 |
+| 10 pods (GPU) | ~170 |
+
+### Модели в ответах API
+
+#### Verification Response
+
+```json
+{
+  "verification_id": "ver_123456",
+  "is_match": true,
+  "similarity_score": 0.89,
+  "confidence": 0.95,
+  "threshold_used": 0.7,
+  "model_info": {
+    "face_detector": "mtcnn",
+    "embedder": "facenet",
+    "liveness_enabled": true
+  }
+}
+```
+
+#### Liveness Response
+
+```json
+{
+  "liveness_id": "live_789xyz",
+  "is_live": true,
+  "liveness_score": 0.94,
+  "confidence": 0.97,
+  "model": "MiniFASNetV2",
+  "spoof_type": null
+}
+```
+
+### Health Check
+
+Эндпоинт `/api/v1/health` возвращает статус моделей:
+
+```json
+{
+  "status": "healthy",
+  "services": {
+    "ml_models": "healthy"
+  },
+  "model_versions": {
+    "facenet": "1.0.0",
+    "minifasnet": "2.0.1",
+    "mtcnn": "1.0.0"
+  }
+}
+```
+
+### Метрики Prometheus
+
+```prometheus
+# HELP model_inference_seconds Model inference latency
+# TYPE model_inference_seconds histogram
+model_inference_seconds_bucket{model="facenet",le="0.01"} 1523
+model_inference_seconds_bucket{model="facenet",le="0.05"} 1890
+model_inference_seconds_bucket{model="minifasnet",le="0.005"} 1450
+
+# HELP verifications_total Total verifications
+verifications_total{model="facenet"} 5234
+
+# HELP liveness_checks_total Total liveness checks
+liveness_checks_total{model="minifasnet"} 4123
+```

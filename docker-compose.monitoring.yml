@@ -1,82 +1,171 @@
-# Docker Compose для сервисов мониторинга
-# Используется совместно с docker-compose.yml: docker-compose -f docker-compose.yml -f docker-compose.monitoring.yml up
+# =============================================================================
+# Monitoring Stack Docker Compose
+# Prometheus + AlertManager + Grafana for biometric metrics
+# =============================================================================
 
 version: '3.8'
 
 services:
-  # Nginx для reverse proxy и статических файлов
-  nginx:
-    image: nginx:alpine
-    container_name: face-recognition-nginx
-    restart: unless-stopped
-    deploy:
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
-      - ./uploads:/var/www/uploads:ro
-    depends_on:
-      - face-recognition-api
-    networks:
-      - face-recognition-network
-
-  # Prometheus для мониторинга
+  # --------------------------------------------------------------------------
+  # Prometheus - Time series database
+  # --------------------------------------------------------------------------
   prometheus:
-    image: prom/prometheus:latest
-    container_name: face-recognition-prometheus
+    image: prom/prometheus:v2.48.0
+    container_name: biometric-prometheus
     restart: unless-stopped
-    deploy:
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--storage.tsdb.retention.time=200h'
+      - '--storage.tsdb.retention.time=30d'
+      - '--storage.tsdb.min-block-duration=2h'
       - '--web.enable-lifecycle'
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus_data:/prometheus
-    ports:
-      - "9090:9090"
+      - '--web.enable-admin-api'
+      - '--query.max-concurrency=10'
+      - '--query.timeout=2m'
+      - '--log.level=info'
     networks:
-      - face-recognition-network
+      - biometric_network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-  # Grafana для визуализации метрик
-  grafana:
-    image: grafana/grafana:latest
-    container_name: face-recognition-grafana
+  # --------------------------------------------------------------------------
+  # AlertManager - Alert routing and notifications
+  # --------------------------------------------------------------------------
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: biometric-alertmanager
     restart: unless-stopped
-    deploy:
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 3
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD_FILE=/run/secrets/grafana_password
-      - GF_USERS_ALLOW_SIGN_UP=false
+    ports:
+      - "9093:9093"
     volumes:
-      - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
-      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--cluster.advertise-address=0.0.0.0:9093'
+      - '--log.level=info'
+    environment:
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+      - PAGERDUTY_KEY=${PAGERDUTY_KEY}
+    networks:
+      - biometric_network
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9093/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # --------------------------------------------------------------------------
+  # Grafana - Visualization dashboard
+  # --------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: biometric-grafana
+    restart: unless-stopped
     ports:
       - "3000:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-biometric123}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=${GF_SERVER_ROOT_URL:-http://localhost:3000}
+      - GF_SMTP_ENABLED=true
+      - GF_SMTP_HOST=${SMTP_HOST:-smtp.company.com:587}
+      - GF_SMTP_USER=${SMTP_USER:-grafana@company.com}
+      - GF_SMTP_PASSWORD=${SMTP_PASSWORD}
+      - GF_SMTP_FROM_ADDRESS=grafana@company.com
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+      - GF_PANELS_ENABLE_HIGHLIGHT_TIP=false
+      - GF_DASHBOARDS_PROVISIONING_INTERVAL=30s
     networks:
-      - face-recognition-network
-    secrets:
-      - grafana_password
+      - biometric_network
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # --------------------------------------------------------------------------
+  # cAdvisor - Container metrics
+  # --------------------------------------------------------------------------
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.2
+    container_name: biometric-cadvisor
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+    command:
+      - --housekeeping_interval=30s
+      - --docker_only=true
+      - --disable_metrics=percpu,sched,tcp,udp,disk,diskIO,hugetlb,referenced_memory,cpu_topology,resctrl
+    networks:
+      - biometric_network
+    depends_on:
+      - prometheus
+
+  # --------------------------------------------------------------------------
+  # Node Exporter - System metrics
+  # --------------------------------------------------------------------------
+  node-exporter:
+    image: prom/node-exporter:v1.7.0
+    container_name: biometric-node-exporter
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --collector.disable-defaults
+      - --collector.cpu
+      - --collector.meminfo
+      - --collector.diskstats
+      - --collector.filesystem
+      - --collector.loadavg
+      - --collector.netdev
+      - --collector.uname
+      - --collector.time
+    networks:
+      - biometric_network
+    depends_on:
+      - prometheus
+
+networks:
+  biometric_network:
+    driver: bridge
 
 volumes:
   prometheus_data:
+    driver: local
+  alertmanager_data:
     driver: local
   grafana_data:
     driver: local

@@ -1,0 +1,15 @@
+{
+  "verification": {
+    "far": {
+      "value": 0.15
+    },
+    "frr": {
+      "value": 4.0
+    }
+  },
+  "liveness": {
+    "accuracy": {
+      "value": 96.0
+    }
+  }
+}

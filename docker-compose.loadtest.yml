@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  # ==========================================
+  # Face Recognition API для нагрузочного тестирования
+  # ==========================================
+  face-recognition-api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - WORKERS=4
+      - ENVIRONMENT=production
+      - LOG_LEVEL=INFO
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ==========================================
+  # Locust Master - Web UI для управления тестами
+  # ==========================================
+  locust-master:
+    image: locustio/locust:2.15.1
+    ports:
+      - "8089:8089"  # Web UI
+    volumes:
+      - ./tests/performance:/mnt/locust
+    command: >
+      -f /mnt/locust/locustfile.py
+      --master
+      --host=http://face-recognition-api:8000
+    depends_on:
+      - face-recognition-api
+    environment:
+      - LOCUST_MODE=master
+
+  # ==========================================
+  # Locust Workers - Генерация нагрузки
+  # ==========================================
+  locust-worker:
+    image: locustio/locust:2.15.1
+    volumes:
+      - ./tests/performance:/mnt/locust
+    command: >
+      -f /mnt/locust/locustfile.py
+      --worker
+      --master-host=locust-master
+    depends_on:
+      - locust-master
+    environment:
+      - LOCUST_MODE=worker
+    deploy:
+      replicas: 4  # 4 worker'а для генерации нагрузки
+
+  # ==========================================
+  # Prometheus для метрик нагрузки
+  # ==========================================
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus/loadtest.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=7d'
+    depends_on:
+      - face-recognition-api
+
+  # ==========================================
+  # Grafana для визуализации результатов
+  # ==========================================
+  grafana:
+    image: grafana/grafana:10.0.0
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./docker/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - grafana-storage:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=loadtest123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    depends_on:
+      - prometheus
+    links:
+      - prometheus:prometheus
+
+volumes:
+  grafana-storage:
+
+networks:
+  default:
+    name: loadtest-network

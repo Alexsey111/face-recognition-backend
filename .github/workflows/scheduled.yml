@@ -1,0 +1,285 @@
+# =============================================================================
+# Scheduled Jobs
+# Daily validation, dependency updates, and maintenance tasks
+# =============================================================================
+
+name: Scheduled Jobs
+
+on:
+  schedule:
+    # Daily at 2 AM UTC - Daily validation
+    - cron: '0 2 * * *'
+    # Weekly on Monday at 3 AM UTC - Dependency update check
+    - cron: '0 3 * * 1'
+    # Monthly on 1st at 4 AM UTC - Security audit
+    - cron: '0 4 1 * *'
+  workflow_dispatch:
+    inputs:
+      task:
+        description: 'Manual task to run'
+        required: true
+        type: choice
+        default: 'daily-validation'
+        options:
+          - daily-validation
+          - dependency-update
+          - security-audit
+          - metrics-retention
+
+env:
+  PYTHON_VERSION: '3.12'
+  VAL_DATASET_PATH: 'tests/datasets/validation_dataset'
+  RETENTION_DAYS: 30
+
+# =============================================================================
+# Jobs
+# =============================================================================
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Daily Metrics Validation
+  # --------------------------------------------------------------------------
+  daily-validation:
+    name: Daily Metrics Validation
+    runs-on: self-hosted  # Requires GPU
+    if: github.event_name == 'schedule' && github.event.schedule == '0 2 * * *'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download models
+        run: |
+          python scripts/download_model.py --model facenet --force
+
+      - name: Run validation
+        id: validation
+        run: |
+          python scripts/validate_metrics.py \
+            --dataset ${{ env.VAL_DATASET_PATH }} \
+            --output daily_validation_$(date +%Y%m%d).json \
+            --threshold 0.6 \
+            --min-validations 100
+
+      - name: Check compliance
+        run: |
+          python scripts/check_compliance.py \
+            --results daily_validation_$(date +%Y%m%d).json \
+            --fail-on-violation=false \
+            --output compliance_report.json
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-validation-${{ github.run_id }}
+          path: daily_validation_*.json
+          retention-days: ${{ env.RETENTION_DAYS }}
+
+      - name: Upload compliance report
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance-report-${{ github.run_id }}
+          path: compliance_report.json
+          retention-days: 90
+
+      - name: Send report
+        if: always()
+        run: |
+          python scripts/send_validation_report.py \
+            --results daily_validation_$(date +%Y%m%d).json \
+            --recipients ops-team@company.com,security@company.com
+
+      - name: Alert on violation
+        if: failure()
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "⚠️ Daily Validation Failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Daily Metrics Validation Failed*\n\nRun: ${{ github.run_id }}\nCheck compliance report for details."
+                  }
+                }
+              ]
+            }
+
+  # --------------------------------------------------------------------------
+  # Dependency Update Check
+  # --------------------------------------------------------------------------
+  dependency-update:
+    name: Update Dependencies
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' && github.event.schedule == '0 3 * * 1'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Check for outdated dependencies
+        id: outdated
+        run: |
+          pip install pip-tools
+          pip-compile --generate-output --output-file requirements-outdated.txt requirements.in
+          echo "has_outdated=$([ -s requirements-outdated.txt ] && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+
+      - name: Create Pull Request
+        if: steps.outdated.outputs.has_outdated == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: 'chore: update dependencies'
+          title: 'chore: automated dependency update'
+          body: |
+            ## Automated Dependency Update
+
+            The following dependencies have updates available:
+
+            ```txt
+            $(cat requirements-outdated.txt)
+            ```
+
+            Please review and merge.
+          branch: automated-dependency-update
+          labels: |
+            dependencies
+            automated
+            chore
+
+      - name: Notify if no updates
+        if: steps.outdated.outputs.has_outdated == 'false'
+        run: |
+          echo "No outdated dependencies found"
+
+  # --------------------------------------------------------------------------
+  # Monthly Security Audit
+  # --------------------------------------------------------------------------
+  security-audit:
+    name: Monthly Security Audit
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' && github.event.schedule == '0 4 1 * *'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'security-audit-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+
+      - name: Upload results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'security-audit-results.sarif'
+
+      - name: Generate audit report
+        run: |
+          python scripts/generate_security_report.py \
+            --input security-audit-results.sarif \
+            --output security_audit_report_$(date +%Y%m).md
+
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-audit-report-${{ github.run_id }}
+          path: security_audit_report_*.md
+          retention-days: 365
+
+      - name: Send audit report
+        run: |
+          python scripts/send_security_report.py \
+            --report security_audit_report_$(date +%Y%m).md \
+            --recipients security@company.com,dpo@company.com
+
+  # --------------------------------------------------------------------------
+  # Metrics Retention Cleanup
+  # --------------------------------------------------------------------------
+  metrics-retention:
+    name: Metrics Retention Cleanup
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cleanup old artifacts
+        run: |
+          python scripts/cleanup_artifacts.py \
+            --retention-days 30 \
+            --min-free-space 10GB \
+            --dry-run=false
+
+      - name: Cleanup old Docker images
+        run: |
+          python scripts/cleanup_docker_images.py \
+            --keep-latest 5 \
+            --keep-tags 'latest,*.*.*' \
+            --dry-run=false
+
+      - name: Send cleanup report
+        run: |
+          python scripts/send_cleanup_report.py \
+            --recipients ops-team@company.com
+
+  # --------------------------------------------------------------------------
+  # License Compliance Check
+  # --------------------------------------------------------------------------
+  license-compliance:
+    name: License Compliance Check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install license checker
+        run: |
+          pip install pip-licenses
+
+      - name: Check licenses
+        run: |
+          pip-licenses --format=csv --output-file licenses.csv
+          python scripts/check_allowed_licenses.py \
+            --input licenses.csv \
+            --allowed MIT,Apache-2.0,BSD-3-Clause,MIT-0
+
+      - name: Upload license report
+        uses: actions/upload-artifact@v4
+        with:
+          name: license-report-${{ github.run_id }}
+          path: licenses.csv
+          retention-days: 90
+
+      - name: Create PR if violations found
+        if: failure()
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: 'fix: update dependencies with allowed licenses'
+          title: 'fix: license compliance violations'
+          body: 'Automated PR to fix license compliance issues'
+          branch: license-fix

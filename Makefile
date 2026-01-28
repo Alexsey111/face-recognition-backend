@@ -221,6 +221,18 @@ health: ## Проверить health status сервиса
 	@echo "$(BLUE)[INFO]$(NC) Проверка health status..."
 	@curl -s http://localhost:8000/health | jq . || curl -s http://localhost:8000/health
 
+health-check: ## Запустить полный health check скрипт
+	@echo "$(BLUE)[INFO]$(NC) Запуск полного health check..."
+	@bash scripts/health_check.sh http://localhost 8000
+
+docker-health: ## Проверить health всех Docker контейнеров
+	@echo "$(BLUE)[INFO]$(NC) Проверка Docker контейнеров..."
+	@bash scripts/docker_health_check.sh all
+
+docker-health-api: ## Проверить health API контейнера
+	@echo "$(BLUE)[INFO]$(NC) Проверка API контейнера..."
+	@bash scripts/docker_health_check.sh api
+
 logs: ## Показать логи приложения
 	@echo "$(BLUE)[INFO]$(NC) Логи приложения..."
 	tail -f logs/app.log 2>/dev/null || echo "Логи не найдены"
@@ -285,6 +297,154 @@ env-help: ## Показать справку по переменным окру�
 # Все в одном
 all: clean install-dev format lint test ## Полная очистка, установка, форматирование, проверка и тесты
 	@echo "$(GREEN)[SUCCESS]$(NC) Все операции завершены успешно!"
+
+# ==================== Metrics Validation ====================
+
+validate-metrics: ## Запуск валидации метрик FAR/FRR/Liveness
+	@echo "$(BLUE)🔍 Запуск валидации метрик FAR/FRR/Liveness...$(NC)"
+	@source $(VENV)/bin/activate && python scripts/validate_metrics.py \
+		--dataset tests/datasets/validation_dataset \
+		--threshold $(shell python -c "from app.config import settings; print(settings.VERIFICATION_THRESHOLD)" 2>/dev/null || echo "0.6") \
+		--output validation_results_$(shell date +%Y%m%d_%H%M%S).json
+
+validate-metrics-threshold: ## Валидация с указанием порога
+	@echo "$(BLUE)🔍 Запуск валидации метрик с порогом $(THRESHOLD)...$(NC)"
+	@source $(VENV)/bin/activate && python scripts/validate_metrics.py \
+		--dataset tests/datasets/validation_dataset \
+		--threshold $(THRESHOLD) \
+		--output validation_results_$(THRESHOLD)_$(shell date +%Y%m%d_%H%M%S).json
+
+validate-quick: ## Быстрая валидация (с меньшим датасетом)
+	@echo "$(BLUE)⚡ Быстрая валидация...$(NC)"
+	@source $(VENV)/bin/activate && python scripts/validate_metrics.py \
+		--dataset tests/datasets/quick_validation \
+		--threshold 0.6 \
+		--output validation_quick.json
+
+validate-threshold-analysis: ## Анализ оптимального порога
+	@echo "$(BLUE)📊 Анализ оптимального порога...$(NC)"
+	@source $(VENV)/bin/activate && python scripts/validate_metrics.py \
+		--dataset tests/datasets/validation_dataset \
+		--analyze-thresholds \
+		--output threshold_analysis.json
+
+validate-rocauc: ## Построение ROC кривой и расчет AUC
+	@echo "$(BLUE)📈 Построение ROC кривой...$(NC)"
+	@source $(VENV)/bin/activate && python scripts/validate_metrics.py \
+		--dataset tests/datasets/validation_dataset \
+		--roc-curve \
+		--output roc_curve.json
+
+prepare-dataset: ## Создание структуры тестового датасета
+	@echo "$(BLUE)📦 Создание структуры тестового датасета...$(NC)"
+	@mkdir -p tests/datasets/validation_dataset/{genuine_pairs,impostor_pairs,live_faces,spoofed_faces}
+	@mkdir -p tests/datasets/quick_validation/{genuine_pairs,impostor_pairs,live_faces,spoofed_faces}
+	@echo "$(GREEN)✅ Структура создана.$(NC)"
+	@echo "$(YELLOW)📝 Следуйте инструкциям в tests/datasets/README.md для заполнения данными$(NC)"
+
+validate-compliance: ## Проверка compliance с 152-ФЗ
+	@echo "$(BLUE)📋 Проверка compliance с 152-ФЗ...$(NC)"
+	@source $(VENV)/bin/activate && python scripts/validate_metrics.py \
+		--dataset tests/datasets/validation_dataset \
+		--compliance-check \
+		--output compliance_report.json
+
+validate-report: ## Создание детального отчета
+	@echo "$(BLUE)📊 Создание детального отчета...$(NC)"
+	@source $(VENV)/bin/activate && python scripts/validate_metrics.py \
+		--dataset tests/datasets/validation_dataset \
+		--detailed-report \
+		--output detailed_report.json
+
+# ========================================
+# Performance Testing
+# ========================================
+
+.PHONY: test-performance load-test-smoke load-test-standard load-test-stress load-test-soak test-all-performance
+
+test-performance: ## Запустить performance тесты
+	@echo "$(BLUE)🚀$(NC) Running performance tests..."
+	@source $(VENV)/bin/activate && pytest tests/performance/test_performance_requirements.py -v -m performance
+
+load-test-smoke: ## Smoke load test (5 users, 60s)
+	@echo "$(BLUE)💨$(NC) Running smoke load test..."
+	@locust \
+		-f tests/performance/locustfile.py \
+		--host=http://localhost:8000 \
+		--users=5 \
+		--spawn-rate=1 \
+		--run-time=60s \
+		--headless \
+		--only-summary
+
+load-test-standard: ## Standard load test
+	@echo "$(BLUE)📊$(NC) Running standard load test..."
+	@bash tests/performance/run_load_tests.sh
+
+load-test-stress: ## Stress test (200 users, 300s)
+	@echo "$(BLUE)💥$(NC) Running stress test..."
+	@mkdir -p load_test_results
+	@locust \
+		-f tests/performance/locustfile.py \
+		--host=http://localhost:8000 \
+		--users=200 \
+		--spawn-rate=10 \
+		--run-time=300s \
+		--headless \
+		--only-summary \
+		--html=load_test_results/stress_test.html
+
+load-test-soak: ## Soak test (1 hour)
+	@echo "$(BLUE)⏰$(NC) Running soak test (1 hour)..."
+	@RUN_SOAK_TEST=true bash tests/performance/run_load_tests.sh
+
+test-all-performance: test-performance load-test-standard ## Все performance тесты
+	@echo "$(GREEN)✅$(NC) All performance tests completed"
+
+# ========================================
+# CI/CD
+# ========================================
+
+.PHONY: ci-lint ci-security ci-test ci-build ci-validate ci-all setup-pre-commit
+
+ci-lint: ## Проверить код линтерами (CI)
+	@echo "🔍 Running linters..."
+	@source $(VENV)/bin/activate && \
+		black --check app/ tests/ && \
+		isort --check-only app/ tests/ && \
+		flake8 app/ tests/ --max-line-length=120 && \
+		mypy app/ --ignore-missing-imports
+
+ci-security: ## Проверить безопасность (CI)
+	@echo "🔒 Running security scans..."
+	@source $(VENV)/bin/activate && \
+		bandit -r app/ -f json -o bandit-report.json && \
+		safety check --json > safety-report.json || true && \
+		trivy fs --exit-code 0 .
+
+ci-test: ## Запустить все тесты (CI)
+	@echo "🧪 Running all tests..."
+	@source $(VENV)/bin/activate && pytest tests/ -v --cov=app --cov-report=xml --cov-report=html
+
+ci-build: ## Собрать Docker образ (CI)
+	@echo "🏗️  Building Docker image..."
+	@docker build -t face-recognition-api:$(shell git rev-parse --short HEAD) .
+
+ci-validate: ## Валидировать метрики (CI)
+	@echo "✅ Validating metrics..."
+	@source $(VENV)/bin/activate && python scripts/validate_metrics.py \
+		--dataset tests/datasets/validation_dataset \
+		--output validation_results.json
+
+ci-all: ci-lint ci-security ci-test ci-build ci-validate ## Все CI проверки
+	@echo "✅ All CI checks passed!"
+
+setup-pre-commit: ## Настроить pre-commit hooks
+	@echo "📋 Setting up pre-commit hooks..."
+	@source $(VENV)/bin/activate && \
+		pip install pre-commit && \
+		pre-commit install
+	@echo "✅ Pre-commit hooks installed"
 
 # По умолчанию показать справку
 .DEFAULT_GOAL := help

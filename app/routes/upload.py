@@ -1,32 +1,159 @@
 """
-API роуты для загрузки изображений (Phase 5).
-Реализует систему сессий загрузки с управлением состояниями.
+API роуты для загрузки изображений.
+Реализует систему загрузки с валидацией и поддержкой HEIC.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from datetime import datetime
-from typing import Dict, Any, List
-from ..db.database import get_async_db_manager
-from ..services.storage_service import StorageService
-from ..services.session_service import SessionService
-from ..tasks.cleanup import CleanupTasks
-from ..utils.file_utils import FileUtils, ImageValidator
-from ..utils.validators import Validators, ValidationError
-from ..utils.logger import get_logger
-from ..routes.auth import get_current_user
+from typing import Any, Dict, Optional
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import JSONResponse
+
+from app.db.database import get_async_db_manager
+from app.routes.auth import get_current_user
+from app.services.session_service import SessionService
+from app.services.storage_service import StorageService
+from app.services.validation_service import ValidationService
+from app.tasks.cleanup import CleanupTasks
+from app.utils.file_utils import ImageFileHandler, FileUtils, ImageValidator
+from app.utils.logger import get_logger
+from app.utils.validators import ValidationError
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 
 
-def get_storage_service():
-    """Фабричная функция для создания StorageService (для мокирования в тестах)"""
+def get_storage_service() -> StorageService:
+    """Фабричная функция для создания StorageService."""
     return StorageService()
 
 
 # =============================================================================
-# Upload Session Endpoints
+# Image Validation Endpoints (NEW - HEIC Support)
+# =============================================================================
+
+
+@router.post("/validate")
+async def validate_image(file: UploadFile = File(...)) -> JSONResponse:
+    """
+    Валидация загруженного изображения.
+    Поддерживаемые форматы: JPG, PNG, HEIC, HEIF, WebP
+
+    Args:
+        file: Файл изображения
+
+    Returns:
+        Информация об изображении и результат валидации
+    """
+    try:
+        # Чтение файла
+        file_data = await file.read()
+
+        # Валидация с использованием ValidationService
+        image, image_info = ValidationService().validate_uploaded_image(
+            file_data=file_data,
+            filename=file.filename,
+            check_face=False,
+        )
+
+        # Определяем, было ли сконвертировано из HEIC
+        original_format = image_info.get("format", "").upper()
+        converted_from_heic = original_format in ["HEIC", "HEIF"]
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "success",
+                "message": "Изображение валидно",
+                "image_info": {
+                    "width": image_info["width"],
+                    "height": image_info["height"],
+                    "format": original_format,
+                    "size_bytes": image_info["size_bytes"],
+                    "size_mb": round(image_info["size_mb"], 2),
+                    "mime_type": image_info["mime_type"],
+                },
+                "converted_from_heic": converted_from_heic,
+                "dimensions": f"{image_info['width']}x{image_info['height']}",
+            },
+        )
+
+    except ValidationError as e:
+        logger.warning(f"Валидация не пройдена: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"Ошибка валидации изображения: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Внутренняя ошибка сервера",
+        )
+
+
+@router.get("/supported-formats")
+async def get_supported_formats() -> Dict[str, Any]:
+    """
+    Получение списка поддерживаемых форматов изображений.
+
+    Returns:
+        Информация о поддерживаемых форматах
+    """
+    return ValidationService().get_supported_formats_info()
+
+
+@router.post("/convert-heic")
+async def convert_heic_to_jpeg(file: UploadFile = File(...)) -> JSONResponse:
+    """
+    Конвертация HEIC/HEIF изображения в JPEG.
+
+    Args:
+        file: Файл изображения (HEIC/HEIF)
+
+    Returns:
+        Информация о конвертации и base64 JPEG
+    """
+    try:
+        file_data = await file.read()
+
+        # Проверяем, что это HEIC
+        if not ImageFileHandler.is_heic_format(file_data, file.filename):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Файл не является HEIC/HEIF форматом",
+            )
+
+        # Конвертируем
+        jpeg_data = ImageFileHandler.convert_heic_to_jpeg(file_data, quality=95)
+
+        # Получаем информацию
+        image_info = ImageFileHandler.get_image_info(jpeg_data, "converted.jpg")
+
+        import base64
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "success",
+                "message": "Конвертация завершена",
+                "jpeg_size_bytes": len(jpeg_data),
+                "jpeg_size_mb": round(len(jpeg_data) / 1024 / 1024, 2),
+                "dimensions": f"{image_info['width']}x{image_info['height']}",
+                "jpeg_base64": base64.b64encode(jpeg_data).decode("utf-8"),
+            },
+        )
+
+    except ValidationError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        logger.error(f"Ошибка конвертации HEIC: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Ошибка конвертации изображения",
+        )
+
+
+# =============================================================================
+# Upload Session Endpoints (EXISTING)
 # =============================================================================
 
 
@@ -104,7 +231,7 @@ async def upload_file_to_session(
                 detail="Недействительная или истекшая сессия загрузки",
             )
 
-        # ✅ Проверяем размер ДО чтения содержимого
+        # Проверяем размер ДО чтения
         if file.size and file.size > FileUtils.MAX_FILE_SIZE_MB * 1024 * 1024:
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -113,7 +240,7 @@ async def upload_file_to_session(
 
         # Чтение содержимого файла
         file_content = await file.read()
-        original_filename = file.filename  # ✅ Сохраняем оригинальное имя
+        original_filename = file.filename
 
         # Валидация файла
         is_valid, error_msg = ImageValidator.validate_image(
@@ -126,10 +253,16 @@ async def upload_file_to_session(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=error_msg
             )
 
-        # Конвертация в JPG если необходимо
+        # Конвертация в JPG если необходимо (включая HEIC)
         processed_content = file_content
         processed_filename = original_filename
-        if FileUtils.get_file_extension(original_filename) != "jpg":
+
+        # Проверяем расширение и конвертируем если нужно
+        ext = FileUtils.get_file_extension(original_filename).lower()
+        if ext in [".heic", ".heif"]:
+            processed_content = ImageFileHandler.convert_heic_to_jpeg(file_content)
+            processed_filename = f"{original_filename.rsplit('.', 1)[0]}.jpg"
+        elif ext != ".jpg":
             processed_content, processed_filename = FileUtils.convert_to_jpeg(
                 file_content, original_filename
             )
@@ -142,15 +275,15 @@ async def upload_file_to_session(
                 processed_content, max_width, max_height
             )
 
-        # ✅ StorageService генерирует ключ внутри
+        # Загрузка в хранилище
         storage = get_storage_service()
         result = await storage.upload_image(
             image_data=processed_content,
-            key=None,  # Пусть StorageService генерирует сам
+            key=None,
             metadata={
                 "user_id": current_user_id,
                 "session_id": session_id,
-                "original_name": original_filename,  # ✅ Сохраняем оригинальное имя
+                "original_name": original_filename,
                 "processed_name": processed_filename,
                 "file_hash": FileUtils.calculate_file_hash(processed_content),
                 "upload_timestamp": datetime.utcnow().isoformat(),
@@ -162,7 +295,7 @@ async def upload_file_to_session(
         file_size_mb = FileUtils.get_file_size_mb(processed_content)
         file_hash = result["metadata"]["file_hash"]
 
-        # Обновление сессии (аудит внутри SessionService)
+        # Обновление сессии
         await SessionService.attach_file_to_session(
             session_id,
             user_id=current_user_id,
@@ -179,7 +312,8 @@ async def upload_file_to_session(
             "file_size_mb": file_size_mb,
             "file_hash": file_hash,
             "session_id": session_id,
-            "original_filename": original_filename,  # ✅ Возвращаем оригинальное имя
+            "original_filename": original_filename,
+            "processed_filename": processed_filename,
         }
 
     except HTTPException:
@@ -279,7 +413,7 @@ async def delete_upload_session(
         # Удаление сессии
         await SessionService.delete_session(session_id)
 
-        # Логирование действия
+        # Логирование
         async with get_async_db_manager().get_session() as db:
             from app.db.crud import AuditLogCRUD
 
@@ -357,7 +491,6 @@ async def cleanup_expired_sessions(current_user_id: str = Depends(get_current_us
         Dict[str, Any]: Результат очистки
     """
     try:
-
         deleted_count = await CleanupTasks.cleanup_expired_upload_sessions()
 
         logger.info(f"Принудительная очистка: удалено {deleted_count} истекших сессий")

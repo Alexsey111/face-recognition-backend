@@ -1,0 +1,27 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  # Locust metrics
+  - job_name: 'locust'
+    static_configs:
+      - targets: ['locust-master:8089']
+    metrics_path: '/stats/metrics'
+
+  # API metrics
+  - job_name: 'face-recognition-api'
+    static_configs:
+      - targets: ['face-recognition-api:8000']
+    metrics_path: /metrics
+    scrape_interval: 1s
+
+  # Node exporter for system metrics
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+# Docker monitoring
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']

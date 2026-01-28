@@ -1,0 +1,184 @@
+# =============================================================================
+# AlertManager Configuration
+# Alert routing for biometric verification system
+# =============================================================================
+
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: 'smtp.company.com:587'
+  smtp_from: 'alerts@company.com'
+  smtp_auth_username: 'alerts@company.com'
+  smtp_auth_password: '${SMTP_PASSWORD}'
+  slack_api_url: '${SLACK_WEBHOOK_URL}'
+
+# =============================================================================
+# Route Configuration
+# =============================================================================
+route:
+  group_by: ['alertname', 'severity']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 12h
+  receiver: 'default'
+
+  routes:
+    # Critical alerts - immediate notification
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      continue: true
+      group_wait: 0s
+      repeat_interval: 1h
+
+    # Compliance team - 152-FZ alerts
+    - match:
+        category: compliance
+      receiver: 'compliance-team'
+      continue: true
+
+    # Security team - security alerts
+    - match:
+        category: security
+      receiver: 'security-team'
+      continue: true
+
+    # Operations team - performance/resource alerts
+    - match:
+        category: performance
+        category: resources
+      receiver: 'ops-team'
+
+    # SLA alerts
+    - match:
+        category: sla
+      receiver: 'ops-team'
+      continue: true
+
+# =============================================================================
+# Receivers
+# =============================================================================
+receivers:
+  # Default receiver - operations team
+  - name: 'default'
+    email_configs:
+      - to: 'ops-team@company.com'
+        headers:
+          Subject: '[Face Recognition] {{ .GroupLabels.alertname }}'
+        html: |
+          <h2>{{ .GroupLabels.alertname }}</h2>
+          {{ range .Alerts }}
+          <p><strong>Status:</strong> {{ .Status }}</p>
+          <p><strong>Description:</strong> {{ .Annotations.description }}</p>
+          <hr>
+          {{ end }}
+          <small>Timestamp: {{ .StartsAt.Format "2006-01-02 15:04:05" }}</small>
+
+  # Critical alerts - PagerDuty + Email + Slack
+  - name: 'critical-alerts'
+    email_configs:
+      - to: 'ops-team@company.com,management@company.com'
+        headers:
+          Subject: '[CRITICAL] Face Recognition Alert'
+        send_resolved: true
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#critical-alerts'
+        title: 'CRITICAL: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          **{{ .Labels.alertname }}**
+          Severity: {{ .Labels.severity }}
+          {{ .Annotations.description }}
+          {{ end }}
+        footer: 'Biometric Monitoring System'
+    pagerduty_configs:
+      - service_key: '${PAGERDUTY_KEY}'
+        severity: 'critical'
+        component: 'face-recognition'
+        group: 'biometric'
+        class: 'security'
+
+  # Compliance team - 152-FZ
+  - name: 'compliance-team'
+    email_configs:
+      - to: 'dpo@company.com,compliance@company.com'
+        headers:
+          Subject: '[Compliance Alert] {{ .GroupLabels.alertname }}'
+        send_resolved: true
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#compliance-alerts'
+        title: 'Compliance Alert: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          **{{ .Labels.alertname }}**
+          Regulation: {{ .Labels.regulation | default "N/A" }}
+          {{ .Annotations.description }}
+          {{ end }}
+
+  # Security team
+  - name: 'security-team'
+    email_configs:
+      - to: 'security@company.com'
+        headers:
+          Subject: '[Security Alert] {{ .GroupLabels.alertname }}'
+        send_resolved: true
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#security-alerts'
+        title: 'Security Alert: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          **{{ .Annotations.summary }}**
+          Severity: {{ .Labels.severity }}
+          Category: {{ .Labels.category }}
+          {{ .Annotations.description }}
+          {{ end }}
+        footer: 'Security Monitoring System'
+
+  # Operations team
+  - name: 'ops-team'
+    email_configs:
+      - to: 'ops-team@company.com'
+        send_resolved: true
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#ops-alerts'
+        title: 'Ops Alert: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          {{ .Annotations.description }}
+          {{ end }}
+
+# =============================================================================
+# Inhibition Rules
+# =============================================================================
+inhibit_rules:
+  # Suppress warning if critical is firing for same alertname
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname']
+
+  # Suppress compliance alerts if critical security alert is firing
+  - source_match:
+      severity: 'critical'
+      category: 'security'
+    target_match:
+      category: 'compliance'
+    equal: ['alertname']
+
+  # Suppress performance alerts during high severity
+  - source_match:
+      severity: 'critical'
+    target_match:
+      category: 'performance'
+    equal: ['instance']
+
+  # Suppress duplicate alerts for same service
+  - source_match:
+      alertname: HighFAR
+    target_match:
+      alertname: RisingFAR
+    equal: ['instance']

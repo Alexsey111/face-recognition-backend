@@ -219,3 +219,295 @@ CERTIFIED_LIVENESS_THRESHOLD=0.98     # Порог принятия решени
 API Version: 1.0.0
 
 Last Updated: 2025-01-06
+
+---
+
+## Поддержка форматов изображений
+
+### Поддерживаемые форматы
+
+Сервис поддерживает следующие форматы изображений:
+
+| Формат | Расширения | Описание | Автоконвертация |
+|--------|-----------|----------|----------------|
+| JPEG   | .jpg, .jpeg | Стандартный формат | - |
+| PNG    | .png | Формат с поддержкой прозрачности | - |
+| **HEIC** | **.heic, .heif** | **Apple формат (iOS/macOS)** | **✓ Да → JPEG** |
+| WebP   | .webp | Google формат | - |
+
+### HEIC (High Efficiency Image Container)
+
+HEIC — современный формат сжатия изображений, используемый Apple начиная с iOS 11.
+
+**Особенности обработки:**
+- ✅ Автоматическое определение формата по magic bytes
+- ✅ Конвертация в JPEG с сохранением качества (95%)
+- ✅ Обработка прозрачности (конвертация в RGB с белым фоном)
+- ✅ Поддержка HEIF (вариант HEIC)
+- ⚠️ Небольшое увеличение времени обработки (~100-200ms)
+
+### Эндпоинты для работы с изображениями
+
+#### POST /api/v1/upload/validate
+
+Валидация загруженного изображения.
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/upload/validate" \
+  -F "file=@photo.heic"
+```
+
+**Response:**
+
+```json
+{
+  "status": "success",
+  "message": "Изображение валидно",
+  "image_info": {
+    "width": 3024,
+    "height": 4032,
+    "format": "HEIC",
+    "mime_type": "image/heic",
+    "size_mb": 2.45
+  },
+  "converted_from_heic": true,
+  "dimensions": "3024x4032"
+}
+```
+
+#### GET /api/v1/upload/supported-formats
+
+Получение списка поддерживаемых форматов.
+
+```bash
+curl "http://localhost:8000/api/v1/upload/supported-formats"
+```
+
+**Response:**
+
+```json
+{
+  "supported_extensions": [".jpg", ".jpeg", ".png", ".heic", ".heif", ".webp"],
+  "max_file_size_mb": 10,
+  "max_dimension": 4096,
+  "min_dimension": 160,
+  "formats": {
+    "JPEG": {
+      "extensions": [".jpg", ".jpeg"],
+      "description": "Стандартный формат"
+    },
+    "PNG": {
+      "extensions": [".png"],
+      "description": "Формат с поддержкой прозрачности"
+    },
+    "HEIC": {
+      "extensions": [".heic", ".heif"],
+      "description": "Apple формат (автоконвертация в JPEG)"
+    },
+    "WebP": {
+      "extensions": [".webp"],
+      "description": "Google формат"
+    }
+  }
+}
+```
+
+#### POST /api/v1/upload/convert-heic
+
+Конвертация HEIC/HEIF в JPEG.
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/upload/convert-heic" \
+  -F "file=@photo.heic"
+```
+
+**Response:**
+
+```json
+{
+  "status": "success",
+  "message": "Конвертация завершена",
+  "jpeg_size_bytes": 524288,
+  "jpeg_size_mb": 0.5,
+  "dimensions": "1920x1080",
+  "jpeg_base64": "/9j/4AAQSkZJRgABAQEAYABgAAD..."
+}
+```
+
+### Ограничения
+
+| Параметр | Значение |
+|----------|----------|
+| Максимальный размер файла | 10 MB |
+| Максимальное разрешение | 4096x4096 px |
+| Минимальное разрешение | 160x160 px (для распознавания лиц) |
+| Качество JPEG при конвертации | 95% |
+
+### Технические детали
+
+#### Определение формата
+
+Формат определяется по **magic bytes** (сигнатуре файла):
+
+| Формат | Magic Bytes |
+|--------|-------------|
+| JPEG   | `FF D8 FF E0` или `FF D8 FF E1` |
+| PNG    | `89 50 4E 47 0D 0A 1A 0A` |
+| HEIC   | `ftypheic` или `ftypmif1` (смещение 4) |
+| HEIF   | `ftypheif` (смещение 4) |
+| WebP   | `RIFF....WEBP` |
+
+#### Конвертация HEIC → JPEG
+
+```python
+# Автоматическая конвертация при загрузке
+def convert_heic_to_jpeg(file_data: bytes, quality: int = 95) -> bytes:
+    image = Image.open(io.BytesIO(file_data))
+    # Обработка прозрачности
+    if image.mode in ('RGBA', 'LA', 'P'):
+        background = Image.new('RGB', image.size, (255, 255, 255))
+        background.paste(image, mask=image.split()[-1])
+        image = background
+    # Сохранение в JPEG
+    return image_to_bytes(image, format='JPEG', quality=quality)
+```
+
+### Интеграция в другие эндпоинты
+
+HEIC файлы автоматически конвертируются в следующих эндпоинтах:
+
+- `POST /api/v1/upload/{session_id}/file` - Загрузка файла
+- `POST /api/v1/verify` - Верификация лица
+- `POST /api/v1/liveness` - Проверка живости
+- `POST /api/v1/reference` - Создание эталона
+
+---
+
+## Используемые модели машинного обучения
+
+### Краткий обзор
+
+Сервис использует следующие модели машинного обучения в едином pipeline обработки:
+
+| Задача | Модель | Точность | Скорость (GPU) |
+|--------|--------|----------|----------------|
+| Face Detection | MTCNN | 95% precision | 10ms |
+| Face Verification | FaceNet (Inception-ResNet-v1) | 99.65% (LFW) | 5ms |
+| Anti-Spoofing | MiniFASNetV2 | 98.95% (ACER) | 2ms |
+
+**Полная документация:** См. [MODELS.md](./docs/MODELS.md)
+
+### Pipeline обработки
+
+```
+Input Image → Face Detection (MTCNN) → Face Alignment → 
+├─→ Anti-Spoofing (MiniFASNetV2) → is_live
+└─→ Embedding Extraction (FaceNet) → 512-dim vector → Comparison
+```
+
+### Конфигурация моделей
+
+Параметры моделей настраиваются через `config.py`:
+
+```python
+# Face Verification
+VERIFICATION_THRESHOLD = 0.6  # Standard (FAR < 0.1%, FRR < 1-3%)
+FACENET_VERSION = "1.0.0"
+EMBEDDING_SIZE = 512
+
+# Liveness Detection
+LIVENESS_THRESHOLD = 0.5  # Balanced
+MINIFASNET_VERSION = "2.0.1"
+
+# Face Detection
+FACE_DETECTOR = "mtcnn"  # or "retinaface"
+MIN_FACE_SIZE = 20
+```
+
+### Метрики производительности
+
+#### Latency breakdown (полный pipeline, 1024×1024 image)
+
+| Этап | CPU (ms) | GPU (ms) |
+|------|----------|----------|
+| Image loading & decode | 10 | 10 |
+| Face detection (MTCNN) | 100 | 10 |
+| Face alignment | 5 | 5 |
+| Liveness check (MiniFASNet) | 15 | 2 |
+| Embedding extraction (FaceNet) | 50 | 5 |
+| Comparison | 1 | 0.5 |
+| **Total** | **~201ms** | **~53ms** |
+
+#### Throughput
+
+| Конфигурация | Запросов/сек |
+|--------------|--------------|
+| Single CPU | 5 |
+| Single GPU | 18 |
+| 10 pods (GPU) | ~170 |
+
+### Модели в ответах API
+
+#### Verification Response
+
+```json
+{
+  "verification_id": "ver_123456",
+  "is_match": true,
+  "similarity_score": 0.89,
+  "confidence": 0.95,
+  "threshold_used": 0.7,
+  "model_info": {
+    "face_detector": "mtcnn",
+    "embedder": "facenet",
+    "liveness_enabled": true
+  }
+}
+```
+
+#### Liveness Response
+
+```json
+{
+  "liveness_id": "live_789xyz",
+  "is_live": true,
+  "liveness_score": 0.94,
+  "confidence": 0.97,
+  "model": "MiniFASNetV2",
+  "spoof_type": null
+}
+```
+
+### Health Check
+
+Эндпоинт `/api/v1/health` возвращает статус моделей:
+
+```json
+{
+  "status": "healthy",
+  "services": {
+    "ml_models": "healthy"
+  },
+  "model_versions": {
+    "facenet": "1.0.0",
+    "minifasnet": "2.0.1",
+    "mtcnn": "1.0.0"
+  }
+}
+```
+
+### Метрики Prometheus
+
+```prometheus
+# HELP model_inference_seconds Model inference latency
+# TYPE model_inference_seconds histogram
+model_inference_seconds_bucket{model="facenet",le="0.01"} 1523
+model_inference_seconds_bucket{model="facenet",le="0.05"} 1890
+model_inference_seconds_bucket{model="minifasnet",le="0.005"} 1450
+
+# HELP verifications_total Total verifications
+verifications_total{model="facenet"} 5234
+
+# HELP liveness_checks_total Total liveness checks
+liveness_checks_total{model="minifasnet"} 4123
+```

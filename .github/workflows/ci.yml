@@ -1,3 +1,7 @@
+# =============================================================================
+# CI/CD Pipeline for Face Recognition Service
+# =============================================================================
+
 name: CI/CD Pipeline
 
 on:
@@ -5,11 +9,22 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
 
 env:
   PYTHON_VERSION: '3.12'
   DOCKER_REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  MIN_COVERAGE: 80
 
 # Останавливает запущенные ранее задачи при новом пуше в ту же ветку
 concurrency:
@@ -19,14 +34,24 @@ concurrency:
 permissions:
   contents: read
   packages: write
+  security-events: write
+  id-token: write
+
+# =============================================================================
+# Jobs
+# =============================================================================
 
 jobs:
+  # --------------------------------------------------------------------------
+  # Code Quality & Linting
+  # --------------------------------------------------------------------------
   lint:
-    name: Lint and Format Check
+    name: Code Quality Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -36,147 +61,98 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
-      
-      - name: Run checks (Black, isort, flake8)
-        run: |
-          black --check app/ tests/
-          isort --check-only app/ tests/
-          flake8 app/ tests/ --max-line-length=120 --extend-ignore=E203,W503
+          pip install flake8 black isort mypy pylint bandit safety
 
-      - name: Run mypy
+      - name: Run Black (code formatting)
+        run: black --check app/ tests/
+
+      - name: Run isort (import sorting)
+        run: isort --check-only app/ tests/
+
+      - name: Run Flake8 (linting)
+        run: flake8 app/ tests/ --max-line-length=120 --extend-ignore=E203,W503
+
+      - name: Run MyPy (type checking)
         run: mypy app/ --ignore-missing-imports
         continue-on-error: true
 
+      - name: Run Pylint
+        run: |
+          pylint app/ --disable=C0111,R0903 --max-line-length=120
+        continue-on-error: true
+
+      - name: Run Bandit (security linting)
+        run: bandit -r app/ -f json -o bandit-report.json
+        continue-on-error: true
+
+      - name: Upload Bandit report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bandit-report
+          path: bandit-report.json
+
+  # --------------------------------------------------------------------------
+  # Security Scanning
+  # --------------------------------------------------------------------------
   security:
-    name: Security Check
+    name: Security Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
 
-      - name: Install security tools
-        run: pip install safety bandit pip-audit
-
-      - name: Security Scans
+      - name: Install dependencies
         run: |
-          bandit -r app/ -f json -o bandit-report.json || true
-          pip-audit -r requirements.txt
+          python -m pip install --upgrade pip
+          pip install safety pip-audit
+
+      - name: Run Safety (check dependencies)
+        run: safety check --json > safety-report.json
+        continue-on-error: true
+
+      - name: Run pip-audit
+        run: pip-audit --requirement requirements.txt --format json > pip-audit-report.json
+        continue-on-error: true
 
       - name: Upload security reports
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: security-reports
-          path: bandit-report.json
+          path: |
+            safety-report.json
+            pip-audit-report.json
 
-  test:
-    name: Run Tests
+      - name: Run Trivy (Docker image scanning)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # --------------------------------------------------------------------------
+  # Unit Tests
+  # --------------------------------------------------------------------------
+  unit-tests:
+    name: Unit Tests
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ['3.11', '3.12']
-
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: test_db
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
-      redis:
-        image: redis:7-alpine
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 6379:6379
-
-      minio:
-        image: minio/minio:latest
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-        options: >-
-          --health-cmd "curl -f http://localhost:9000/minio/health/live"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 9000:9000
-          - 9001:9001
-
     steps:
-      - name: Run tests
-        env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
-          REDIS_URL: redis://localhost:6379/0
-          MINIO_ENDPOINT: localhost:9000
-          MINIO_ACCESS_KEY: minioadmin
-          MINIO_SECRET_KEY: minioadmin
-          ENVIRONMENT: test
-          JWT_SECRET_KEY: test-secret-key
-        run: pytest --cov=app --cov-report=term-missing --cov-report=html --cov-report=xml --cov-fail-under=80
-
-  integration-test:
-    name: Integration Tests
-    runs-on: ubuntu-latest
-    needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: test_db
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
-      redis:
-        image: redis:7-alpine
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 6379:6379
-
-      minio:
-        image: minio/minio:latest
-        env:
-          MINIO_ROOT_USER: minioadmin
-          MINIO_ROOT_PASSWORD: minioadmin
-        options: >-
-          --health-cmd "curl -f http://localhost:9000/minio/health/live"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 9000:9000
-          - 9001:9001
-
-    steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -190,29 +166,160 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
+      - name: Run pytest (unit tests)
+        run: |
+          pytest tests/unit/ \
+            -v \
+            --cov=app \
+            --cov-report=xml \
+            --cov-report=html \
+            --junit-xml=junit-report.xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-unit
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-test-results
+          path: |
+            junit-report.xml
+            htmlcov/
+
+  # --------------------------------------------------------------------------
+  # Integration Tests
+  # --------------------------------------------------------------------------
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libheif-dev libde265-dev
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Download models
+        run: |
+          python scripts/download_model.py --model facenet --model minifasnetv2
+
       - name: Run integration tests
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
-          REDIS_URL: redis://localhost:6379/0
-          MINIO_ENDPOINT: localhost:9000
-          MINIO_ACCESS_KEY: minioadmin
-          MINIO_SECRET_KEY: minioadmin
-          ENVIRONMENT: test
-          JWT_SECRET_KEY: test-secret-key
-        run: pytest tests/integration/ -v
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+          REDIS_URL: redis://localhost:6379
+        run: |
+          pytest tests/integration/ \
+            -v \
+            --cov=app \
+            --cov-report=xml \
+            --junit-xml=junit-integration.xml
 
-  build:
-    name: Build & Push Docker Image
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          flags: integration
+          name: codecov-integration
+
+  # --------------------------------------------------------------------------
+  # Performance Tests
+  # --------------------------------------------------------------------------
+  performance-tests:
+    name: Performance Tests
     runs-on: ubuntu-latest
-    needs: [lint, security, test]
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run performance tests
+        run: |
+          pytest tests/performance/test_performance_requirements.py \
+            -v \
+            --junit-xml=junit-performance.xml
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: performance-test-results
+          path: junit-performance.xml
+
+  # --------------------------------------------------------------------------
+  # Build Docker Image
+  # --------------------------------------------------------------------------
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [lint, security, unit-tests, integration-tests]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to GitHub Container Registry
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
           registry: ${{ env.DOCKER_REGISTRY }}
@@ -226,10 +333,12 @@ jobs:
           images: ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
             type=sha,prefix={{branch}}-
-            type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push
+      - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -238,21 +347,219 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ github.ref_name }}
 
+      - name: Scan Docker image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-image-results.sarif'
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-image-results.sarif'
+
+  # --------------------------------------------------------------------------
+  # Validate Metrics (FAR/FRR)
+  # --------------------------------------------------------------------------
+  validate-metrics:
+    name: Validate FAR/FRR Metrics
+    runs-on: self-hosted  # Requires GPU for validation
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download models
+        run: |
+          python scripts/download_model.py --model facenet
+          python scripts/download_model.py --model minifasnetv2
+
+      - name: Prepare test dataset
+        run: |
+          mkdir -p tests/datasets/validation_dataset
+
+      - name: Run metrics validation
+        run: |
+          python scripts/validate_metrics.py \
+            --dataset tests/datasets/validation_dataset \
+            --threshold 0.6 \
+            --output validation_results_${{ github.sha }}.json
+
+      - name: Check compliance
+        run: |
+          python scripts/check_compliance.py \
+            --results validation_results_${{ github.sha }}.json \
+            --fail-on-violation
+
+      - name: Upload validation results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-results
+          path: validation_results_*.json
+
+  # --------------------------------------------------------------------------
+  # Deploy to Staging
+  # --------------------------------------------------------------------------
   deploy-staging:
-    needs: build
-    if: github.ref == 'refs/heads/develop'
+    name: Deploy to Staging
     runs-on: ubuntu-latest
-    environment: staging
+    needs: [build]
+    if: github.ref == 'refs/heads/develop' || github.event_name == 'workflow_dispatch'
+    environment:
+      name: staging
+      url: https://staging-api.company.com
     steps:
-      - name: Deploy
-        run: echo "Deploying to staging..."
+      - name: Checkout code
+        uses: actions/checkout@v4
 
+      - name: Configure kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Set up kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBECONFIG_STAGING }}" | base64 -d > $HOME/.kube/config
+
+      - name: Deploy to Kubernetes
+        run: |
+          kubectl set image deployment/face-recognition-api \
+            face-recognition-api=${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            -n staging
+          kubectl rollout status deployment/face-recognition-api -n staging --timeout=5m
+
+      - name: Run smoke tests
+        run: |
+          sleep 30
+          curl -f https://staging-api.company.com/health || exit 1
+          curl -f https://staging-api.company.com/upload/supported-formats || exit 1
+
+      - name: Notify Slack
+        if: always()
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "✅ Deployed to Staging: ${{ github.sha }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Deployment to Staging Complete*\n\nCommit: `${{ github.sha }}`\nBranch: `${{ github.ref_name }}`\nAuthor: ${{ github.actor }}"
+                  }
+                }
+              ]
+            }
+
+  # --------------------------------------------------------------------------
+  # Deploy to Production
+  # --------------------------------------------------------------------------
   deploy-production:
-    needs: build
-    if: github.ref == 'refs/heads/main'
+    name: Deploy to Production
     runs-on: ubuntu-latest
-    environment: production
+    needs: [build, validate-metrics]
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://api.company.com
     steps:
-      - name: Deploy
-        run: echo "Deploying to production..."
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure kubectl
+        uses: azure/setup-kubectl@v3
+
+      - name: Set up kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBECONFIG_PRODUCTION }}" | base64 -d > $HOME/.kube/config
+
+      - name: Deploy to Kubernetes (Blue-Green)
+        run: |
+          # Deploy to green environment
+          kubectl set image deployment/face-recognition-api-green \
+            face-recognition-api=${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+            -n production
+          kubectl rollout status deployment/face-recognition-api-green -n production --timeout=10m
+
+      - name: Run health checks
+        run: |
+          sleep 60
+          bash scripts/health_check.sh https://green.api.company.com
+
+      - name: Switch traffic (Blue → Green)
+        run: |
+          kubectl patch service face-recognition-api \
+            -n production \
+            -p '{"spec":{"selector":{"version":"green"}}}'
+
+      - name: Monitor for 5 minutes
+        run: |
+          sleep 300
+          bash scripts/monitor_deployment.sh
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          kubectl patch service face-recognition-api \
+            -n production \
+            -p '{"spec":{"selector":{"version":"blue"}}}'
+          exit 1
+
+      - name: Notify Slack (Success)
+        if: success()
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "🚀 Deployed to Production: ${{ github.sha }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Production Deployment Complete*\n\nCommit: `${{ github.sha }}`\nAuthor: ${{ github.actor }}\n\n✅ All health checks passed"
+                  }
+                }
+              ]
+            }
+
+      - name: Notify Slack (Failure)
+        if: failure()
+        uses: slackapi/slack-github-action@v1
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          payload: |
+            {
+              "text": "❌ Production Deployment Failed: ${{ github.sha }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Production Deployment Failed*\n\nCommit: `${{ github.sha }}`\nAuthor: ${{ github.actor }}\n\n⚠️ Rollback initiated"
+                  }
+                }
+              ]
+            }

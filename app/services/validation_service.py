@@ -36,6 +36,12 @@ except Exception:
     HEIF_SUPPORTED = False
 
 from ..config import settings
+from ..utils.file_utils import (
+    ImageFileHandler,
+    validate_image_file,
+    SUPPORTED_EXTENSIONS,
+    MAX_FILE_SIZE,
+)
 from ..utils.logger import get_logger
 from ..utils.exceptions import ValidationError
 
@@ -511,6 +517,120 @@ class ValidationService:
     def generate_file_hash(self, file_data: bytes) -> str:
         return hashlib.sha256(file_data).hexdigest()
 
+    # =========================================================================
+    # НОВЫЕ МЕТОДЫ ВАЛИДАЦИИ (с использованием ImageFileHandler)
+    # =========================================================================
+
+    def validate_uploaded_image(
+        self,
+        file_data: bytes,
+        filename: str,
+        check_face: bool = True,
+    ) -> Tuple[np.ndarray, dict]:
+        """
+        Полная валидация загруженного изображения
+
+        Args:
+            file_data: Байты файла
+            filename: Имя файла
+            check_face: Проверять наличие лица
+
+        Returns:
+            (image_array, image_info)
+
+        Raises:
+            ValidationError: При ошибке валидации
+        """
+        logger.info(f"Валидация изображения: {filename}")
+
+        # 1. Проверка формата и размера
+        is_valid, error_msg = validate_image_file(file_data, filename)
+        if not is_valid:
+            raise ValidationError(error_msg)
+
+        # 2. Получение информации о файле
+        image_info = ImageFileHandler.get_image_info(file_data, filename)
+        logger.info(
+            f"Информация об изображении: {image_info['width']}x{image_info['height']}, "
+            f"format: {image_info['format']}, size: {image_info['size_mb']:.2f} MB"
+        )
+
+        # 3. Загрузка изображения (с автоконвертацией HEIC)
+        image = ImageFileHandler.load_image_from_bytes(file_data, filename)
+
+        # 4. Проверка качества изображения
+        self._check_image_quality(image)
+
+        # 5. Проверка наличия лица (опционально)
+        if check_face:
+            # Эта логика должна быть в face detection service
+            pass
+
+        return image, image_info
+
+    def _check_image_quality(self, image: np.ndarray) -> None:
+        """
+        Проверка качества изображения
+
+        Args:
+            image: Массив изображения
+
+        Raises:
+            ValidationError: При недостаточном качестве
+        """
+        # Проверка минимального разрешения
+        height, width = image.shape[:2]
+        min_dimension = 160  # Минимум для FaceNet
+
+        if height < min_dimension or width < min_dimension:
+            raise ValidationError(
+                f"Слишком низкое разрешение: {width}x{height}. "
+                f"Минимум: {min_dimension}x{min_dimension}"
+            )
+
+        # Проверка на черно-белое изображение
+        if len(image.shape) == 2 or image.shape[2] == 1:
+            logger.warning("Обнаружено черно-белое изображение")
+
+        # Проверка размытости (Laplacian variance)
+        gray = image if len(image.shape) == 2 else image[:, :, 0]
+        laplacian_var = np.var(gray)
+
+        if laplacian_var < 100:  # Пороговое значение для размытости
+            logger.warning(f"Изображение может быть размытым (variance: {laplacian_var:.2f})")
+
+    def get_supported_formats_info(self) -> dict:
+        """
+        Получение информации о поддерживаемых форматах
+
+        Returns:
+            Словарь с информацией
+        """
+        return {
+            "supported_extensions": SUPPORTED_EXTENSIONS,
+            "max_file_size_mb": MAX_FILE_SIZE / 1024 / 1024,
+            "max_dimension": 4096,
+            "min_dimension": 160,
+            "formats": {
+                "JPEG": {
+                    "extensions": [".jpg", ".jpeg"],
+                    "description": "Стандартный формат",
+                },
+                "PNG": {
+                    "extensions": [".png"],
+                    "description": "Формат с поддержкой прозрачности",
+                },
+                "HEIC": {
+                    "extensions": [".heic", ".heif"],
+                    "description": "Apple формат (автоконвертация в JPEG)",
+                },
+                "WebP": {
+                    "extensions": [".webp"],
+                    "description": "Google формат",
+                },
+            },
+        }
+
     async def analyze_spoof_signs(self, image_data: bytes) -> Dict[str, Any]:
         """
         Анализ признаков подделки (spoofing) с помощью эвристик.
@@ -582,7 +702,7 @@ class ValidationService:
                 grad_y = cv2.Sobel(gray_float, cv2.CV_32F, 0, 1, ksize=3)
                 gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
 
-                # Экраны часто имеют artifical sharp gradients
+                # Экраны часто имеют artificial sharp gradients
                 sharp_edges = np.sum(gradient_magnitude > 0.3) / (h * w)
                 details["sharp_edge_ratio"] = round(sharp_edges, 4)
                 if sharp_edges > 0.4:

@@ -677,6 +677,67 @@ docker-compose -f docker-compose.monitoring.yml up -d grafana
 | `/health/live` | Liveness probe |
 | `/metrics` | Prometheus metrics |
 
+### Health Check Scripts
+
+Для проверки работоспособности сервиса доступны скрипты:
+
+#### Локальный health check
+
+```bash
+# Проверка всех endpoints
+make health-check
+
+# Или напрямую
+bash scripts/health_check.sh http://localhost 8000
+```
+
+Скрипт проверяет:
+- `/health` — базовый health check с повторами
+- `/metrics/prometheus` — наличие метрик
+- `/upload/supported-formats` — поддерживаемые форматы
+- Время ответа (< 500ms)
+
+#### Docker health check
+
+```bash
+# Проверить все контейнеры
+make docker-health
+
+# Только API
+make docker-health-api
+
+# Напрямую
+bash scripts/docker_health_check.sh all        # все сервисы
+bash scripts/docker_health_check.sh api        # только API
+bash scripts/docker_health_check.sh postgres   # PostgreSQL
+bash scripts/docker_health_check.sh redis      # Redis
+bash scripts/docker_health_check.sh minio      # MinIO
+```
+
+#### CI/CD интеграция
+
+```bash
+# В CI pipeline
+- name: Health Check
+  run: |
+    make docker-up
+    make health-check
+    make docker-health
+```
+
+#### Автоматический healthcheck в Docker
+
+В `docker-compose.prod.yml` уже настроен healthcheck:
+
+```yaml
+healthcheck:
+  test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 40s
+```
+
 ## Backup and Recovery
 
 ### Database Backup

@@ -48,3 +48,5 @@ pip-audit==2.6.1
 
 # Coverage
 coverage[toml]==7.3.3
+
+pillow-heif[dev]>=0.15.0

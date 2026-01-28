@@ -1,0 +1,119 @@
+{
+  "version": "1.0",
+  "name": "Face Recognition Service Requirements",
+  "description": "Конфигурация пороговых значений для проверки соответствия ТЗ",
+  "verification": {
+    "far": {
+      "display_name": "False Accept Rate (FAR)",
+      "threshold": 0.1,
+      "operator": "<",
+      "description": "Максимальный процент ложных срабатываний",
+      "weight": 1.5,
+      "enabled": true,
+      "critical": true
+    },
+    "frr": {
+      "display_name": "False Reject Rate (FRR)",
+      "threshold": 3.0,
+      "operator": "<",
+      "description": "Максимальный процент ложных отклонений",
+      "weight": 1.5,
+      "enabled": true,
+      "critical": true
+    },
+    "eer": {
+      "display_name": "Equal Error Rate (EER)",
+      "threshold": 1.0,
+      "operator": "<",
+      "description": "Точка равенства FAR и FRR (ниже лучше)",
+      "weight": 1.0,
+      "enabled": true,
+      "critical": false
+    },
+    "fmr_01": {
+      "display_name": "FMR @ FMR=0.1%",
+      "threshold": 5.0,
+      "operator": "<",
+      "description": "FNMR при FMR=0.1%",
+      "weight": 0.5,
+      "enabled": false,
+      "critical": false
+    }
+  },
+  "liveness": {
+    "accuracy": {
+      "display_name": "Liveness Accuracy",
+      "threshold": 98.0,
+      "operator": ">",
+      "description": "Минимальная точность детекции живого лица",
+      "weight": 2.0,
+      "enabled": true,
+      "critical": true
+    },
+    "precision": {
+      "display_name": "Liveness Precision",
+      "threshold": 97.0,
+      "operator": ">",
+      "description": "Precision для детекции живого лица",
+      "weight": 1.0,
+      "enabled": true,
+      "critical": false
+    },
+    "recall": {
+      "display_name": "Liveness Recall",
+      "threshold": 97.0,
+      "operator": ">",
+      "description": "Recall для детекции живого лица",
+      "weight": 1.0,
+      "enabled": true,
+      "critical": false
+    },
+    "f1_score": {
+      "display_name": "Liveness F1-Score",
+      "threshold": 97.0,
+      "operator": ">",
+      "description": "F1-Score для детекции живого лица",
+      "weight": 1.0,
+      "enabled": true,
+      "critical": false
+    },
+    "apcer": {
+      "display_name": "APCER",
+      "threshold": 2.0,
+      "operator": "<",
+      "description": "Attack Presentation Classification Error Rate",
+      "weight": 1.0,
+      "enabled": false,
+      "critical": false
+    },
+    "bpcer": {
+      "display_name": "BPCER",
+      "threshold": 2.0,
+      "operator": "<",
+      "description": "Bona Fide Presentation Classification Error Rate",
+      "weight": 1.0,
+      "enabled": false,
+      "critical": false
+    }
+  },
+  "performance": {
+    "inference_time_ms": {
+      "display_name": "Inference Time",
+      "threshold": 100.0,
+      "operator": "<",
+      "description": "Максимальное время инференса в мс",
+      "weight": 1.0,
+      "enabled": false,
+      "critical": false
+    },
+    "throughput_fps": {
+      "display_name": "Throughput",
+      "threshold": 10.0,
+      "operator": ">",
+      "description": "Минимальная пропускная способность (FPS)",
+      "weight": 1.0,
+      "enabled": false,
+      "critical": false
+    }
+  }
+}

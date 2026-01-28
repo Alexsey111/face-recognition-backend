@@ -1,0 +1,312 @@
+# =============================================================================
+# Biometric Verification Alert Rules
+# Prometheus AlertManager rules for FAR/FRR compliance
+# =============================================================================
+
+groups:
+  - name: biometric_alerts
+    rules:
+      # -----------------------------------------------------------------------------
+      # FAR Alerts (False Accept Rate)
+      # -----------------------------------------------------------------------------
+      - alert: HighFAR
+        expr: |
+          false_accept_rate > 0.5
+        for: 5m
+        labels:
+          severity: critical
+          team: security
+        annotations:
+          summary: "FAR exceeded 0.5%"
+          description: |
+            False Accept Rate is {{ $value | printf "%.4f" }}% (threshold: 0.1%)
+            {{ $labels | humanizeQuote }}
+            
+            RECOMMENDED ACTIONS:
+            1. Increase verification threshold by 0.05
+            2. Review recent failed spoofing attempts
+            3. Check for potential security breach
+
+      - alert: RisingFAR
+        expr: |
+          increase(false_accept_rate[1h]) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "FAR increasing trend detected"
+          description: |
+            FAR increased by {{ $value | printf "%.4f" }}% in the last hour
+            Immediate investigation required
+
+      # -----------------------------------------------------------------------------
+      # FRR Alerts (False Reject Rate)
+      # -----------------------------------------------------------------------------
+      - alert: HighFRR
+        expr: |
+          false_reject_rate > 3.0
+        for: 5m
+        labels:
+          severity: warning
+          team: biometric
+        annotations:
+          summary: "FRR exceeded 3%"
+          description: |
+            False Reject Rate is {{ $value | printf "%.4f" }}% (threshold: 3%)
+            {{ $labels | humanizeQuote }}
+            
+            RECOMMENDED ACTIONS:
+            1. Consider decreasing verification threshold by 0.02-0.05
+            2. Review image quality metrics
+            3. Check for lighting/occlusion issues
+
+      - alert: RisingFRR
+        expr: |
+          increase(false_reject_rate[30m]) > 1.0
+        for: 10m
+        labels:
+          severity: warning
+          team: biometric
+        annotations:
+          summary: "FRR increasing trend detected"
+          description: |
+            FRR increased by {{ $value | printf "%.4f" }}% in the last 30 minutes
+            Check for environmental changes
+
+      # -----------------------------------------------------------------------------
+      # EER Alerts (Equal Error Rate)
+      # -----------------------------------------------------------------------------
+      - alert: HighEER
+        expr: |
+          equal_error_rate > 3.0
+        for: 10m
+        labels:
+          severity: warning
+          team: biometric
+        annotations:
+          summary: "EER exceeded 3%"
+          description: |
+            Equal Error Rate is {{ $value | printf "%.4f" }}%
+            Model retraining may be required
+
+      - alert: CriticalEER
+        expr: |
+          equal_error_rate > 5.0
+        for: 5m
+        labels:
+          severity: critical
+          team: biometric
+        annotations:
+          summary: "Critical EER level"
+          description: |
+            Equal Error Rate is {{ $value | printf "%.4f" }}%
+            IMMEDIATE ACTION REQUIRED - Model performance degraded
+
+      # -----------------------------------------------------------------------------
+      # Severity-based Alerts
+      # -----------------------------------------------------------------------------
+      - alert: HighSeverityFalseAccepts
+        expr: |
+          rate(false_accept_total{severity="high"}[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+          team: security
+        annotations:
+          summary: "High severity false accepts detected"
+          description: |
+            High severity false accepts rate: {{ $value | printf "%.4f" }}/sec
+            Potential security breach - impostors with high confidence scores
+
+      - alert: HighSeverityFalseRejects
+        expr: |
+          rate(false_reject_total{severity="high"}[5m]) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          team: biometric
+        annotations:
+          summary: "High severity false rejects detected"
+          description: |
+            High severity false rejects rate: {{ $value | printf "%.4f" }}/sec
+            Legitimate users being rejected with high confidence
+
+      # -----------------------------------------------------------------------------
+      # Liveness Detection Alerts
+      # -----------------------------------------------------------------------------
+      - alert: LowLivenessDetectionRate
+        expr: |
+          (
+            sum(rate(liveness_checks_total{result="live"}[5m])) /
+            sum(rate(liveness_checks_total[5m]))
+          ) < 0.95
+        for: 5m
+        labels:
+          severity: warning
+          team: security
+        annotations:
+          summary: "Liveness detection rate below 95%"
+          description: |
+            Live detection rate: {{ $value | printf "%.2f" }}%
+            Check for spoofing attack patterns
+
+      - alert: SpoofingAttackDetected
+        expr: |
+          increase(spoofing_attacks_detected[5m]) > 10
+        for: 1m
+        labels:
+          severity: critical
+          team: security
+        annotations:
+          summary: "Spoofing attack detected"
+          description: |
+            {{ $value }} spoofing attempts detected in last 5 minutes
+            Attack types: {{ $labels.attack_type }}
+
+      # -----------------------------------------------------------------------------
+      # Performance Alerts
+      # -----------------------------------------------------------------------------
+      - alert: VerificationLatencyHigh
+        expr: |
+          histogram_quantile(0.95, sum(rate(verification_duration_seconds_bucket[5m])) by (le)) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+          team: infrastructure
+        annotations:
+          summary: "Verification P95 latency exceeds 1 second"
+          description: |
+            P95 latency: {{ $value | printf "%.2f" }}s
+            Check GPU utilization and model performance
+
+      - alert: VerificationThroughputLow
+        expr: |
+          rate(verification_requests_total[5m]) < 0.1
+        for: 15m
+        labels:
+          severity: warning
+          team: infrastructure
+        annotations:
+          summary: "Very low verification throughput"
+          description: |
+            Throughput: {{ $value | printf "%.4f" }} verifications/sec
+            Service may be degraded or under maintenance
+
+      # -----------------------------------------------------------------------------
+      # GPU Alerts
+      # -----------------------------------------------------------------------------
+      - alert: GPUHighUtilization
+        expr: |
+          gpu_utilization_percent > 90
+        for: 5m
+        labels:
+          severity: warning
+          team: infrastructure
+        annotations:
+          summary: "GPU utilization above 90%"
+          description: |
+            GPU {{ $labels.gpu_id }} utilization: {{ $value | printf "%.1f" }}%
+            Consider scaling or batching optimization
+
+      - alert: GPUMemoryHigh
+        expr: |
+          gpu_memory_used_bytes / (1024 * 1024 * 1024) > 0.9 * gpu_memory_bytes
+        for: 5m
+        labels:
+          severity: warning
+          team: infrastructure
+        annotations:
+          summary: "GPU memory usage above 90%"
+          description: |
+            GPU {{ $labels.gpu_id }} memory: {{ $value | printf "%.1f" }}%
+            May require model optimization or GPU scaling
+
+      # -----------------------------------------------------------------------------
+      # Compliance Summary Alert
+      # -----------------------------------------------------------------------------
+      - alert: BiometricComplianceViolation
+        expr: |
+          (
+            (false_accept_rate > 0.1 and increase(false_accept_rate[5m]) > 0.01) or
+            (false_reject_rate > 3.0 and increase(false_reject_rate[5m]) > 0.5) or
+            (equal_error_rate > 3.0 and increase(equal_error_rate[5m]) > 0.5)
+          )
+        for: 5m
+        labels:
+          severity: critical
+          team: security
+        annotations:
+          summary: "Biometric compliance violation"
+          description: |
+            Multiple compliance metrics exceeded simultaneously
+            
+            FAR: {{ printf "%.4f" (predicate_value | query "false_accept_rate") }}%
+            FRR: {{ printf "%.4f" (predicate_value | query "false_reject_rate") }}%
+            EER: {{ printf "%.4f" (predicate_value | query "equal_error_rate") }}%
+            
+            Immediate investigation required
+
+# =============================================================================
+# Recording Rules (pre-aggregation for faster queries)
+# =============================================================================
+
+  - name: biometric_recording_rules
+    rules:
+      # FAR/FRR/EER rates
+      - record: biometric:far:5m
+        expr: |
+          sum(rate(false_accept_total[5m])) / sum(rate(impostor_verifications_total[5m])) * 100
+
+      - record: biometric:frr:5m
+        expr: |
+          sum(rate(false_reject_total[5m])) / sum(rate(genuine_verifications_total[5m])) * 100
+
+      - record: biometric:eer:5m
+        expr: |
+          (biometric:far:5m + biometric:frr:5m) / 2
+
+      # Compliance status
+      - record: biometric:compliance:far
+        expr: |
+          biometric:far:5m < 0.1
+
+      - record: biometric:compliance:frr
+        expr: |
+          biometric:frr:5m < 3.0
+
+      - record: biometric:compliance:overall
+        expr: |
+          biometric:compliance:far and biometric:compliance:frr
+
+      # Severity breakdown
+      - record: biometric:false_accepts:high:5m
+        expr: |
+          sum(rate(false_accept_total{severity="high"}[5m]))
+
+      - record: biometric:false_accepts:medium:5m
+        expr: |
+          sum(rate(false_accept_total{severity="medium"}[5m]))
+
+      - record: biometric:false_accepts:low:5m
+        expr: |
+          sum(rate(false_accept_total{severity="low"}[5m]))
+
+      # Liveness metrics
+      - record: biometric:liveness:rate:5m
+        expr: |
+          sum(rate(liveness_checks_total{result="live"}[5m])) /
+          sum(rate(liveness_checks_total[5m]))
+
+      - record: biometric:spoofing:attack_type:5m
+        expr: |
+          sum by (attack_type) (rate(spoofing_attacks_detected[5m]))
+
+      # Performance metrics
+      - record: biometric:latency:p95:5m
+        expr: |
+          histogram_quantile(0.95, sum(rate(verification_duration_seconds_bucket[5m])) by (le))
+
+      - record: biometric:throughput:5m
+        expr: |
+          sum(rate(verification_requests_total[5m]))

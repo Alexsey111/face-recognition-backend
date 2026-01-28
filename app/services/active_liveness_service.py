@@ -30,6 +30,11 @@ from ..models.active_liveness import (
 from ..utils.eye_blink_detector import detect_blinks_in_sequence, BlinkDetector
 from ..utils.video_processing import extract_frames_from_video, calculate_video_quality
 from ..utils.face_alignment_utils import detect_face_landmarks
+from ..utils.mouth_detector import (
+    detect_smile_in_sequence,
+    detect_open_mouth_in_sequence,
+    calculate_mouth_aspect_ratio,
+)
 from ..services.face_occlusion_detector import get_occlusion_detector
 from ..utils.logger import get_logger
 from ..utils.exceptions import ValidationError, ProcessingError
@@ -527,48 +532,42 @@ class ActiveLivenessService:
         parameters: Dict[str, Any],
         landmarks_sequence: List[np.ndarray],
     ) -> Dict[str, Any]:
-        """Верификация улыбки."""
+        """Верификация улыбки с использованием mouth_detector."""
         
         intensity_threshold = parameters.get("intensity_threshold", 0.6)
         min_duration_frames = parameters.get("min_duration_frames", 15)
         
-        # Вычисляем MAR (Mouth Aspect Ratio) и smile intensity
-        smile_frames = []
-        mar_values = []
+        # Используем detect_smile_in_sequence из mouth_detector
+        success, smile_intensity, stats = await asyncio.to_thread(
+            detect_smile_in_sequence,
+            landmarks_sequence,
+            min_intensity=intensity_threshold,
+            min_frames_with_smile=min_duration_frames,
+        )
         
-        for frame_idx, landmarks in enumerate(landmarks_sequence):
-            mar = self._calculate_mouth_aspect_ratio(landmarks)
-            mar_values.append(mar)
-            
-            # MAR > 0.5 обычно означает улыбку
-            if mar > intensity_threshold:
-                smile_frames.append(frame_idx)
-        
-        # Проверяем длительность улыбки
-        consecutive_smile_frames = self._count_consecutive_frames(smile_frames)
-        smile_detected = consecutive_smile_frames >= min_duration_frames
-        
-        avg_mar = np.mean(mar_values) if mar_values else 0.0
-        smile_intensity = min(1.0, avg_mar / intensity_threshold)
+        # Извлекаем данные из stats
+        smile_frames = stats.get("smile_frames", [])
+        max_mar = stats.get("max_mar", 0.0)
+        avg_mar = stats.get("avg_mar", 0.0)
         
         smile_result = SmileDetectionResult(
-            smile_detected=smile_detected,
-            confidence=smile_intensity if smile_detected else 0.5,
+            smile_detected=success,
+            confidence=smile_intensity if success else 0.5,
             mouth_aspect_ratio=avg_mar,
             smile_intensity=smile_intensity,
             frames_with_smile=smile_frames,
-            total_frames=len(landmarks_sequence),
+            total_frames=stats.get("total_frames", len(landmarks_sequence)),
         )
-        
+    
         failure_reasons = []
-        if not smile_detected:
+        if not success:
             if len(smile_frames) == 0:
                 failure_reasons.append("no_smile_detected")
             else:
-                failure_reasons.append(f"smile_too_short: {consecutive_smile_frames}/{min_duration_frames} frames")
+                failure_reasons.append(f"smile_too_short: {len(smile_frames)}/{min_duration_frames} frames")
         
         return {
-            "success": smile_detected,
+            "success": success,
             "smile_result": smile_result,
             "failure_reasons": failure_reasons,
             "warnings": [],
@@ -579,45 +578,43 @@ class ActiveLivenessService:
         parameters: Dict[str, Any],
         landmarks_sequence: List[np.ndarray],
     ) -> Dict[str, Any]:
-        """Верификация открытого рта."""
+        """Верификация открытого рта с использованием mouth_detector."""
         
         mar_threshold = parameters.get("mouth_aspect_ratio_threshold", 0.5)
         min_duration_frames = parameters.get("min_duration_frames", 10)
         
-        mouth_open_frames = []
-        mar_values = []
+        # Используем detect_open_mouth_in_sequence из mouth_detector
+        success, max_mar, stats = await asyncio.to_thread(
+            detect_open_mouth_in_sequence,
+            landmarks_sequence,
+            min_mar=mar_threshold,
+            min_frames_with_open_mouth=min_duration_frames,
+        )
         
-        for frame_idx, landmarks in enumerate(landmarks_sequence):
-            mar = self._calculate_mouth_aspect_ratio(landmarks)
-            mar_values.append(mar)
-            
-            if mar > mar_threshold:
-                mouth_open_frames.append(frame_idx)
-        
-        consecutive_frames = self._count_consecutive_frames(mouth_open_frames)
-        mouth_opened = consecutive_frames >= min_duration_frames
-        
-        avg_mar = np.mean(mar_values) if mar_values else 0.0
+        # Извлекаем данные из stats
+        open_frames = stats.get("open_frames", [])
+        avg_mar = stats.get("avg_mar", 0.0)
         
         failure_reasons = []
-        if not mouth_opened:
-            if len(mouth_open_frames) == 0:
+        if not success:
+            if len(open_frames) == 0:
                 failure_reasons.append("mouth_not_opened")
             else:
-                failure_reasons.append(f"mouth_open_too_short: {consecutive_frames}/{min_duration_frames} frames")
+                failure_reasons.append(f"mouth_open_too_short: {len(open_frames)}/{min_duration_frames} frames")
         
         return {
-            "success": mouth_opened,
+            "success": success,
             "mouth_open_result": {
-                "detected": mouth_opened,
-                "mar": avg_mar,
-                "frames_with_open_mouth": mouth_open_frames,
-                "total_frames": len(landmarks_sequence),
+                "detected": success,
+                "mar": max_mar,
+                "avg_mar": avg_mar,
+                "frames_with_open_mouth": open_frames,
+                "total_frames": stats.get("total_frames", len(landmarks_sequence)),
             },
             "failure_reasons": failure_reasons,
             "warnings": [],
         }
-    
+
     # ========================================================================
     # Helper Methods
     # ========================================================================
@@ -670,7 +667,7 @@ class ActiveLivenessService:
             confidence=result.confidence,
             details=result.details,
         )
-    
+        
     async def _run_passive_liveness(self, frame: np.ndarray) -> Dict[str, float]:
         """Пассивная liveness проверка (для дополнительной безопасности)."""
         
@@ -695,7 +692,7 @@ class ActiveLivenessService:
             "liveness_score": result.get("confidence", 0.5),
             "anti_spoofing_score": result.get("anti_spoofing_score", 0.5),
         }
-    
+
     def _calculate_combined_score(
         self,
         challenge_result: Dict[str, Any],
@@ -703,7 +700,7 @@ class ActiveLivenessService:
         occlusion_result: OcclusionDetectionResult,
     ) -> Dict[str, float]:
         """Комбинированная оценка живости."""
-        
+
         # Веса компонентов
         weights = {
             "challenge": 0.5,      # Active challenge
@@ -804,29 +801,6 @@ class ActiveLivenessService:
             "pitch": np.degrees(pitch),
             "roll": np.degrees(roll),
         }
-    
-    def _calculate_mouth_aspect_ratio(self, landmarks: np.ndarray) -> float:
-        """Вычисление MAR (Mouth Aspect Ratio)."""
-        
-        # Индексы точек рта в 68-point landmarks
-        mouth_top = landmarks[51:54]     # Верхняя губа (центр)
-        mouth_bottom = landmarks[57:60]  # Нижняя губа (центр)
-        mouth_left = landmarks[48]       # Левый угол
-        mouth_right = landmarks[54]      # Правый угол
-        
-        # Вертикальное расстояние
-        vertical_dist = np.mean([
-            np.linalg.norm(mouth_top[i] - mouth_bottom[i])
-            for i in range(len(mouth_top))
-        ])
-        
-        # Горизонтальное расстояние
-        horizontal_dist = np.linalg.norm(mouth_right - mouth_left)
-        
-        # MAR
-        mar = vertical_dist / (horizontal_dist + 1e-6)
-        
-        return float(mar)
     
     def _count_consecutive_frames(self, frame_indices: List[int]) -> int:
         """Подсчет максимальной последовательности кадров."""
@@ -1104,15 +1078,9 @@ class ActiveLivenessService:
         }
 
     async def _detect_smile_action(self, landmarks: np.ndarray) -> Dict[str, Any]:
-        """Детекция улыбки."""
-        # MAR для улыбки
-        mouth_width = np.linalg.norm(landmarks[48] - landmarks[54])
-        mouth_height = np.linalg.norm(
-            (landmarks[51] + landmarks[52] + landmarks[53]) / 3 -
-            (landmarks[57] + landmarks[58] + landmarks[59]) / 3
-        )
-        
-        mar = mouth_height / (mouth_width + 1e-6)
+        """Детекция улыбки с использованием mouth_detector."""
+        # Используем calculate_mouth_aspect_ratio из mouth_detector
+        mar = calculate_mouth_aspect_ratio(landmarks)
         
         # Улыбка при MAR > 0.25
         is_smile = mar > 0.25
@@ -1174,18 +1142,9 @@ class ActiveLivenessService:
         }
 
     async def _detect_mouth_open_action(self, landmarks: np.ndarray) -> Dict[str, Any]:
-        """Детекция открытого рта."""
-        # MAR для открытия рта
-        mouth_top = landmarks[51:54]
-        mouth_bottom = landmarks[57:60]
-        
-        vertical = np.mean([
-            np.linalg.norm(mouth_top[i] - mouth_bottom[i])
-            for i in range(len(mouth_top))
-        ])
-        
-        horizontal = np.linalg.norm(landmarks[54] - landmarks[48])
-        mar = vertical / (horizontal + 1e-6)
+        """Детекция открытого рта с использованием mouth_detector."""
+        # Используем calculate_mouth_aspect_ratio из mouth_detector
+        mar = calculate_mouth_aspect_ratio(landmarks)
         
         is_open = mar > 0.5
         

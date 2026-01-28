@@ -1,0 +1,45 @@
+{
+  "categories": [
+    {
+      "title": "## 🚀 Features",
+      "labels": ["enhancement", "feature"]
+    },
+    {
+      "title": "## 🐛 Bug Fixes",
+      "labels": ["bug", "fix"]
+    },
+    {
+      "title": "## 🔒 Security",
+      "labels": ["security"]
+    },
+    {
+      "title": "## 📊 Performance",
+      "labels": ["performance"]
+    },
+    {
+      "title": "## 🎨 Refactoring",
+      "labels": ["refactor", "cleanup"]
+    },
+    {
+      "title": "## 📝 Documentation",
+      "labels": ["documentation", "docs"]
+    },
+    {
+      "title": "## 🔧 Maintenance",
+      "labels": ["maintenance", "chore", "ci"]
+    }
+  ],
+  "ignore_labels": ["duplicate", "question", "wontfix"],
+  "template": |
+    ## What's Changed
+
+    {{changes}}
+
+    ## Metrics Validation
+    - FAR < 0.1%
+    - FRR < 1-3%
+    - Liveness Accuracy > 98%
+    - Response Time P95 < 1s
+
+    **Full Changelog**: https://github.com/${{ owner }}/${{ repo }}/compare/${{ previous_tag }}...${{ current_tag }}
+}

@@ -1,0 +1,321 @@
+stages:
+- lint
+- security
+- test
+- build
+- validate
+- deploy
+variables:
+PYTHON_VERSION: "3.11"
+PYTHON_CACHE_KEY: "pip-${PYTHON_VERSION}-${CI_COMMIT_REF_SLUG}"
+DOCKER_DRIVER: overlay2
+DOCKER_TLS_CERTDIR: "/certs"
+IMAGE_TAG: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+# ========================================
+# Templates
+# ========================================
+.python_template: &python_template
+image: python:${PYTHON_VERSION}
+cache:
+  key: ${PYTHON_CACHE_KEY}
+  paths:
+    - ~/.cache/pip
+    - .venv
+  policy: pull
+before_script:
+- python -m venv venv
+- . venv/bin/activate
+- pip install --upgrade pip wheel
+- pip install -r requirements.txt -r requirements-dev.txt
+
+.docker_template: &docker_template
+image: docker:24.0
+services:
+- docker:24.0-dind
+before_script:
+- echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
+
+.k8s_deploy_template: &k8s_deploy_template
+image: bitnami/kubectl:latest
+before_script:
+- mkdir -p ~/.kube
+# ========================================
+# Lint Stage
+# ========================================
+lint:black:
+<<: *python_template
+stage: lint
+parallel: 3
+script:
+- black --check app/ tests/
+allow_failure: false
+
+lint:flake8:
+<<: *python_template
+stage: lint
+script:
+- flake8 app/ tests/ --max-line-length=120
+allow_failure: false
+
+lint:mypy:
+<<: *python_template
+stage: lint
+script:
+- mypy app/ --ignore-missing-imports
+allow_failure: true
+
+# ========================================
+# Security Stage
+# ========================================
+security:bandit:
+<<: *python_template
+stage: security
+script:
+- bandit -r app/ -f json -o bandit-report.json || true
+artifacts:
+  paths:
+    - bandit-report.json
+  expire_in: 30 days
+allow_failure: true
+
+security:safety:
+<<: *python_template
+stage: security
+script:
+- safety check --json > safety-report.json || true
+artifacts:
+  paths:
+    - safety-report.json
+  expire_in: 30 days
+allow_failure: true
+
+security:trivy:
+<<: *docker_template
+stage: security
+variables:
+  TRIVY_DB_REPOSITORY: "ghcr.io/aquasecurity/trivy-db:2"
+  TRIVY_SKIP_UPDATE: "true"
+script:
+- apk add --no-cache curl
+- curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+- trivy fs --exit-code 0 --no-progress --format json --output trivy-report.json --severity HIGH,CRITICAL .
+artifacts:
+  paths:
+    - trivy-report.json
+  expire_in: 30 days
+allow_failure: true
+
+# ========================================
+# Test Stage
+# ========================================
+test:unit:
+<<: *python_template
+stage: test
+services:
+- postgres:15
+- redis:7-alpine
+variables:
+  POSTGRES_DB: test_db
+  POSTGRES_USER: test_user
+  # Masked variables for security
+  POSTGRES_PASSWORD: ${POSTGRES_TEST_PASSWORD}
+  DATABASE_URL: postgresql://test_user:${POSTGRES_TEST_PASSWORD}@postgres:5432/test_db
+  REDIS_URL: redis://redis:6379/0
+  PYTHONDONTWRITEBYTECODE: "1"
+  COVERAGE_PROCESS_START: .coveragerc
+script:
+- pytest tests/unit/ -v --cov=app --cov-config=.coveragerc --cov-report=xml --cov-report=html --junit-xml=junit-unit.xml
+coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
+artifacts:
+  reports:
+    junit: junit-unit.xml
+    coverage_report:
+      coverage_format: cobertura
+      path: coverage.xml
+  paths:
+    - htmlcov/
+    - coverage.xml
+  expire_in: 30 days
+  when: always
+retry:
+  max: 2
+  when:
+    - runner_system_failure
+    - stuck_or_timeout_failure
+
+.test:integration: &test_integration
+<<: *python_template
+stage: test
+services:
+- postgres:15
+- redis:7-alpine
+variables:
+  POSTGRES_DB: test_db
+  POSTGRES_USER: test_user
+  POSTGRES_PASSWORD: ${POSTGRES_TEST_PASSWORD}
+  DATABASE_URL: postgresql://test_user:${POSTGRES_TEST_PASSWORD}@postgres:5432/test_db
+  REDIS_URL: redis://redis:6379/0
+before_script:
+- apt-get update && apt-get install -y --no-install-recommends libheif-dev
+- python -m venv venv && . venv/bin/activate
+- pip install --upgrade pip wheel
+- pip install -r requirements.txt -r requirements-dev.txt
+- python scripts/download_model.py --model facenet --model minifasnetv2
+script:
+- pytest tests/integration/ -v --junit-xml=junit-integration.xml
+artifacts:
+  reports:
+    junit: junit-integration.xml
+  expire_in: 30 days
+  when: always
+retry:
+  max: 2
+  when:
+    - runner_system_failure
+    - stuck_or_timeout_failure
+
+test:integration:
+<<: *test_integration
+
+test:performance:
+<<: *python_template
+stage: test
+tags:
+- gpu
+resource_group: performance
+only:
+- main
+- develop
+script:
+- pytest tests/performance/ -v -m performance --junit-xml=junit-performance.xml --benchmark-only
+artifacts:
+  reports:
+    junit: junit-performance.xml
+  paths:
+    - benchmark_results/
+  expire_in: 30 days
+allow_failure: true
+retry:
+  max: 1
+  when: runner_system_failure
+
+# ========================================
+# Build Stage
+# ========================================
+build:docker:
+<<: *docker_template
+stage: build
+before_script:
+- echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin $CI_REGISTRY
+script:
+- docker build --cache-from $CI_REGISTRY_IMAGE:latest -t $IMAGE_TAG .
+- docker tag $IMAGE_TAG $CI_REGISTRY_IMAGE:latest
+- docker push $IMAGE_TAG
+- docker push $CI_REGISTRY_IMAGE:latest
+only:
+- main
+- develop
+- tags
+resources:
+  cpu: 2048
+  memory: 4GiB
+retry:
+  max: 2
+
+# ========================================
+# Validate Stage
+# ========================================
+validate:metrics:
+<<: *python_template
+stage: validate
+tags:
+- gpu
+only:
+- main
+before_script:
+- python -m venv venv && . venv/bin/activate
+- pip install -r requirements.txt -r requirements-dev.txt
+- python scripts/download_model.py --model facenet --model minifasnetv2
+script:
+- |
+python scripts/validate_metrics.py \
+--dataset tests/datasets/validation_dataset \
+--output validation_results_${CI_COMMIT_SHORT_SHA}.json
+- python scripts/check_compliance.py \
+--results validation_results_${CI_COMMIT_SHORT_SHA}.json \
+--output-format json \
+--output compliance_report_${CI_COMMIT_SHORT_SHA}.json
+artifacts:
+  paths:
+    - validation_results_*.json
+    - compliance_report_*.json
+  expire_in: 90 days
+allow_failure: false
+timeout: 2h
+
+# ========================================
+# Deploy Stage
+# ========================================
+.deploy: &deploy_template
+stage: deploy
+<<: *k8s_deploy_template
+environment:
+  name: ${ENVIRONMENT}
+  url: https://${ENVIRONMENT_URL}
+  on_stop: rollback
+  action: start
+retry:
+  max: 2
+when: manual
+
+deploy:staging:
+<<: *deploy_template
+environment:
+  name: staging
+  url: https://staging-api.company.com
+only:
+- develop
+before_script:
+- echo "$KUBECONFIG_STAGING" | base64 -d > ~/.kube/config
+script:
+- kubectl set image deployment/face-recognition-api face-recognition-api=$IMAGE_TAG -n staging --record
+- kubectl rollout status deployment/face-recognition-api -n staging --timeout=5m
+after_script:
+- curl -f https://staging-api.company.com/health || true
+
+deploy:production:
+<<: *deploy_template
+environment:
+  name: production
+  url: https://api.company.com
+only:
+- main
+- tags
+when: manual
+before_script:
+- echo "$KUBECONFIG_PRODUCTION" | base64 -d > ~/.kube/config
+script:
+# Blue-Green Deployment
+- kubectl get pods -n production
+- kubectl set image deployment/face-recognition-api-green face-recognition-api=$IMAGE_TAG -n production --record
+- kubectl rollout status deployment/face-recognition-api-green -n production --timeout=10m
+- sleep 60
+- bash scripts/health_check.sh https://green.api.company.com || (kubectl rollout undo deployment/face-recognition-api-green -n production && exit 1)
+- kubectl patch service face-recognition-api -n production -p '{"spec":{"selector":{"version":"green"}}}'
+- sleep 60
+after_script:
+- |
+if [ $CI_JOB_STATUS == 'failed' ]; then
+  kubectl rollout undo deployment/face-recognition-api-green -n production
+fi
+
+rollback:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  environment:
+    name: rollback
+    action: stop
+  script:
+  - kubectl rollout undo deployment/face-recognition-api-green -n production
+  when: manual
+  allow_failure: true

@@ -1,0 +1,240 @@
+# =============================================================================
+# Biometric Compliance Alert Rules
+# Prometheus rules for FAR/FRR monitoring and 152-FZ compliance
+# =============================================================================
+
+groups:
+  - name: biometric_compliance
+    interval: 30s
+    rules:
+      # ========================================================================
+      # Critical Alerts (152-FZ compliance)
+      # ========================================================================
+      - alert: HighFAR
+        expr: "false_accept_rate > 0.1"
+        for: 5m
+        labels:
+          severity: critical
+          category: compliance
+          regulation: "152-FZ"
+        annotations:
+          summary: "False Accept Rate exceeds TZ requirement"
+          description: |
+            FAR = {{ $value | humanizePercentage }}
+            TZ requirement: < 0.1%
+
+            Possible causes:
+            - Verification threshold too low
+            - Model quality degradation
+            - System attacks
+
+            Actions:
+            1. Check recent verification logs
+            2. Consider increasing threshold
+            3. Conduct security audit
+
+      - alert: HighFRR
+        expr: "false_reject_rate > 3.0"
+        for: 5m
+        labels:
+          severity: warning
+          category: compliance
+        annotations:
+          summary: "False Reject Rate exceeds TZ requirement"
+          description: |
+            FRR = {{ $value | humanizePercentage }}
+            TZ requirement: < 1-3%
+
+            Possible causes:
+            - Threshold too high
+            - Low image quality
+            - Face alignment issues
+
+            Actions:
+            1. Analyze rejected genuine pairs
+            2. Check input image quality
+            3. Consider decreasing threshold
+
+      - alert: LowLivenessAccuracy
+        expr: |
+          sum(rate(liveness_checks_total{result="live"}[5m]))
+          / sum(rate(liveness_checks_total[5m])) < 0.98
+        for: 10m
+        labels:
+          severity: critical
+          category: security
+        annotations:
+          summary: "Liveness Detection accuracy below 98%"
+          description: |
+            Accuracy = {{ $value | humanizePercentage }}
+            TZ requirement: > 98%
+
+            Possible causes:
+            - Spoofing attacks
+            - MiniFASNetV2 model issues
+            - Low image quality
+
+      # ========================================================================
+      # Security Alerts
+      # ========================================================================
+      - alert: SpoofingAttackSpike
+        expr: "rate(spoofing_attacks_detected[5m]) > 10"
+        for: 1m
+        labels:
+          severity: critical
+          category: security
+        annotations:
+          summary: "Spoofing attack spike detected"
+          description: |
+            Rate: {{ $value | humanize }} attacks/sec
+
+            Immediate actions:
+            1. Check attack sources (IP addresses)
+            2. Enable additional authentication
+            3. Notify security team
+
+      - alert: MultipleFailedVerifications
+        expr: "sum(rate(verification_requests_total{result='error'}[5m])) > 5"
+        for: 2m
+        labels:
+          severity: warning
+          category: operations
+        annotations:
+          summary: "Multiple verification errors"
+          description: |
+            Error rate: {{ $value | humanize }}/sec
+
+            Check:
+            - GPU/CPU status
+            - Application logs
+            - System load
+
+      # ========================================================================
+      # Performance Alerts
+      # ========================================================================
+      - alert: SlowVerification
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(verification_duration_seconds_bucket[5m])) by (le)
+          ) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "Verification time exceeds 1 second (P95)"
+          description: |
+            P95 latency: {{ $value | humanizeDuration }}
+            TZ requirement: < 1 second
+
+            Possible causes:
+            - High load
+            - GPU issues
+            - Large images
+
+      - alert: HighGPUUtilization
+        expr: "avg(gpu_utilization_percent) > 90"
+        for: 10m
+        labels:
+          severity: warning
+          category: resources
+        annotations:
+          summary: "High GPU utilization"
+          description: |
+            GPU utilization: {{ $value }}%
+
+            Recommendations:
+            - Consider horizontal scaling
+            - Optimize batch size
+            - Add additional GPUs
+
+      - alert: HighMemoryUsage
+        expr: |
+          (gpu_memory_used_bytes /
+            on(gpu_id) gpu_memory_total_bytes) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          category: resources
+        annotations:
+          summary: "High GPU memory usage"
+          description: |
+            GPU {{ $labels.gpu_id }}: {{ $value | humanizePercentage }} memory used
+
+      # ========================================================================
+      # Availability (SLA)
+      # ========================================================================
+      - alert: LowAvailability
+        expr: |
+          (sum(rate(http_requests_total{status=~'2..'}[5m])) /
+            sum(rate(http_requests_total[5m]))) < 0.995
+        for: 15m
+        labels:
+          severity: critical
+          category: sla
+        annotations:
+          summary: "Service availability below 99.5%"
+          description: |
+            Availability: {{ $value | humanizePercentage }}
+            SLA requirement: > 99.5%
+
+            Immediate actions:
+            1. Check healthcheck endpoints
+            2. Analyze error logs
+            3. Check infrastructure
+
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~'5..'}[5m])) /
+            sum(rate(http_requests_total[5m])) > 0.01
+        for: 3m
+        labels:
+          severity: critical
+          category: operations
+        annotations:
+          summary: "High 5xx error rate"
+          description: |
+            Error rate: {{ $value | humanizePercentage }}
+
+            Check:
+            - Application logs
+            - Database connectivity
+            - External dependencies
+
+      # ========================================================================
+      # 152-FZ Compliance
+      # ========================================================================
+      - alert: UnauthorizedBiometricAccess
+        expr: |
+          sum(rate(biometric_data_access_total{operation='read', authorized='false'}[5m])) > 0
+        for: 1m
+        labels:
+          severity: critical
+          category: security
+          regulation: "152-FZ"
+        annotations:
+          summary: "Unauthorized biometric data access attempt"
+          description: |
+            CRITICAL 152-FZ VIOLATION!
+
+            Immediate actions:
+            1. Block suspicious IPs
+            2. Conduct access audit
+            3. Notify DPO
+            4. Document incident
+
+      - alert: BiometricDataRetentionViolation
+        expr: "sum(biometric_data_age_days) > 365"
+        labels:
+          severity: warning
+          category: compliance
+          regulation: "152-FZ"
+        annotations:
+          summary: "Biometric data stored longer than allowed"
+          description: |
+            Some biometric data stored > 365 days
+
+            Actions:
+            1. Check retention policy
+            2. Run cleanup script
+            3. Verify user consents

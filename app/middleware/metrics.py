@@ -126,8 +126,198 @@ http_response_size_bytes = Histogram(
 )
 
 # =============================================================================
-# Business Metrics (AGGREGATED, NO user_id)
+# Biometric Security Metrics (152-ФЗ compliance)
 # =============================================================================
+
+biometric_data_access_total = Counter(
+    "biometric_data_access_total",
+    "Total accesses to biometric data",
+    ["operation"],  # 'create', 'read', 'update', 'delete'
+    registry=app_registry,
+)
+
+biometric_data_deleted_total = Counter(
+    "biometric_data_deleted_total",
+    "Total biometric data deletions",
+    ["reason"],  # 'user_request', 'consent_withdrawn', 'retention_expired'
+    registry=app_registry,
+)
+
+consent_operations_total = Counter(
+    "consent_operations_total",
+    "Total consent operations",
+    ["operation"],  # 'granted', 'withdrawn', 'updated'
+    registry=app_registry,
+)
+
+encryption_operations_total = Counter(
+    "encryption_operations_total",
+    "Total encryption/decryption operations",
+    ["operation", "status"],  # operation: 'encrypt'/'decrypt', status: 'success'/'failure'
+    registry=app_registry,
+)
+
+audit_log_entries_total = Counter(
+    "audit_log_entries_total",
+    "Total audit log entries created",
+    ["event_type"],
+    registry=app_registry,
+)
+
+# =============================================================================
+# FAR/FRR Metrics (Biometric Performance)
+# =============================================================================
+
+false_accept_total = Counter(
+    "false_accept_total",
+    "Total false accepts (impostor accepted)",
+    ["severity"],  # 'low', 'medium', 'high'
+    registry=app_registry,
+)
+
+false_reject_total = Counter(
+    "false_reject_total",
+    "Total false rejects (genuine rejected)",
+    ["severity"],
+    registry=app_registry,
+)
+
+false_accept_rate = Gauge(
+    "false_accept_rate",
+    "Current False Accept Rate (FAR) percentage",
+    registry=app_registry,
+)
+
+false_reject_rate = Gauge(
+    "false_reject_rate",
+    "Current False Reject Rate (FRR) percentage",
+    registry=app_registry,
+)
+
+equal_error_rate = Gauge(
+    "equal_error_rate",
+    "Current Equal Error Rate (EER) percentage",
+    registry=app_registry,
+)
+
+# =============================================================================
+# Image Quality Metrics
+# =============================================================================
+
+image_quality_score = Histogram(
+    "image_quality_score",
+    "Image quality score (blur, lighting, etc.)",
+    ["quality_metric"],  # 'blur', 'lighting', 'face_size'
+    buckets=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+    registry=app_registry,
+)
+
+image_preprocessing_failures = Counter(
+    "image_preprocessing_failures",
+    "Image preprocessing failures",
+    ["failure_reason"],  # 'format_unsupported', 'size_too_large', 'corrupted'
+    registry=app_registry,
+)
+
+# =============================================================================
+# Face Detection & Embedding Metrics
+# =============================================================================
+
+face_detection_total = Counter(
+    "face_detection_total",
+    "Total face detection attempts",
+    ["faces_detected"],  # '0', '1', 'multiple'
+    registry=app_registry,
+)
+
+face_detection_duration_seconds = Histogram(
+    "face_detection_duration_seconds",
+    "Face detection processing time",
+    ["model"],  # 'mtcnn', 'retinaface'
+    buckets=[0.01, 0.05, 0.1, 0.2, 0.5, 1.0, 2.5, 5.0],
+    registry=app_registry,
+)
+
+embedding_extraction_duration_seconds = Histogram(
+    "embedding_extraction_duration_seconds",
+    "Embedding extraction processing time",
+    ["model"],  # 'facenet', 'arcface'
+    buckets=[0.01, 0.05, 0.1, 0.2, 0.5, 1.0, 2.5, 5.0],
+    registry=app_registry,
+)
+
+# =============================================================================
+# Verification Detailed Metrics
+# =============================================================================
+
+verification_duration_seconds = Histogram(
+    "verification_duration_seconds",
+    "Verification processing time",
+    ["method"],  # 'cosine', 'euclidean'
+    buckets=[0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 5.0],
+    registry=app_registry,
+)
+
+verification_confidence_score = Histogram(
+    "verification_confidence_score",
+    "Verification confidence/similarity score",
+    ["result"],  # 'match', 'no_match'
+    buckets=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+    registry=app_registry,
+)
+
+# =============================================================================
+# Liveness Detection Detailed Metrics
+# =============================================================================
+
+liveness_duration_seconds = Histogram(
+    "liveness_duration_seconds",
+    "Liveness check processing time",
+    ["model"],  # 'minifasnet'
+    buckets=[0.01, 0.05, 0.1, 0.2, 0.5, 1.0, 2.5],
+    registry=app_registry,
+)
+
+liveness_confidence_score = Histogram(
+    "liveness_confidence_score",
+    "Liveness confidence score",
+    ["result"],  # 'live', 'spoof'
+    buckets=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+    registry=app_registry,
+)
+
+spoofing_attacks_detected = Counter(
+    "spoofing_attacks_detected",
+    "Total spoofing attacks detected",
+    ["attack_type"],  # 'print', 'replay', 'mask', 'deepfake', 'unknown'
+    registry=app_registry,
+)
+
+# =============================================================================
+# GPU/System Resources
+# =============================================================================
+
+gpu_utilization_percent = Gauge(
+    "gpu_utilization_percent",
+    "GPU utilization percentage",
+    ["gpu_id"],
+    registry=app_registry,
+)
+
+gpu_memory_used_bytes = Gauge(
+    "gpu_memory_used_bytes",
+    "GPU memory used in bytes",
+    ["gpu_id"],
+    registry=app_registry,
+)
+
+model_inference_batch_size = Histogram(
+    "model_inference_batch_size",
+    "Model inference batch size",
+    ["model_name"],
+    buckets=[1, 2, 4, 8, 16, 32, 64, 128],
+    registry=app_registry,
+)
 
 verifications_total = Counter(
     "verifications_total",
@@ -385,6 +575,144 @@ def record_business_error(error_type: str):
 def record_error(error_type: str, endpoint: str):
     """Record an HTTP error for metrics."""
     http_errors_total.labels(status_code=error_type, endpoint=endpoint).inc()
+
+
+# =============================================================================
+# Biometric Security Helpers (152-ФЗ compliance)
+# =============================================================================
+
+
+def record_biometric_access(operation: str):
+    """Record biometric data access (152-ФЗ)."""
+    biometric_data_access_total.labels(operation=operation).inc()
+
+
+def record_biometric_deletion(reason: str):
+    """Record biometric data deletion (152-ФЗ)."""
+    biometric_data_deleted_total.labels(reason=reason).inc()
+
+
+def record_consent_operation(operation: str):
+    """Record consent operation (152-ФЗ)."""
+    consent_operations_total.labels(operation=operation).inc()
+
+
+def record_encryption(operation: str, status: str):
+    """Record encryption/decryption operation."""
+    encryption_operations_total.labels(operation=operation, status=status).inc()
+
+
+def record_audit_event(event_type: str):
+    """Record audit log entry."""
+    audit_log_entries_total.labels(event_type=event_type).inc()
+
+
+# =============================================================================
+# FAR/FRR Metrics Helpers
+# =============================================================================
+
+
+def record_false_accept(severity: str = "medium"):
+    """Record false accept event."""
+    false_accept_total.labels(severity=severity).inc()
+
+
+def record_false_reject(severity: str = "medium"):
+    """Record false reject event."""
+    false_reject_total.labels(severity=severity).inc()
+
+
+def update_far_frr_rates(far: float, frr: float, eer: float):
+    """Update FAR/FRR/EER gauges."""
+    false_accept_rate.set(far)
+    false_reject_rate.set(frr)
+    equal_error_rate.set(eer)
+
+
+# =============================================================================
+# Image Quality Helpers
+# =============================================================================
+
+
+def record_image_quality(quality_metric: str, score: float):
+    """Record image quality score."""
+    image_quality_score.labels(quality_metric=quality_metric).observe(score)
+
+
+def record_preprocessing_failure(reason: str):
+    """Record preprocessing failure."""
+    image_preprocessing_failures.labels(failure_reason=reason).inc()
+
+
+# =============================================================================
+# Face Detection & Embedding Helpers
+# =============================================================================
+
+
+def record_face_detection(faces_detected: str):
+    """Record face detection result."""
+    face_detection_total.labels(faces_detected=faces_detected).inc()
+
+
+def record_face_detection_duration(model: str, duration: float):
+    """Record face detection duration."""
+    face_detection_duration_seconds.labels(model=model).observe(duration)
+
+
+def record_embedding_extraction(model: str, duration: float):
+    """Record embedding extraction duration."""
+    embedding_extraction_duration_seconds.labels(model=model).observe(duration)
+
+
+# =============================================================================
+# Verification Detailed Helpers
+# =============================================================================
+
+
+def record_verification_duration(method: str, duration: float):
+    """Record verification duration."""
+    verification_duration_seconds.labels(method=method).observe(duration)
+
+
+def record_verification_confidence(result: str, score: float):
+    """Record verification confidence score."""
+    verification_confidence_score.labels(result=result).observe(score)
+
+
+# =============================================================================
+# Liveness Detection Helpers
+# =============================================================================
+
+
+def record_liveness_duration(model: str, duration: float):
+    """Record liveness check duration."""
+    liveness_duration_seconds.labels(model=model).observe(duration)
+
+
+def record_liveness_confidence(result: str, score: float):
+    """Record liveness confidence score."""
+    liveness_confidence_score.labels(result=result).observe(score)
+
+
+def record_spoofing_attack(attack_type: str):
+    """Record detected spoofing attack."""
+    spoofing_attacks_detected.labels(attack_type=attack_type).inc()
+
+
+# =============================================================================
+# GPU/System Helpers
+# =============================================================================
+
+
+def update_gpu_metrics(gpu_id: str, utilization: float, memory_bytes: int):
+    """Update GPU metrics."""
+    gpu_utilization_percent.labels(gpu_id=gpu_id).set(utilization)
+    gpu_memory_used_bytes.labels(gpu_id=gpu_id).set(memory_bytes)
+
+
+def record_batch_size(model_name: str, size: int):
+    """Record model inference batch size."""
+    model_inference_batch_size.labels(model_name=model_name).observe(size)
 
 
 # =============================================================================

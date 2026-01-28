@@ -1,129 +1,225 @@
-# app/routes/metrics.py (СОЗДАТЬ НОВЫЙ)
-
 """
-Metrics endpoint for cache and database monitoring
+API эндпоинты для просмотра метрик
 """
+from datetime import datetime, timezone
+from typing import Optional, Dict, Any
 
-from fastapi import APIRouter, Depends
-from typing import Dict, Any, AsyncGenerator
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, Query, HTTPException
 
-from app.db.database import get_db, engine
-from app.services.cache_service import CacheService
+from app.services.metrics_service import MetricsService, get_metrics_service
+from app.middleware.metrics import get_metrics, get_metrics_content_type
 from app.utils.logger import get_logger
+from app.dependencies import get_current_user
+from app.models.response import BaseResponse
 
-router = APIRouter(tags=["Metrics"])
+router = APIRouter(prefix="/metrics", tags=["metrics"])
 logger = get_logger(__name__)
 
 
-async def get_cache() -> AsyncGenerator[CacheService, None]:
-    """Dependency for cache service"""
-    cache = CacheService()
-    try:
-        yield cache
-    finally:
-        await cache.close()
+# ============================================================================
+# Prometheus Metrics
+# ============================================================================
 
-
-@router.get("/metrics/cache")
-async def get_cache_metrics(cache: CacheService = Depends(get_cache)) -> Dict[str, Any]:
+@router.get("/prometheus")
+async def get_prometheus_metrics() -> Dict[str, str]:
     """
-    Get cache performance metrics
+    Эндпоинт для Prometheus scraping.
+
+    Возвращает метрики в формате Prometheus text format.
+    """
+    metrics = get_metrics()
+    content_type = get_metrics_content_type()
+
+    # FastAPI ожидает Response объект для установки заголовков
+    from fastapi import Response
+    return Response(
+        content=metrics,
+        media_type=content_type,
+        headers={"Content-Type": content_type}
+    )
+
+
+# ============================================================================
+# Biometric Metrics (FAR/FRR/EER)
+# ============================================================================
+
+@router.get("/biometric", response_model=BaseResponse)
+async def get_biometric_metrics(
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> BaseResponse:
+    """
+    **Текущие биометрические метрики (FAR/FRR/EER).**
+
+    Требования ТЗ:
+    - FAR < 0.1% (False Accept Rate)
+    - FRR < 1-3% (False Reject Rate)
+    - Accuracy > 99%
 
     Returns:
-        - Hit rate (target: > 80%)
-        - Total hits/misses
-        - Error count
-        - Health status
+    - FAR, FRR, EER текущие значения
+    - Compliance статус
+    - Статистика верификаций
+    - Распределение скоров
+
+    **Доступ:** Аутентифицированные пользователи
     """
     try:
-        stats = await cache.get_cache_stats()
-        return {"status": "success", "data": stats}
-    except Exception as e:
-        logger.error(f"Failed to get cache metrics: {e}")
-        return {"status": "error", "error": str(e)}
+        metrics_service = await get_metrics_service()
+        metrics = await metrics_service.get_current_metrics()
 
-
-@router.get("/metrics/database")
-async def get_database_metrics(db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """
-    Get database connection pool metrics
-
-    Returns:
-        - Pool size
-        - Active connections
-        - Utilization percentage
-    """
-    try:
-        pool = engine.pool
-
-        pool_size = pool.size()
-        checked_out = pool.checkedout()
-        overflow = pool.overflow()
-
-        utilization = (checked_out / pool_size * 100) if pool_size > 0 else 0
-
-        return {
-            "status": "success",
-            "data": {
-                "pool_size": pool_size,
-                "active_connections": checked_out,
-                "overflow": overflow,
-                "utilization_percent": round(utilization, 2),
-                "status": "healthy" if utilization < 80 else "high_load",
+        return BaseResponse(
+            success=True,
+            message="Biometric metrics retrieved successfully",
+            data={
+                "timestamp": metrics["timestamp"],
+                "metrics": {
+                    "far_percent": f"{metrics['far']:.4f}%",
+                    "frr_percent": f"{metrics['frr']:.4f}%",
+                    "eer_percent": f"{metrics['eer']:.4f}%",
+                },
+                "compliance": metrics["compliance"],
+                "statistics": {
+                    "genuine_count": metrics["genuine_count"],
+                    "impostor_count": metrics["impostor_count"],
+                    "total_verifications": (
+                        metrics["genuine_count"] + metrics["impostor_count"]
+                    ),
+                },
+                "distributions": metrics["distributions"],
+                "window_size": metrics["window_size"],
             },
-        }
+        )
+
     except Exception as e:
-        logger.error(f"Failed to get database metrics: {e}")
-        return {"status": "error", "error": str(e)}
+        logger.error(f"Failed to get biometric metrics: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve biometric metrics: {str(e)}",
+        )
 
 
-@router.get("/metrics/system")
-async def get_system_metrics(
-    cache: CacheService = Depends(get_cache), db: Session = Depends(get_db)
-) -> Dict[str, Any]:
+@router.get("/biometric/history", response_model=BaseResponse)
+async def get_biometric_metrics_history(
+    days: int = Query(
+        default=7,
+        ge=1,
+        le=90,
+        description="Количество дней истории",
+    ),
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> BaseResponse:
     """
-    Comprehensive system health check
+    **Исторические биометрические метрики.**
+
+    Получение временного ряда метрик FAR/FRR/EER из базы данных.
+
+    Args:
+        days: Количество дней истории (1-90)
 
     Returns:
-        - Cache metrics
-        - Database metrics
-        - Overall health status
+    - Временной ряд метрик
+    - Статистика по периодам
+
+    **Доступ:** Аутентифицированные пользователи
     """
     try:
-        # Cache stats
-        cache_stats = await cache.get_cache_stats()
+        end_date = datetime.now(timezone.utc)
+        start_date = end_date - timezone.timedelta(days=days)
 
-        # Database stats
-        pool = engine.pool
-        db_metrics = {
-            "pool_size": pool.size(),
-            "active_connections": pool.checkedout(),
-            "utilization_percent": round(
-                (pool.checkedout() / pool.size() * 100) if pool.size() > 0 else 0, 2
-            ),
-        }
+        metrics_service = await get_metrics_service()
+        history = await metrics_service.get_historical_metrics(start_date, end_date)
 
-        # Redis health
-        redis_healthy = await cache.health_check()
-
-        # Overall status
-        overall_status = "healthy"
-
-        if not redis_healthy:
-            overall_status = "degraded"
-        elif cache_stats.get("hit_rate_percent", 0) < 70:
-            overall_status = "warning"
-        elif db_metrics["utilization_percent"] > 80:
-            overall_status = "warning"
-
-        return {
-            "status": overall_status,
-            "cache": cache_stats,
-            "database": db_metrics,
-            "redis_connection": "up" if redis_healthy else "down",
-        }
+        return BaseResponse(
+            success=True,
+            message="Historical metrics retrieved successfully",
+            data={
+                "period": {
+                    "start_date": start_date.isoformat(),
+                    "end_date": end_date.isoformat(),
+                    "days": days,
+                },
+                "data_points": len(history),
+                "metrics": history,
+            },
+        )
 
     except Exception as e:
-        logger.error(f"Failed to get system metrics: {e}")
-        return {"status": "error", "error": str(e)}
+        logger.error(f"Failed to get metrics history: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve metrics history: {str(e)}",
+        )
+
+
+# ============================================================================
+# Service Status
+# ============================================================================
+
+@router.get("/health", response_model=BaseResponse)
+async def metrics_health(
+    user: Dict[str, Any] = Depends(get_current_user),
+) -> BaseResponse:
+    """
+    **Healthcheck сервиса метрик.**
+
+    Returns:
+    - Статус сервиса
+    - Состояние буферов
+    - Информация о фоновых задачах
+
+    **Доступ:** Аутентифицированные пользователи
+    """
+    try:
+        metrics_service = await get_metrics_service()
+        status = metrics_service.get_status()
+
+        return BaseResponse(
+            success=True,
+            message="Metrics service status retrieved",
+            data={
+                "status": "healthy" if status["running"] else "stopped",
+                "service": "metrics",
+                "details": status,
+            },
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to get metrics health: {str(e)}", exc_info=True)
+        return BaseResponse(
+            success=False,
+            message="Metrics service unhealthy",
+            data={
+                "status": "error",
+                "error": str(e),
+            },
+        )
+
+
+# ============================================================================
+# Service Status (Public)
+# ============================================================================
+
+@router.get("/status")
+async def metrics_status_public() -> Dict[str, Any]:
+    """
+    **Public healthcheck сервиса метрик.**
+
+    Не требует аутентификации.
+
+    Returns:
+    - Статус сервиса
+    """
+    try:
+        metrics_service = await get_metrics_service()
+        status = metrics_service.get_status()
+
+        return {
+            "status": "healthy" if status["running"] else "degraded",
+            "service": "metrics",
+        }
+
+    except Exception:
+        return {
+            "status": "unhealthy",
+            "service": "metrics",
+        }

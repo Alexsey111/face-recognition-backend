@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import io
 import time
+import uuid
 from typing import Dict, Any, Optional, Tuple, Literal
 
 import numpy as np
@@ -36,6 +37,7 @@ from ..config import settings
 from ..utils.logger import get_logger
 from ..utils.exceptions import ProcessingError, ValidationError
 from ..services.anti_spoofing_service import AntiSpoofingService
+from ..services.metrics_service import get_metrics_service
 
 logger = get_logger(__name__)
 
@@ -182,6 +184,7 @@ class FaceVerificationService:
         threshold: Optional[float] = None,
         require_liveness: bool = False,
         return_embeddings: bool = False,
+        is_genuine: Optional[bool] = None,  # Ground truth для метрик
     ) -> Dict[str, Any]:
         """Сравнение двух лиц."""
         start_time = time.time()
@@ -233,6 +236,22 @@ class FaceVerificationService:
                 result["embedding1"] = emb1.tolist()
                 result["embedding2"] = emb2.tolist()
                 
+            # Запись метрик верификации
+            if is_genuine is not None:
+                try:
+                    metrics = await get_metrics_service()
+                    await metrics.record_verification(
+                        verification_id=str(uuid.uuid4()),
+                        is_genuine=is_genuine,
+                        is_accepted=is_match,
+                        similarity_score=cosine_sim,
+                        threshold=threshold,
+                        processing_time_ms=processing_time * 1000,
+                        model_version=f"{self.model_type}-vggface2",
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to record metrics: {e}")
+
             logger.info(f"Verification: match={is_match}, similarity={cosine_sim:.4f}")
             return result
             
