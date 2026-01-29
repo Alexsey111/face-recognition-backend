@@ -25,6 +25,8 @@ env:
   DOCKER_REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
   MIN_COVERAGE: 80
+  # CPU-версия PyTorch для CI (снижает размер загрузки с ~4-7GB до ~2GB)
+  TORCH_INDEX_URL: https://download.pytorch.org/whl/cpu
 
 # Останавливает запущенные ранее задачи при новом пуше в ту же ветку
 concurrency:
@@ -57,6 +59,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
+          cache-dependency-path: requirements.txt
 
       - name: Install dependencies
         run: |
@@ -107,6 +110,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
+          cache-dependency-path: requirements.txt
 
       - name: Install dependencies
         run: |
@@ -159,10 +163,14 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
+          cache-dependency-path: requirements-ci.txt
 
-      - name: Install dependencies
+      - name: Install dependencies (CPU PyTorch)
         run: |
           python -m pip install --upgrade pip
+          # CPU-версия PyTorch для CI (значительно меньше размер)
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install torchvision --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
@@ -232,15 +240,19 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
+          cache-dependency-path: requirements-ci.txt
 
       - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libheif-dev libde265-dev
 
-      - name: Install Python dependencies
+      - name: Install Python dependencies (CPU PyTorch)
         run: |
           python -m pip install --upgrade pip
+          # CPU-версия PyTorch для CI
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install torchvision --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
@@ -282,10 +294,13 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
+          cache-dependency-path: requirements-ci.txt
 
-      - name: Install dependencies
+      - name: Install dependencies (CPU PyTorch)
         run: |
           python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install torchvision --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
@@ -381,6 +396,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
+          cache-dependency-path: requirements.txt
 
       - name: Install dependencies
         run: |
