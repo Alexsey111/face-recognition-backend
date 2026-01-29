@@ -3,20 +3,21 @@
 Все тесты полностью адаптированы для работы с асинхронным API.
 """
 
-import pytest
 import json
 import uuid
-from unittest.mock import Mock, patch, AsyncMock, MagicMock, PropertyMock
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock, MagicMock, Mock, PropertyMock, patch
 
-from app.routes.reference import router as reference_router
-from app.routes.health import router as health_router
-from app.db.database import get_async_db
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.database import get_async_db
+from app.routes.health import router as health_router
+from app.routes.reference import router as reference_router
 
 
 def create_test_app_for_reference():
@@ -130,8 +131,9 @@ class TestReferenceRoutes:
     @pytest.fixture
     def sample_image_data(self):
         import base64
-        from PIL import Image
         import io
+
+        from PIL import Image
 
         img = Image.new("RGB", (224, 224), color="blue")
         img_bytes = io.BytesIO()

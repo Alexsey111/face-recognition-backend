@@ -1,5 +1,6 @@
+from unittest.mock import AsyncMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, AsyncMock
 
 # from app.services.cache_service import CacheService  # Не можем импортировать из-за SQLAlchemy ошибки
 # from app.services.encryption_service import EncryptionService  # Не можем импортировать из-за SQLAlchemy ошибки

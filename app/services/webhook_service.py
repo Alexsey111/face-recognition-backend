@@ -1,17 +1,17 @@
 """Сервис webhook-уведомлений."""
 
 import asyncio
-import json
-import hmac
 import hashlib
-import uuid
+import hmac
+import json
 import time
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Optional
 
 import aiohttp
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
 
 from ..db.models import WebhookConfig, WebhookLog, WebhookStatus
@@ -292,7 +292,7 @@ class WebhookService:
     ) -> None:
         """
         Отправка webhook с retry логикой.
-        
+
         ВАЖНО: Создает собственную сессию БД для избежания конкурентных операций.
 
         Args:

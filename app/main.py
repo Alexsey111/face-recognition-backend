@@ -3,36 +3,36 @@ app/main.py
 Точка входа для Face Recognition Service API.
 """
 
+import json
+import os
 from contextlib import asynccontextmanager
+from datetime import date, datetime, timezone
+from typing import Any
+
+import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response, JSONResponse
-import uvicorn
-import os
-import json
-from datetime import datetime, date, timezone
-from typing import Any
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 from . import __version__
 from .config import settings
-from .routes import (
-    health,
-    upload,
-    verify,
-    liveness,
-    reference,
-    admin,
-    auth,
-    webhook,
-    metrics,
-    face_recognition,
-)
 from .middleware.auth import AuthMiddleware
-from .middleware.rate_limit import RateLimitMiddleware
 from .middleware.logging_middleware import LoggingMiddleware
 from .middleware.metrics import MetricsMiddleware, initialize_metrics
+from .middleware.rate_limit import RateLimitMiddleware
+from .routes import (
+    admin,
+    auth,
+    face_recognition,
+    health,
+    liveness,
+    metrics,
+    reference,
+    upload,
+    verify,
+    webhook,
+)
 from .utils.logger import setup_logger
-
 
 # -----------------------------
 # JSON utils
@@ -73,7 +73,7 @@ async def http_exception_handler(request, exc: HTTPException):
 
 
 async def general_exception_handler(request, exc: Exception):
-    from .utils.exceptions import ValidationError, ProcessingError, NotFoundError
+    from .utils.exceptions import NotFoundError, ProcessingError, ValidationError
 
     if isinstance(exc, ValidationError):
         code, status = "VALIDATION_ERROR", 400
@@ -99,6 +99,7 @@ async def general_exception_handler(request, exc: Exception):
 # Lifespan
 # -----------------------------
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger = setup_logger()
@@ -114,30 +115,34 @@ async def lifespan(app: FastAPI):
     logger.info("Redis initialized")
 
     # ============================================================================
-    # ML SERVICE INITIALIZATION 
+    # ML SERVICE INITIALIZATION
     # ============================================================================
     if settings.USE_LOCAL_ML_SERVICE:
         try:
             from .services.ml_service import get_ml_service
-            
+
             logger.info("Initializing ML service...")
             ml_service = await get_ml_service()
             app.state.ml_service = ml_service  # Сохраняем в app.state
             logger.info("✅ ML service initialized successfully")
-            
+
             # Опционально: вывод статистики моделей
             stats = ml_service.get_stats()
             logger.info(f"   Device: {stats.get('device', 'unknown')}")
-            logger.info(f"   Models initialized: {stats.get('models_initialized', False)}")
+            logger.info(
+                f"   Models initialized: {stats.get('models_initialized', False)}"
+            )
             logger.info(f"   CUDA available: {stats.get('cuda_available', False)}")
-            if stats.get('certified_liveness_enabled'):
+            if stats.get("certified_liveness_enabled"):
                 logger.info(f"   ✅ Certified liveness (MiniFASNetV2): ENABLED")
             else:
                 logger.info(f"   ⚠️  Certified liveness: DISABLED (will use heuristics)")
-                
+
         except Exception as e:
             logger.error(f"❌ Failed to initialize ML service: {str(e)}")
-            logger.warning("⚠️  ML service will be unavailable. Face recognition features disabled.")
+            logger.warning(
+                "⚠️  ML service will be unavailable. Face recognition features disabled."
+            )
             app.state.ml_service = None
     else:
         logger.info("Local ML service disabled (using external ML service)")
@@ -176,9 +181,9 @@ async def lifespan(app: FastAPI):
     logger.info("Service shutting down")
 
     # ============================================================================
-    # ML SERVICE CLEANUP 
+    # ML SERVICE CLEANUP
     # ============================================================================
-    if hasattr(app.state, 'ml_service') and app.state.ml_service:
+    if hasattr(app.state, "ml_service") and app.state.ml_service:
         try:
             # Если есть метод cleanup/close в MLService
             logger.info("Shutting down ML service...")
@@ -208,7 +213,6 @@ async def lifespan(app: FastAPI):
         logger.info("Redis closed")
     except Exception:
         logger.warning("Redis close failed", exc_info=True)
-
 
 
 # -----------------------------

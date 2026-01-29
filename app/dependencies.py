@@ -3,10 +3,11 @@
 Аутентификация и авторизация через JWT.
 """
 
-from typing import Dict, Any, AsyncGenerator
-from fastapi import Request, HTTPException, status, Depends
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from typing import Any, AsyncGenerator, Dict
+
 import jwt
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.config import settings
 from app.services.cache_service import CacheService
@@ -188,39 +189,40 @@ async def get_current_admin(
 
     return user
 
+
 from typing import Optional
+
 from fastapi import Depends, HTTPException
+
 from app.services.ml_service import OptimizedMLService
+
 
 async def get_ml_service_dep() -> OptimizedMLService:
     """
     Dependency для получения ML сервиса.
-    
+
     Usage:
         @router.post("/verify")
         async def verify(ml_service: OptimizedMLService = Depends(get_ml_service_dep)):
             result = await ml_service.generate_embedding(image)
     """
-    from app.services.ml_service import get_ml_service
     from app.config import settings
-    
+    from app.services.ml_service import get_ml_service
+
     if not settings.USE_LOCAL_ML_SERVICE:
         raise HTTPException(
             status_code=503,
-            detail="Local ML service is disabled. Configure external ML service."
+            detail="Local ML service is disabled. Configure external ML service.",
         )
-    
+
     try:
         ml_service = await get_ml_service()
         if not ml_service.is_initialized:
             raise HTTPException(
                 status_code=503,
-                detail="ML service is not initialized yet. Please try again."
+                detail="ML service is not initialized yet. Please try again.",
             )
         return ml_service
     except Exception as e:
         logger.error(f"Failed to get ML service: {str(e)}")
-        raise HTTPException(
-            status_code=503,
-            detail=f"ML service unavailable: {str(e)}"
-        )
+        raise HTTPException(status_code=503, detail=f"ML service unavailable: {str(e)}")

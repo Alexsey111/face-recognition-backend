@@ -3,8 +3,9 @@
 Проверка API endpoints загрузки файлов.
 """
 
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from fastapi.testclient import TestClient
 
 
@@ -126,6 +127,7 @@ class TestUploadWorkflows:
         """Тест полного workflow загрузки файла"""
         from datetime import datetime, timedelta
         from io import BytesIO
+
         from PIL import Image
 
         mock_session = MagicMock()

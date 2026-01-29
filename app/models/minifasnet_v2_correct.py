@@ -8,14 +8,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import (
-    Conv2d,
-    BatchNorm2d,
     BatchNorm1d,
-    PReLU,
-    Sequential,
-    Module,
+    BatchNorm2d,
+    Conv2d,
     Flatten,
     Linear,
+    Module,
+    PReLU,
+    Sequential,
 )
 
 
@@ -27,10 +27,18 @@ class L2Norm(Module):
 class Conv_block(Module):
     """Conv -> BatchNorm -> PReLU"""
 
-    def __init__(self, in_c, out_c, kernel=(1, 1), stride=(1, 1), padding=(0, 0), groups=1):
+    def __init__(
+        self, in_c, out_c, kernel=(1, 1), stride=(1, 1), padding=(0, 0), groups=1
+    ):
         super(Conv_block, self).__init__()
         self.conv = Conv2d(
-            in_c, out_c, kernel_size=kernel, groups=groups, stride=stride, padding=padding, bias=False
+            in_c,
+            out_c,
+            kernel_size=kernel,
+            groups=groups,
+            stride=stride,
+            padding=padding,
+            bias=False,
         )
         self.bn = BatchNorm2d(out_c)
         self.prelu = PReLU(out_c)
@@ -45,10 +53,18 @@ class Conv_block(Module):
 class Linear_block(Module):
     """Conv -> BatchNorm (no PReLU)"""
 
-    def __init__(self, in_c, out_c, kernel=(1, 1), stride=(1, 1), padding=(0, 0), groups=1):
+    def __init__(
+        self, in_c, out_c, kernel=(1, 1), stride=(1, 1), padding=(0, 0), groups=1
+    ):
         super(Linear_block, self).__init__()
         self.conv = Conv2d(
-            in_c, out_c, kernel_size=kernel, groups=groups, stride=stride, padding=padding, bias=False
+            in_c,
+            out_c,
+            kernel_size=kernel,
+            groups=groups,
+            stride=stride,
+            padding=padding,
+            bias=False,
         )
         self.bn = BatchNorm2d(out_c)
 
@@ -62,16 +78,30 @@ class Depth_Wise(Module):
     """Depth-wise separable convolution block"""
 
     def __init__(
-        self, c1, c2, c3, residual=False, kernel=(3, 3), stride=(2, 2), padding=(1, 1), groups=1
+        self,
+        c1,
+        c2,
+        c3,
+        residual=False,
+        kernel=(3, 3),
+        stride=(2, 2),
+        padding=(1, 1),
+        groups=1,
     ):
         super(Depth_Wise, self).__init__()
         c1_in, c1_out = c1
         c2_in, c2_out = c2
         c3_in, c3_out = c3
 
-        self.conv = Conv_block(c1_in, out_c=c1_out, kernel=(1, 1), padding=(0, 0), stride=(1, 1))
-        self.conv_dw = Conv_block(c2_in, c2_out, groups=c2_in, kernel=kernel, padding=padding, stride=stride)
-        self.project = Linear_block(c3_in, c3_out, kernel=(1, 1), padding=(0, 0), stride=(1, 1))
+        self.conv = Conv_block(
+            c1_in, out_c=c1_out, kernel=(1, 1), padding=(0, 0), stride=(1, 1)
+        )
+        self.conv_dw = Conv_block(
+            c2_in, c2_out, groups=c2_in, kernel=kernel, padding=padding, stride=stride
+        )
+        self.project = Linear_block(
+            c3_in, c3_out, kernel=(1, 1), padding=(0, 0), stride=(1, 1)
+        )
         self.residual = residual
 
     def forward(self, x):
@@ -90,7 +120,17 @@ class Depth_Wise(Module):
 class Residual(Module):
     """Residual block with multiple Depth_Wise layers"""
 
-    def __init__(self, c1, c2, c3, num_block, groups, kernel=(3, 3), stride=(1, 1), padding=(1, 1)):
+    def __init__(
+        self,
+        c1,
+        c2,
+        c3,
+        num_block,
+        groups,
+        kernel=(3, 3),
+        stride=(1, 1),
+        padding=(1, 1),
+    ):
         super(Residual, self).__init__()
         modules = []
         for i in range(num_block):
@@ -99,7 +139,14 @@ class Residual(Module):
             c3_tuple = c3[i]
             modules.append(
                 Depth_Wise(
-                    c1_tuple, c2_tuple, c3_tuple, residual=True, kernel=kernel, padding=padding, stride=stride, groups=groups
+                    c1_tuple,
+                    c2_tuple,
+                    c3_tuple,
+                    residual=True,
+                    kernel=kernel,
+                    padding=padding,
+                    stride=stride,
+                    groups=groups,
                 )
             )
         self.model = Sequential(*modules)
@@ -184,9 +231,16 @@ class MiniFASNetV2(Module):
         keep = self.MODEL_CONFIG["1.8M_"]
 
         # Initial convolutions
-        self.conv1 = Conv_block(img_channel, keep[0], kernel=(3, 3), stride=(2, 2), padding=(1, 1))
+        self.conv1 = Conv_block(
+            img_channel, keep[0], kernel=(3, 3), stride=(2, 2), padding=(1, 1)
+        )
         self.conv2_dw = Conv_block(
-            keep[0], keep[1], kernel=(3, 3), stride=(1, 1), padding=(1, 1), groups=keep[1]
+            keep[0],
+            keep[1],
+            kernel=(3, 3),
+            stride=(1, 1),
+            padding=(1, 1),
+            groups=keep[1],
         )
 
         # conv_23: Depth_Wise block
@@ -194,15 +248,43 @@ class MiniFASNetV2(Module):
         c2 = [(keep[2], keep[3])]
         c3 = [(keep[3], keep[4])]
         self.conv_23 = Depth_Wise(
-            c1[0], c2[0], c3[0], kernel=(3, 3), stride=(2, 2), padding=(1, 1), groups=keep[3]
+            c1[0],
+            c2[0],
+            c3[0],
+            kernel=(3, 3),
+            stride=(2, 2),
+            padding=(1, 1),
+            groups=keep[3],
         )
 
         # conv_3: Residual block (4 layers)
-        c1 = [(keep[4], keep[5]), (keep[7], keep[8]), (keep[10], keep[11]), (keep[13], keep[14])]
-        c2 = [(keep[5], keep[6]), (keep[8], keep[9]), (keep[11], keep[12]), (keep[14], keep[15])]
-        c3 = [(keep[6], keep[7]), (keep[9], keep[10]), (keep[12], keep[13]), (keep[15], keep[16])]
+        c1 = [
+            (keep[4], keep[5]),
+            (keep[7], keep[8]),
+            (keep[10], keep[11]),
+            (keep[13], keep[14]),
+        ]
+        c2 = [
+            (keep[5], keep[6]),
+            (keep[8], keep[9]),
+            (keep[11], keep[12]),
+            (keep[14], keep[15]),
+        ]
+        c3 = [
+            (keep[6], keep[7]),
+            (keep[9], keep[10]),
+            (keep[12], keep[13]),
+            (keep[15], keep[16]),
+        ]
         self.conv_3 = Residual(
-            c1, c2, c3, num_block=4, groups=keep[4], kernel=(3, 3), stride=(1, 1), padding=(1, 1)
+            c1,
+            c2,
+            c3,
+            num_block=4,
+            groups=keep[4],
+            kernel=(3, 3),
+            stride=(1, 1),
+            padding=(1, 1),
         )
 
         # conv_34: Depth_Wise block
@@ -210,7 +292,13 @@ class MiniFASNetV2(Module):
         c2 = [(keep[17], keep[18])]
         c3 = [(keep[18], keep[19])]
         self.conv_34 = Depth_Wise(
-            c1[0], c2[0], c3[0], kernel=(3, 3), stride=(2, 2), padding=(1, 1), groups=keep[19]
+            c1[0],
+            c2[0],
+            c3[0],
+            kernel=(3, 3),
+            stride=(2, 2),
+            padding=(1, 1),
+            groups=keep[19],
         )
 
         # conv_4: Residual block (6 layers)
@@ -239,7 +327,14 @@ class MiniFASNetV2(Module):
             (keep[36], keep[37]),
         ]
         self.conv_4 = Residual(
-            c1, c2, c3, num_block=6, groups=keep[19], kernel=(3, 3), stride=(1, 1), padding=(1, 1)
+            c1,
+            c2,
+            c3,
+            num_block=6,
+            groups=keep[19],
+            kernel=(3, 3),
+            stride=(1, 1),
+            padding=(1, 1),
         )
 
         # conv_45: Depth_Wise block
@@ -247,7 +342,13 @@ class MiniFASNetV2(Module):
         c2 = [(keep[38], keep[39])]
         c3 = [(keep[39], keep[40])]
         self.conv_45 = Depth_Wise(
-            c1[0], c2[0], c3[0], kernel=(3, 3), stride=(2, 2), padding=(1, 1), groups=keep[40]
+            c1[0],
+            c2[0],
+            c3[0],
+            kernel=(3, 3),
+            stride=(2, 2),
+            padding=(1, 1),
+            groups=keep[40],
         )
 
         # conv_5: Residual block (2 layers)
@@ -255,13 +356,27 @@ class MiniFASNetV2(Module):
         c2 = [(keep[41], keep[42]), (keep[44], keep[45])]
         c3 = [(keep[42], keep[43]), (keep[45], keep[46])]
         self.conv_5 = Residual(
-            c1, c2, c3, num_block=2, groups=keep[40], kernel=(3, 3), stride=(1, 1), padding=(1, 1)
+            c1,
+            c2,
+            c3,
+            num_block=2,
+            groups=keep[40],
+            kernel=(3, 3),
+            stride=(1, 1),
+            padding=(1, 1),
         )
 
         # Final layers
-        self.conv_6_sep = Conv_block(keep[46], keep[47], kernel=(1, 1), stride=(1, 1), padding=(0, 0))
+        self.conv_6_sep = Conv_block(
+            keep[46], keep[47], kernel=(1, 1), stride=(1, 1), padding=(0, 0)
+        )
         self.conv_6_dw = Linear_block(
-            keep[47], keep[48], groups=keep[48], kernel=conv6_kernel, stride=(1, 1), padding=(0, 0)
+            keep[47],
+            keep[48],
+            groups=keep[48],
+            kernel=conv6_kernel,
+            stride=(1, 1),
+            padding=(0, 0),
         )
         self.conv_6_flatten = Flatten()
 
@@ -278,7 +393,9 @@ class MiniFASNetV2(Module):
         """Initialize model weights using Kaiming initialization."""
         for m in self.modules():
             if isinstance(m, Conv2d):
-                torch.nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+                torch.nn.init.kaiming_normal_(
+                    m.weight, mode="fan_out", nonlinearity="relu"
+                )
                 if m.bias is not None:
                     torch.nn.init.constant_(m.bias, 0)
             elif isinstance(m, (BatchNorm2d, BatchNorm1d)):

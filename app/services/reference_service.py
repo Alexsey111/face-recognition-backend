@@ -11,20 +11,20 @@ Reference Service - Управление эталонными изображен
 import hashlib
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc
 
 from ..config import settings
-from ..db.models import Reference
 from ..db.crud import ReferenceCRUD
-from ..services.ml_service import MLService
+from ..db.models import Reference
 from ..services.encryption_service import EncryptionService
-from ..services.validation_service import ValidationService
+from ..services.ml_service import MLService
 from ..services.storage_service import StorageService
+from ..services.validation_service import ValidationService
+from ..utils.exceptions import NotFoundError, ProcessingError, ValidationError
 from ..utils.logger import get_logger
-from ..utils.exceptions import ValidationError, ProcessingError, NotFoundError
 
 logger = get_logger(__name__)
 

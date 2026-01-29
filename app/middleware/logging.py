@@ -2,11 +2,12 @@
 Запись информации о HTTP запросах и ответах без биометрических данных.
 """
 
-from typing import Dict, Any
-from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware
 import time
 import uuid
+from typing import Any, Dict
+
+from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from ..utils.logger import get_logger
 

@@ -28,19 +28,18 @@ Performance targets:
     - Throughput: > 100 RPS
 """
 
-import os
-import time
-import random
-import json
 import base64
-from typing import Optional, Dict, Any
+import json
+import os
+import random
+import time
 from io import BytesIO
+from typing import Any, Dict, Optional
 
-from locust import HttpUser, task, between, events
+import numpy as np
+from locust import HttpUser, between, events, task
 from locust.exception import StopUser
 from PIL import Image
-import numpy as np
-
 
 # ==================== Configuration ====================
 

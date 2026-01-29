@@ -3,11 +3,12 @@ Unit тесты для ML Service.
 Тестируют отдельные методы без внешних зависимостей.
 """
 
-import pytest
-import numpy as np
-from PIL import Image
 import io
-from unittest.mock import Mock, AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
+
+import numpy as np
+import pytest
+from PIL import Image
 
 
 class TestMLServiceInitialization:

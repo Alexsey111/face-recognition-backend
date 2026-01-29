@@ -11,7 +11,7 @@ import json
 import os
 import re
 import socket
-from typing import Optional, Tuple, List, Dict, Any
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import cv2
@@ -36,14 +36,14 @@ except Exception:
     HEIF_SUPPORTED = False
 
 from ..config import settings
+from ..utils.exceptions import ValidationError
 from ..utils.file_utils import (
+    MAX_FILE_SIZE,
+    SUPPORTED_EXTENSIONS,
     ImageFileHandler,
     validate_image_file,
-    SUPPORTED_EXTENSIONS,
-    MAX_FILE_SIZE,
 )
 from ..utils.logger import get_logger
-from ..utils.exceptions import ValidationError
 
 logger = get_logger(__name__)
 
@@ -597,7 +597,9 @@ class ValidationService:
         laplacian_var = np.var(gray)
 
         if laplacian_var < 100:  # Пороговое значение для размытости
-            logger.warning(f"Изображение может быть размытым (variance: {laplacian_var:.2f})")
+            logger.warning(
+                f"Изображение может быть размытым (variance: {laplacian_var:.2f})"
+            )
 
     def get_supported_formats_info(self) -> dict:
         """

@@ -2,10 +2,10 @@
 Unit-тест фикстуры с замоканными сервисами.
 """
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-import numpy as np
 
+import numpy as np
+import pytest
 
 # ======================================================================
 # Mock Services

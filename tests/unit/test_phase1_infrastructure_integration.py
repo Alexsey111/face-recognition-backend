@@ -5,10 +5,11 @@
 
 import os
 import sys
-import yaml
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 import pytest
+import yaml
 
 
 class TestInfrastructureIntegration:

@@ -11,31 +11,31 @@
 - Parameters: ~0.4M
 """
 
-import io
-import base64
-import time
 import asyncio
-from pathlib import Path
-from typing import Optional, Dict, Any, Tuple, List
-from datetime import datetime, timezone
+import base64
+import io
+import time
 from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
 import cv2
-from PIL import Image
+import numpy as np
 import torch
 import torch.nn as nn
-from torchvision import transforms
 import torch.nn.functional as F
+from PIL import Image
+from torchvision import transforms
 
 from ..config import settings
-from ..utils.logger import get_logger
-from ..utils.exceptions import ProcessingError, MLServiceError, ValidationError
+from ..models.minifasnet_v2_correct import MiniFASNetV2
+from ..utils.exceptions import MLServiceError, ProcessingError, ValidationError
 from ..utils.face_alignment_utils import (
     align_face,
     detect_face_landmarks,
 )
-from ..models.minifasnet_v2_correct import MiniFASNetV2
+from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -287,15 +287,17 @@ class AntiSpoofingService:
             # Удаляем префикс 'module.' если есть
             new_state_dict = {}
             for key, value in state_dict.items():
-                new_key = key[7:] if key.startswith('module.') else key
+                new_key = key[7:] if key.startswith("module.") else key
                 new_state_dict[new_key] = value
 
             # Адаптируем prob.weight (3 класса -> 1 класс)
-            if 'prob.weight' in new_state_dict:
-                orig_weight = new_state_dict['prob.weight']
+            if "prob.weight" in new_state_dict:
+                orig_weight = new_state_dict["prob.weight"]
                 if orig_weight.shape[0] > 1:
-                    logger.info(f"Adapting prob.weight: {orig_weight.shape} -> [1, {orig_weight.shape[1]}]")
-                    new_state_dict['prob.weight'] = orig_weight[0:1, :].clone()
+                    logger.info(
+                        f"Adapting prob.weight: {orig_weight.shape} -> [1, {orig_weight.shape[1]}]"
+                    )
+                    new_state_dict["prob.weight"] = orig_weight[0:1, :].clone()
 
             # Пытаемся загрузить в строгом режиме
             self.model.load_state_dict(new_state_dict, strict=True)
@@ -312,16 +314,22 @@ class AntiSpoofingService:
 
             # Анализируем результаты
             if len(missing_keys) > 0:
-                logger.warning(f"Missing keys ({len(missing_keys)}): {missing_keys[:3]}...")
+                logger.warning(
+                    f"Missing keys ({len(missing_keys)}): {missing_keys[:3]}..."
+                )
                 logger.warning("These layers will use random initialization")
 
             if len(unexpected_keys) > 0:
-                logger.warning(f"Unexpected keys ({len(unexpected_keys)}): {list(unexpected_keys)[:3]}...")
+                logger.warning(
+                    f"Unexpected keys ({len(unexpected_keys)}): {list(unexpected_keys)[:3]}..."
+                )
                 logger.warning("These weights from checkpoint will be ignored")
 
             # Проверяем, загрузилось ли хоть что-то полезное
             model_keys = set(self.model.state_dict().keys())
-            loaded_keys = set(k for k in new_state_dict.keys() if k not in unexpected_keys)
+            loaded_keys = set(
+                k for k in new_state_dict.keys() if k not in unexpected_keys
+            )
 
             intersection = model_keys & loaded_keys
             load_ratio = len(intersection) / len(model_keys) if model_keys else 0
@@ -345,7 +353,10 @@ class AntiSpoofingService:
                 return checkpoint[key]
 
         # Если не найден, используем checkpoint как есть
-        if all(isinstance(k, str) and k.startswith(("conv", "fc", "bn", "module")) for k in checkpoint.keys()):
+        if all(
+            isinstance(k, str) and k.startswith(("conv", "fc", "bn", "module"))
+            for k in checkpoint.keys()
+        ):
             logger.debug("Using checkpoint as state_dict directly")
             return checkpoint
 
@@ -387,9 +398,11 @@ class AntiSpoofingService:
             if image_data.size == 0:
                 raise ValueError("Image array is empty")
             if image_data.ndim not in [2, 3]:
-                raise ValueError(f"Invalid image dimensions: {image_data.ndim}, expected 2 or 3")
+                raise ValueError(
+                    f"Invalid image dimensions: {image_data.ndim}, expected 2 or 3"
+                )
         # Проверка PIL Image
-        elif hasattr(image_data, 'size'):
+        elif hasattr(image_data, "size"):
             if image_data.size[0] == 0 or image_data.size[1] == 0:
                 raise ValueError("Image size is zero")
         # Проверка bytes
@@ -462,14 +475,9 @@ class AntiSpoofingService:
         low_resolution = min_dimension < 240
 
         # === ИТОГОВАЯ ОЦЕНКА ===
-        issues = sum([
-            is_too_dark,
-            is_too_bright,
-            is_blurry,
-            low_contrast,
-            noisy,
-            low_resolution
-        ])
+        issues = sum(
+            [is_too_dark, is_too_bright, is_blurry, low_contrast, noisy, low_resolution]
+        )
 
         quality_score = max(0, 100 - issues * 15)
 
@@ -490,7 +498,7 @@ class AntiSpoofingService:
             "low_resolution": low_resolution,
             "quality_score": quality_score,
             "quality_ok": quality_score >= 70,
-            "issues_count": issues
+            "issues_count": issues,
         }
 
     def _preprocess_with_alignment(self, image: np.ndarray) -> torch.Tensor:

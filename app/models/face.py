@@ -4,12 +4,12 @@ Pydantic модели для работы с распознаванием лиц
 Централизованное хранилище всех face-related моделей данных.
 """
 
-from typing import Optional, List, Dict, Any, Literal
-from pydantic import BaseModel, Field, field_validator, ConfigDict
-from datetime import datetime, timezone
-import numpy as np
 import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Literal, Optional
 
+import numpy as np
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # ============================================================================
 # FACE DETECTION MODELS

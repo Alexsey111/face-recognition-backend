@@ -4,12 +4,13 @@ Tests parallel requests, race conditions, and async operations.
 """
 
 import asyncio
-import pytest
-import pytest_asyncio
 import time
 import uuid
-from typing import List, Dict, Any
-from unittest.mock import AsyncMock, patch, MagicMock
+from typing import Any, Dict, List
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+import pytest_asyncio
 
 # Test data
 TEST_IMAGE_DATA = (
@@ -214,6 +215,7 @@ class TestAsyncClientRequests:
         """Create async test client."""
         try:
             from httpx import ASGITransport, AsyncClient
+
             from app.main import create_test_app
 
             app = create_test_app()
@@ -361,7 +363,8 @@ class TestConnectionPooling:
     @pytest.mark.asyncio
     async def test_concurrent_requests_limits(self):
         """Test behavior when exceeding connection limits."""
-        from httpx import AsyncClient, ASGITransport, Timeout
+        from httpx import ASGITransport, AsyncClient, Timeout
+
         from app.main import create_test_app
 
         app = create_test_app()

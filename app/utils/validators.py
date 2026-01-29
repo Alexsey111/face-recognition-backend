@@ -3,27 +3,26 @@
 Проверка корректности входных данных и форматов.
 """
 
-import re
-import os
-import uuid
 import base64
 import hashlib
 import html
 import math
-from typing import Optional, List, Dict, Any, Union
+import os
+import re
+import uuid
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Union
 
 from .constants import (
-    IMAGE_FORMATS,
-    FILE_LIMITS,
-    MAGIC_NUMBERS,
-    SIMILARITY_LIMITS,
-    PASSWORD_REGEX,
     EMAIL_REGEX,
+    FILE_LIMITS,
+    IMAGE_FORMATS,
+    MAGIC_NUMBERS,
+    PASSWORD_REGEX,
+    SIMILARITY_LIMITS,
     USERNAME_REGEX,
 )
 from .exceptions import ValidationError
-
 
 # =============================================================================
 # BASIC VALIDATORS

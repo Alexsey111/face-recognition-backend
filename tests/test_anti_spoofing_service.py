@@ -2,25 +2,25 @@
 Unit и integration тесты для AntiSpoofingService.
 """
 
+import asyncio
+import gc
+import io
+
+import numpy as np
 import pytest
 import pytest_asyncio
-import asyncio
-import numpy as np
-from PIL import Image
-import io
-import gc
 import torch
+from PIL import Image
 
 from app.services.anti_spoofing_service import (
     AntiSpoofingService,
     MiniFASNetV2,
+    analyze_image_for_spoofing_indicators,
+    estimate_face_texture_quality,
     get_anti_spoofing_service,
     reset_anti_spoofing_service,
-    estimate_face_texture_quality,
-    analyze_image_for_spoofing_indicators,
 )
-from app.utils.exceptions import ProcessingError, ValidationError, MLServiceError
-
+from app.utils.exceptions import MLServiceError, ProcessingError, ValidationError
 
 # =============================================================================
 # Fixtures

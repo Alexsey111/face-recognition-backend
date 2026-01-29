@@ -6,13 +6,14 @@ Hybrid sync/async approach:
   refresh_access_token, revoke_token, is_token_revoked, check_rate_limit, get_user_info_from_token
 """
 
-import pytest
-import jwt
-from datetime import datetime, timezone, timedelta
-from unittest.mock import Mock, patch, AsyncMock
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, Mock, patch
 
-from app.services.auth_service import AuthService, AuthenticationError
+import jwt
+import pytest
+
 from app.config import settings
+from app.services.auth_service import AuthenticationError, AuthService
 
 
 class TestAuthService:
@@ -164,7 +165,8 @@ class TestAuthService:
 
     def test_needs_password_rehash_legacy(self, auth_service):
         """Test sync: check if legacy PBKDF2 needs rehash (no await)."""
-        import hashlib, secrets
+        import hashlib
+        import secrets
 
         salt = secrets.token_bytes(32)
         password_hash = hashlib.pbkdf2_hmac(
@@ -348,7 +350,8 @@ class TestAuthService:
     @pytest.mark.asyncio
     async def test_legacy_pbkdf2_compatibility(self, auth_service):
         """Test async: legacy PBKDF2 compatibility (with await)."""
-        import hashlib, secrets
+        import hashlib
+        import secrets
 
         password = "test_password_123"
         salt = secrets.token_bytes(32)
@@ -366,7 +369,8 @@ class TestAuthService:
     @pytest.mark.asyncio
     async def test_password_migration_workflow(self, auth_service):
         """Test async: password migration workflow (with await)."""
-        import hashlib, secrets
+        import hashlib
+        import secrets
 
         password = "migration_test_password"
         salt = secrets.token_bytes(32)

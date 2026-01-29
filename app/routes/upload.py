@@ -15,7 +15,7 @@ from app.services.session_service import SessionService
 from app.services.storage_service import StorageService
 from app.services.validation_service import ValidationService
 from app.tasks.cleanup import CleanupTasks
-from app.utils.file_utils import ImageFileHandler, FileUtils, ImageValidator
+from app.utils.file_utils import FileUtils, ImageFileHandler, ImageValidator
 from app.utils.logger import get_logger
 from app.utils.validators import ValidationError
 

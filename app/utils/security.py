@@ -3,12 +3,12 @@
 Password hashing, CORS конфигурация, security headers и другие функции безопасности.
 """
 
-import secrets
 import hashlib
 import hmac
 import os
 import re
-from typing import Optional, List, Dict, Any
+import secrets
+from typing import Any, Dict, List, Optional
 
 from fastapi import Request
 

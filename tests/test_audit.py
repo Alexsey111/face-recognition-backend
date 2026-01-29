@@ -3,21 +3,21 @@
 import json
 import logging
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch, AsyncMock
 from io import StringIO
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.utils.logger import (
-    audit_event,
+    _LOG_CONTEXT,
+    EmptyMessageFilter,
     LogContext,
+    StructuredFormatter,
+    _redact,
+    audit_event,
+    get_logger,
     log_with_context,
     setup_logger,
-    get_logger,
-    _redact,
-    StructuredFormatter,
-    EmptyMessageFilter,
-    _LOG_CONTEXT,
 )
 
 

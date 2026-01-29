@@ -2,26 +2,26 @@
 Тесты для структурированного логирования
 """
 
-import pytest
 import json
 import logging
-from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime
 from io import StringIO
+from unittest.mock import MagicMock, Mock, patch
 
+import pytest
 
 from app.utils.structured_logging import (
-    LoggerFactory,
-    LogContext,
-    get_logger,
-    log_with_context,
-    log_info,
-    log_error,
     AuditLogger,
-    redact_sensitive_data,
-    LogLevel,
+    LogContext,
     LogEntry,
+    LoggerFactory,
+    LogLevel,
     create_log,
+    get_logger,
+    log_error,
+    log_info,
+    log_with_context,
+    redact_sensitive_data,
 )
 
 
@@ -305,8 +305,8 @@ class TestStructuredLogging:
 
     def test_logger_factory_with_file(self):
         """Тест фабрики логгеров с файлом"""
-        import tempfile
         import os
+        import tempfile
 
         # Создаем временный файл (закрываем сразу, чтобы не блокировать)
         fd, temp_path = tempfile.mkstemp(suffix=".log")

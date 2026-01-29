@@ -3,10 +3,11 @@ Pydantic модели для работы с пользователями.
 Модели для создания, обновления и представления пользователей.
 """
 
-from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, EmailStr, field_validator, ConfigDict
-from datetime import datetime, timezone
 import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 class UserModel(BaseModel):

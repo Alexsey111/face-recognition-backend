@@ -3,13 +3,14 @@ Middleware для ограничения скорости запросов (Rate
 Защита от DDoS атак и контроль нагрузки на API.
 """
 
-from typing import Dict, Any
+import hashlib
+import time
+from collections import defaultdict, deque
+from typing import Any, Dict
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
-import time
-import hashlib
-from collections import defaultdict, deque
 
 from ..config import settings
 from ..utils.logger import get_logger

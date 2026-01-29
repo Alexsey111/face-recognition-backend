@@ -1,10 +1,12 @@
-from starlette.middleware.base import BaseHTTPMiddleware
-from fastapi import Request
 import time
 import uuid
 from typing import Callable
+
+from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
+
 from ..config import settings
-from ..utils.logger import get_logger, audit_event
+from ..utils.logger import audit_event, get_logger
 
 logger = get_logger(__name__)
 
@@ -106,32 +108,31 @@ Middleware для логирования всех HTTP запросов:
 - Интеграция с Prometheus метриками
 """
 
-import time
-import uuid
 import json
 import logging
-from typing import Optional, Callable, Dict, Any
+import time
+import uuid
+from typing import Any, Callable, Dict, Optional
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import JSONResponse
 
+from ..config import settings
+from ..utils.helpers import generate_request_id
 from ..utils.logger import (
-    get_logger,
-    log_with_context,
     LogContext,
     _redact,
+    get_logger,
+    log_with_context,
 )
-from ..utils.helpers import generate_request_id
-from ..config import settings
 from .metrics import (
-    http_requests_total,
     http_request_duration_seconds,
     http_request_size_bytes,
+    http_requests_total,
     http_response_size_bytes,
     record_error,
 )
-
 
 logger = get_logger(__name__)
 
@@ -550,8 +551,8 @@ def timed_operation(operation_name: Optional[str] = None):
     """
 
     def decorator(func):
-        import functools
         import asyncio
+        import functools
 
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs):

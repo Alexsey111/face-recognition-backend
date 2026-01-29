@@ -1,24 +1,26 @@
 """Сервис для расчета и отслеживания метрик FAR/FRR"""
+
 import asyncio
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any
-import numpy as np
 from collections import deque
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
 
+import numpy as np
+
+from app.config import settings
+from app.middleware.metrics import (
+    equal_error_rate,
+    false_accept_rate,
+    false_accept_total,
+    false_reject_rate,
+    false_reject_total,
+    record_verification_confidence,
+    record_verification_duration,
+)
 from app.services.cache_service import CacheService
 from app.services.database_service import DatabaseService
-from app.middleware.metrics import (
-    false_accept_rate,
-    false_reject_rate,
-    equal_error_rate,
-    false_accept_total,
-    false_reject_total,
-    record_verification_duration,
-    record_verification_confidence,
-)
 from app.utils.logger import get_logger
-from app.config import settings
 
 logger = get_logger(__name__)
 
@@ -26,14 +28,17 @@ logger = get_logger(__name__)
 @dataclass
 class MetricsConfig:
     """Конфигурация метрик."""
+
     WINDOW_SIZE: int = 1000
     UPDATE_INTERVAL: int = 60
     TARGET_FAR: float = 0.001  # < 0.1%
-    TARGET_FRR: float = 0.03   # < 3%
-    SEVERITY_THRESHOLDS: Dict[str, float] = field(default_factory=lambda: {
-        'low': 0.1,
-        'medium': 0.2,
-    })
+    TARGET_FRR: float = 0.03  # < 3%
+    SEVERITY_THRESHOLDS: Dict[str, float] = field(
+        default_factory=lambda: {
+            "low": 0.1,
+            "medium": 0.2,
+        }
+    )
 
 
 class MetricsService:
@@ -130,10 +135,10 @@ class MetricsService:
                         f"threshold={threshold:.3f}, severity={severity}"
                     )
                     return {
-                        'event': 'false_reject',
-                        'severity': severity,
-                        'score': similarity_score,
-                        'threshold': threshold,
+                        "event": "false_reject",
+                        "severity": severity,
+                        "score": similarity_score,
+                        "threshold": threshold,
                     }
             else:
                 self.impostor_scores.append(similarity_score)
@@ -151,21 +156,20 @@ class MetricsService:
                         f"threshold={threshold:.3f}, severity={severity}"
                     )
                     return {
-                        'event': 'false_accept',
-                        'severity': severity,
-                        'score': similarity_score,
-                        'threshold': threshold,
+                        "event": "false_accept",
+                        "severity": severity,
+                        "score": similarity_score,
+                        "threshold": threshold,
                     }
 
             # Record processing metrics
             if processing_time_ms is not None:
                 record_verification_duration("cosine", processing_time_ms / 1000.0)
             record_verification_confidence(
-                "match" if match_result else "no_match",
-                similarity_score
+                "match" if match_result else "no_match", similarity_score
             )
-        
-            return {'event': 'verification_recorded', 'score': similarity_score}
+
+            return {"event": "verification_recorded", "score": similarity_score}
 
     def _calculate_severity(
         self,
@@ -180,23 +184,23 @@ class MetricsService:
             'low', 'medium', 'high'
         """
         distance = abs(score - threshold)
-        low_threshold = self.config.SEVERITY_THRESHOLDS['low']
-        medium_threshold = self.config.SEVERITY_THRESHOLDS['medium']
+        low_threshold = self.config.SEVERITY_THRESHOLDS["low"]
+        medium_threshold = self.config.SEVERITY_THRESHOLDS["medium"]
 
         if is_false_reject:
             # FRR: genuine pair отклонена
             if distance > medium_threshold:
-                return 'high'
+                return "high"
             elif distance > low_threshold:
-                return 'medium'
-            return 'low'
+                return "medium"
+            return "low"
         else:
             # FAR: impostor accepted
             if score > threshold + medium_threshold:
-                return 'high'
+                return "high"
             elif score > threshold + low_threshold:
-                return 'medium'
-            return 'low'
+                return "medium"
+            return "low"
 
     async def _update_metrics(self) -> None:
         """Обновление Prometheus метрик."""
@@ -218,16 +222,15 @@ class MetricsService:
         eer = 0.0
         if len(self.genuine_scores) > 0 and len(self.impostor_scores) > 0:
             eer = self._calculate_eer(
-                list(self.genuine_scores),
-                list(self.impostor_scores)
+                list(self.genuine_scores), list(self.impostor_scores)
             )
         equal_error_rate.set(eer)
-        
+
         logger.debug(
             f"Metrics updated: FAR={far:.4f}%, FRR={frr:.4f}%, "
             f"EER={eer:.4f}%, window={len(self.genuine_scores) + len(self.impostor_scores)}"
         )
-        
+
     def _calculate_eer(
         self,
         genuine_scores: List[float],
@@ -290,12 +293,28 @@ class MetricsService:
 
         # Получаем значения метрик безопасным способом
         try:
-            far = false_accept_rate._value.get() if hasattr(false_accept_rate, '_value') else 0.0
-            frr = false_reject_rate._value.get() if hasattr(false_reject_rate, '_value') else 0.0
-            eer = equal_error_rate._value.get() if hasattr(equal_error_rate, '_value') else 0.0
+            far = (
+                false_accept_rate._value.get()
+                if hasattr(false_accept_rate, "_value")
+                else 0.0
+            )
+            frr = (
+                false_reject_rate._value.get()
+                if hasattr(false_reject_rate, "_value")
+                else 0.0
+            )
+            eer = (
+                equal_error_rate._value.get()
+                if hasattr(equal_error_rate, "_value")
+                else 0.0
+            )
         except (AttributeError, ValueError):
             # Fallback к прямым переменным
-            far = (impostor_accepted / impostor_total * 100) if impostor_total > 0 else 0.0
+            far = (
+                (impostor_accepted / impostor_total * 100)
+                if impostor_total > 0
+                else 0.0
+            )
             frr = (genuine_rejected / genuine_total * 100) if genuine_total > 0 else 0.0
             eer = 0.0
 
@@ -309,16 +328,24 @@ class MetricsService:
                 "far_compliant": far < self.config.TARGET_FAR * 100,
                 "frr_compliant": frr < self.config.TARGET_FRR * 100,
                 "overall_compliant": (
-                    far < self.config.TARGET_FAR * 100 and
-                    frr < self.config.TARGET_FRR * 100
+                    far < self.config.TARGET_FAR * 100
+                    and frr < self.config.TARGET_FRR * 100
                 ),
             },
             "window_size": len(genuine_scores) + len(impostor_scores),
             "distributions": {
-                "genuine_mean": round(float(np.mean(genuine_scores)), 4) if genuine_scores else 0,
-                "genuine_std": round(float(np.std(genuine_scores)), 4) if genuine_scores else 0,
-                "impostor_mean": round(float(np.mean(impostor_scores)), 4) if impostor_scores else 0,
-                "impostor_std": round(float(np.std(impostor_scores)), 4) if impostor_scores else 0,
+                "genuine_mean": (
+                    round(float(np.mean(genuine_scores)), 4) if genuine_scores else 0
+                ),
+                "genuine_std": (
+                    round(float(np.std(genuine_scores)), 4) if genuine_scores else 0
+                ),
+                "impostor_mean": (
+                    round(float(np.mean(impostor_scores)), 4) if impostor_scores else 0
+                ),
+                "impostor_std": (
+                    round(float(np.std(impostor_scores)), 4) if impostor_scores else 0
+                ),
             },
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
@@ -349,7 +376,8 @@ class MetricsService:
         """
         return {
             "running": self._running,
-            "update_task_active": self._update_task is not None and not self._update_task.done(),
+            "update_task_active": self._update_task is not None
+            and not self._update_task.done(),
             "window_size": len(self.genuine_scores) + len(self.impostor_scores),
             "genuine_buffer_size": len(self.genuine_scores),
             "impostor_buffer_size": len(self.impostor_scores),

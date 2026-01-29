@@ -1,20 +1,21 @@
 """API роуты для проверки здоровья сервиса."""
 
-from fastapi import APIRouter, HTTPException
-from datetime import datetime, timezone
-import time
-import psutil
+import asyncio
 import os
 import sys
-import asyncio
+import time
+from datetime import datetime, timezone
+
 import asyncpg
+import psutil
 import redis.asyncio as redis
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, HTTPException
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import __version__
-from ..models.response import HealthResponse, StatusResponse, BaseResponse
 from ..config import settings
+from ..models.response import BaseResponse, HealthResponse, StatusResponse
 from ..utils.logger import get_logger
 
 router = APIRouter()
@@ -51,10 +52,11 @@ async def check_redis_connection() -> tuple[bool, str]:
 async def check_storage_connection() -> tuple[bool, str]:
     """Проверка подключения к хранилищу (S3/MinIO)."""
     try:
-        import boto3
-        from botocore.config import Config
         import asyncio
         import functools
+
+        import boto3
+        from botocore.config import Config
 
         config = Config(
             region_name=settings.S3_REGION,
@@ -101,31 +103,30 @@ async def check_ml_service_connection() -> tuple[bool, str]:
         else:
             # Локальный ML сервис - проверяем инициализацию
             from ..services.ml_service import get_ml_service
-            
+
             try:
                 ml_service = await get_ml_service()
-                
+
                 # Проверяем что модели загружены
                 if not ml_service.is_initialized:
                     return False, "models_not_initialized"
-                
+
                 # Проверяем статус моделей
                 stats = ml_service.get_stats()
-                if not stats.get('models_initialized', False):
+                if not stats.get("models_initialized", False):
                     return False, "models_not_loaded"
-                
+
                 # Все хорошо
-                device = stats.get('device', 'unknown')
+                device = stats.get("device", "unknown")
                 return True, f"ready_on_{device}"
-                
+
             except Exception as e:
                 logger.error(f"ML service health check error: {str(e)}")
                 return False, f"error: {str(e)[:50]}"
-                
+
     except Exception as e:
         logger.error(f"ML service health check failed: {str(e)}")
         return False, str(e)
-
 
 
 async def check_all_services() -> dict[str, tuple[bool, str]]:
@@ -310,6 +311,7 @@ async def get_ml_metrics():
     """
     try:
         import torch
+
         from ..services.ml_service import get_ml_service
 
         ml_service = await get_ml_service()

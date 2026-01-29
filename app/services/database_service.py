@@ -1,24 +1,23 @@
-from typing import Optional, Dict, Any, List
-from datetime import datetime, timezone, timedelta
 import logging
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-
 from app.db.crud import (
-    UserCRUD,
-    ReferenceCRUD,
-    VerificationSessionCRUD,
     AuditLogCRUD,
+    ReferenceCRUD,
+    UserCRUD,
+    VerificationSessionCRUD,
 )
 from app.db.models import (
-    User,
+    AuditLog,
     Reference,
+    User,
     VerificationSession,
     VerificationStatus,
-    AuditLog,
 )
 from app.models.user import UserCreate, UserUpdate
 
@@ -845,7 +844,7 @@ class BiometricService:
         Returns:
             Список error logs
         """
-        from sqlalchemy import select, and_
+        from sqlalchemy import and_, select
 
         query = select(AuditLog).where(AuditLog.success == False)
 
@@ -895,7 +894,7 @@ class BiometricService:
         date_to: Optional[datetime] = None,
     ) -> int:
         """Подсчёт error logs."""
-        from sqlalchemy import select, func, and_
+        from sqlalchemy import and_, func, select
 
         query = select(func.count(AuditLog.id)).where(AuditLog.success == False)
 

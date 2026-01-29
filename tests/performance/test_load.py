@@ -2,11 +2,12 @@
 Performance тесты для проверки производительности под нагрузкой.
 """
 
-import pytest
-import time
-import statistics
-from locust import HttpUser, task, between
 import base64
+import statistics
+import time
+
+import pytest
+from locust import HttpUser, between, task
 
 
 class FaceVerificationUser(HttpUser):
@@ -88,8 +89,9 @@ class TestPerformanceMetrics:
     @pytest.mark.performance
     def test_embedding_generation_speed(self):
         """Тест скорости генерации эмбеддингов."""
-        from app.services.ml_service import OptimizedMLService
         import asyncio
+
+        from app.services.ml_service import OptimizedMLService
 
         async def run_test():
             ml_service = OptimizedMLService()
@@ -129,9 +131,11 @@ class TestPerformanceMetrics:
     @pytest.mark.performance
     def test_verification_speed(self):
         """Тест скорости верификации."""
-        from app.services.ml_service import OptimizedMLService
         import asyncio
+
         import numpy as np
+
+        from app.services.ml_service import OptimizedMLService
 
         async def run_test():
             ml_service = OptimizedMLService()

@@ -2,15 +2,15 @@
 Unit-тесты для ReferenceService.
 """
 
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 import hashlib
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.services.reference_service import ReferenceService
+import pytest
+
 from app.db.models import Reference
-from app.utils.exceptions import ValidationError, ProcessingError, NotFoundError
-
+from app.services.reference_service import ReferenceService
+from app.utils.exceptions import NotFoundError, ProcessingError, ValidationError
 
 # ======================================================================
 # Fixtures
@@ -520,29 +520,28 @@ async def test_get_all_references_with_filters(
 ):
     """Test getting all references with filtering."""
     mock_user_id = "test-user-123"
-    
+
     ref1 = MagicMock()
     ref1.id = "ref-1"
     ref1.label = "my_label"
     ref1.is_active = True
     ref1.quality_score = 0.9
-    
+
     ref2 = MagicMock()
     ref2.id = "ref-2"
     ref2.label = "other_label"
     ref2.is_active = False
     ref2.quality_score = 0.7
-    
+
     async def mock_get_all(user_id, include_inactive=False):
         return [ref1, ref2]
-    
+
     reference_service.get_all_references = mock_get_all
-    
+
     result = await reference_service.get_all_references(
-        user_id=mock_user_id,
-        include_inactive=False
+        user_id=mock_user_id, include_inactive=False
     )
-    
+
     assert len(result) == 2
 
 
@@ -555,15 +554,16 @@ async def test_get_latest_reference_multiple(
     mock_ref = MagicMock()
     mock_ref.id = "latest-ref"
     mock_ref.user_id = mock_user_id
-    
+
     with patch("app.services.reference_service.ReferenceCRUD") as mock_crud:
+
         async def mock_get_latest(user_id):
             return mock_ref
-        
+
         reference_service.get_latest_reference = mock_get_latest
-        
+
         result = await reference_service.get_latest_reference(mock_user_id)
-        
+
         assert result.id == "latest-ref"
 
 
@@ -577,16 +577,15 @@ async def test_update_reference_metadata_only(
     updated_ref = MagicMock()
     updated_ref.id = mock_reference_id
     updated_ref.metadata = {"new_key": "new_value"}
-    
+
     with patch("app.services.reference_service.ReferenceCRUD") as mock_crud:
         mock_crud.get_reference_by_id = AsyncMock(return_value=mock_reference)
         mock_crud.update_reference = AsyncMock(return_value=updated_ref)
-        
+
         result = await reference_service.update_reference(
-            reference_id=mock_reference_id,
-            metadata={"new_key": "new_value"}
+            reference_id=mock_reference_id, metadata={"new_key": "new_value"}
         )
-        
+
         mock_crud.update_reference.assert_called_once()
 
 
@@ -600,12 +599,11 @@ async def test_update_reference_deactivate(
     with patch("app.services.reference_service.ReferenceCRUD") as mock_crud:
         mock_crud.get_reference_by_id = AsyncMock(return_value=mock_reference)
         mock_crud.update_reference = AsyncMock(return_value=mock_reference)
-        
+
         result = await reference_service.update_reference(
-            reference_id=mock_reference_id,
-            is_active=False
+            reference_id=mock_reference_id, is_active=False
         )
-        
+
         mock_crud.update_reference.assert_called_once_with(
             db=reference_service.db,
             reference_id=mock_reference_id,
@@ -621,9 +619,11 @@ async def test_delete_reference_not_found(
     mock_reference_id,
 ):
     """Test deleting non-existent reference."""
-    with patch.object(reference_service, 'get_reference', new_callable=AsyncMock) as mock_get:
+    with patch.object(
+        reference_service, "get_reference", new_callable=AsyncMock
+    ) as mock_get:
         mock_get.return_value = None
-        
+
         with pytest.raises(NotFoundError):
             await reference_service.delete_reference(mock_reference_id)
 
@@ -635,15 +635,17 @@ async def test_compare_with_references_empty_result(
 ):
     """Test comparing when no references found."""
     mock_user_id = "test-user-123"
-    
-    with patch.object(reference_service, 'get_all_references', new_callable=AsyncMock) as mock_get_all:
+
+    with patch.object(
+        reference_service, "get_all_references", new_callable=AsyncMock
+    ) as mock_get_all:
         mock_get_all.return_value = []
-        
+
         results = await reference_service.compare_with_references(
             image_data=mock_image_data.encode(),
             user_id=mock_user_id,
         )
-        
+
         assert results == []
 
 
@@ -655,20 +657,20 @@ async def test_compare_with_specific_references(
 ):
     """Test comparing with specific reference IDs."""
     mock_ref_ids = ["ref-1", "ref-2"]
-    
+
     with patch("app.services.reference_service.ReferenceCRUD") as mock_crud:
         mock_crud.get_reference_by_id = AsyncMock(return_value=mock_reference)
-        
+
         async def mock_get_ref(ref_id):
             return mock_reference
-        
+
         reference_service.get_reference = mock_get_ref
-        
+
         results = await reference_service.compare_with_references(
             image_data=mock_image_data.encode(),
             reference_ids=mock_ref_ids,
         )
-        
+
         assert len(results) > 0
 
 
@@ -682,18 +684,18 @@ async def test_compare_with_references_error_handling(
     """Test error handling during comparison."""
     # Make compare_faces raise an exception
     reference_service.ml_service.compare_faces.side_effect = Exception("ML error")
-    
+
     async def mock_get_all(user_id, include_inactive=False):
         return [mock_reference]
-    
+
     reference_service.get_all_references = mock_get_all
-    
+
     # Should handle error gracefully and continue
     results = await reference_service.compare_with_references(
         image_data=mock_image_data.encode(),
         user_id=mock_user_id,
     )
-    
+
     # Results should be empty due to error
     assert len(results) == 0
 
@@ -705,7 +707,7 @@ async def test_get_reference_statistics_single_reference(
 ):
     """Test statistics with single active reference."""
     now = datetime.now(timezone.utc)
-    
+
     ref = Reference(
         id="ref-1",
         user_id=mock_user_id,
@@ -714,14 +716,14 @@ async def test_get_reference_statistics_single_reference(
         is_active=True,
         created_at=now,
     )
-    
+
     async def mock_get_all(user_id, include_inactive=True):
         return [ref]
-    
+
     reference_service.get_all_references = mock_get_all
-    
+
     stats = await reference_service.get_reference_statistics(mock_user_id)
-    
+
     assert stats["total_references"] == 1
     assert stats["active_references"] == 1
     assert stats["average_quality_score"] == 0.95
@@ -735,20 +737,21 @@ async def test_create_reference_duplicate_embedding(
 ):
     """Test creating reference with duplicate embedding."""
     from sqlalchemy import text
-    
+
     # Mock finding duplicate
     mock_duplicate = MagicMock()
     mock_duplicate.id = "existing-ref"
-    
-    with patch.object(reference_service.db, 'execute', new_callable=AsyncMock) as mock_execute:
+
+    with patch.object(
+        reference_service.db, "execute", new_callable=AsyncMock
+    ) as mock_execute:
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = mock_duplicate
         mock_execute.return_value = mock_result
-        
+
         with pytest.raises(ValidationError, match="Duplicate embedding detected"):
             await reference_service._check_duplicate_embedding(
-                user_id=mock_user_id,
-                embedding_hash="duplicate-hash"
+                user_id=mock_user_id, embedding_hash="duplicate-hash"
             )
 
 
@@ -759,13 +762,15 @@ async def test_create_reference_new_version(
     mock_image_data,
 ):
     """Test getting next version for user with existing references."""
-    with patch.object(reference_service.db, 'execute', new_callable=AsyncMock) as mock_execute:
+    with patch.object(
+        reference_service.db, "execute", new_callable=AsyncMock
+    ) as mock_execute:
         mock_result = MagicMock()
         mock_result.scalar.return_value = 3
         mock_execute.return_value = mock_result
-        
+
         version = await reference_service._get_next_version(mock_user_id)
-        
+
         assert version == 4
 
 
@@ -776,13 +781,15 @@ async def test_create_reference_first_version(
     mock_image_data,
 ):
     """Test getting next version for user with no references."""
-    with patch.object(reference_service.db, 'execute', new_callable=AsyncMock) as mock_execute:
+    with patch.object(
+        reference_service.db, "execute", new_callable=AsyncMock
+    ) as mock_execute:
         mock_result = MagicMock()
         mock_result.scalar.return_value = None
         mock_execute.return_value = mock_result
-        
+
         version = await reference_service._get_next_version(mock_user_id)
-        
+
         assert version == 1
 
 
@@ -793,11 +800,15 @@ async def test_create_reference_no_previous_for_similarity(
     mock_image_data,
 ):
     """Test creating reference when no previous reference exists."""
-    with patch("app.services.reference_service.ReferenceCRUD") as mock_crud, \
-         patch.object(reference_service, 'get_latest_reference', new_callable=AsyncMock) as mock_get_latest:
-        
+    with (
+        patch("app.services.reference_service.ReferenceCRUD") as mock_crud,
+        patch.object(
+            reference_service, "get_latest_reference", new_callable=AsyncMock
+        ) as mock_get_latest,
+    ):
+
         mock_get_latest.return_value = None
-        
+
         mock_crud.create_reference = AsyncMock(
             return_value=Reference(
                 id="new-ref",
@@ -806,12 +817,12 @@ async def test_create_reference_no_previous_for_similarity(
                 is_active=True,
             )
         )
-        
+
         result = await reference_service.create_reference(
             user_id=mock_user_id,
             image_data=mock_image_data.encode(),
         )
-        
+
         # similarity_with_previous should be None in metadata
         assert result is not None
 
@@ -823,12 +834,12 @@ async def test_compare_embeddings_directly(
 ):
     """Test direct embedding comparison."""
     reference_service.ml_service.compare_embeddings.return_value = 0.88
-    
+
     similarity = await reference_service.ml_service.compare_embeddings(
         embedding_1=mock_embedding,
         embedding_2=mock_embedding,
     )
-    
+
     assert similarity == 0.88
 
 
@@ -839,13 +850,17 @@ async def test_decrypt_embedding_for_reference(
     mock_embedding,
 ):
     """Test decrypting embedding from reference."""
-    with patch.object(reference_service.encryption_service, 'decrypt_embedding', new_callable=AsyncMock) as mock_decrypt:
+    with patch.object(
+        reference_service.encryption_service,
+        "decrypt_embedding",
+        new_callable=AsyncMock,
+    ) as mock_decrypt:
         mock_decrypt.return_value = mock_embedding
-        
+
         result = await reference_service.encryption_service.decrypt_embedding(
             mock_reference.embedding_encrypted
         )
-        
+
         assert result == mock_embedding
 
 
@@ -857,7 +872,7 @@ async def test_get_reference_statistics_sorted_by_date(
     """Test statistics shows correct newest/oldest dates."""
     now = datetime.now(timezone.utc)
     yesterday = datetime.now(timezone.utc).replace(day=now.day - 1)
-    
+
     newer_ref = Reference(
         id="newer",
         user_id=mock_user_id,
@@ -874,14 +889,14 @@ async def test_get_reference_statistics_sorted_by_date(
         is_active=True,
         created_at=yesterday,
     )
-    
+
     async def mock_get_all(user_id, include_inactive=True):
         return [newer_ref, older_ref]
-    
+
     reference_service.get_all_references = mock_get_all
-    
+
     stats = await reference_service.get_reference_statistics(mock_user_id)
-    
+
     assert stats["newest_reference"] is not None
     assert stats["oldest_reference"] is not None
     assert stats["latest_version"] == 2
@@ -890,6 +905,7 @@ async def test_get_reference_statistics_sorted_by_date(
 # ======================================================================
 # ДОПОЛНИТЕЛЬНЫЕ ТЕСТЫ ДЛЯ ДОСТИЖЕНИЯ 100% ПОКРЫТИЯ
 # ======================================================================
+
 
 @pytest.mark.asyncio
 async def test_compare_with_references_max_results_limit(
@@ -967,10 +983,21 @@ async def test_get_all_references_include_inactive(
 ):
     """Тест получения всех references включая неактивные."""
 
-    active_ref = Reference(id="active", user_id=mock_user_id, is_active=True, created_at=datetime.now(timezone.utc))
-    inactive_ref = Reference(id="inactive", user_id=mock_user_id, is_active=False, created_at=datetime.now(timezone.utc))
+    active_ref = Reference(
+        id="active",
+        user_id=mock_user_id,
+        is_active=True,
+        created_at=datetime.now(timezone.utc),
+    )
+    inactive_ref = Reference(
+        id="inactive",
+        user_id=mock_user_id,
+        is_active=False,
+        created_at=datetime.now(timezone.utc),
+    )
 
     with patch("app.services.reference_service.ReferenceCRUD") as mock_crud:
+
         async def mock_get_all_refs(db, user_id):
             return [active_ref, inactive_ref]
 
@@ -992,8 +1019,10 @@ async def test_create_reference_store_original_false(
 ):
     """Тест создания reference без сохранения оригинала."""
 
-    with patch("app.services.reference_service.ReferenceCRUD") as mock_crud, \
-         patch("app.services.reference_service.settings") as mock_settings:
+    with (
+        patch("app.services.reference_service.ReferenceCRUD") as mock_crud,
+        patch("app.services.reference_service.settings") as mock_settings,
+    ):
 
         mock_settings.STORE_ORIGINAL_IMAGES = False
 
@@ -1164,6 +1193,7 @@ async def test_get_latest_reference_none(
     """Тест получения latest reference когда их нет."""
 
     with patch("app.services.reference_service.ReferenceCRUD") as mock_crud:
+
         async def mock_execute():
             mock_result = MagicMock()
             mock_result.scalar_one_or_none.return_value = None

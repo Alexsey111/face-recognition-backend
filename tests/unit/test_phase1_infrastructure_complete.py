@@ -3,14 +3,15 @@
 Проверяет все 13 задач первой фазы проекта.
 """
 
-import os
-import sys
-import yaml
 import json
+import os
 import subprocess
+import sys
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
+import yaml
 
 # Добавляем путь к корню проекта
 sys.path.append(str(Path(__file__).parent.parent.parent))

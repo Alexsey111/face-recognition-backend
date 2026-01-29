@@ -14,21 +14,22 @@ Features:
 
 from __future__ import annotations
 
+import asyncio
 import io
 import time
-import asyncio
-from typing import Optional, Dict, Any, List, Tuple, Union
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple, Union
 
-import numpy as np
 import cv2
-from PIL import Image
-
+import numpy as np
 import torch
 from facenet_pytorch import MTCNN, InceptionResnetV1
-from datetime import datetime
+from PIL import Image
 
 try:
-    from decord import VideoReader, cpu as decord_cpu
+    from decord import VideoReader
+    from decord import cpu as decord_cpu
+
     _HAS_DECORD = True
 except Exception:
     VideoReader = None
@@ -36,22 +37,28 @@ except Exception:
     _HAS_DECORD = False
 
 from ..config import settings
-from ..utils.logger import get_logger
-from ..utils.exceptions import ProcessingError, MLServiceError
+from ..utils.exceptions import MLServiceError, ProcessingError
 
 # Импорты утилит для выравнивания, анализа освещения и depth estimation
 # ✅ ВСЕ ЭТИ ФУНКЦИИ ТЕПЕРЬ ИСПОЛЬЗУЮТ MediaPipe ПОД КАПОТОМ
+from ..utils.face_alignment_utils import DepthAnalysis  # Dataclass для depth
+from ..utils.face_alignment_utils import FaceLandmarks  # Класс для работы с landmarks
+from ..utils.face_alignment_utils import LightingAnalysis  # Dataclass для результатов
+from ..utils.face_alignment_utils import align_face  # Выравнивание по landmarks
 from ..utils.face_alignment_utils import (
-    detect_face_landmarks,      # MediaPipe → 68-point landmarks
-    align_face,                  # Выравнивание по landmarks
-    FaceLandmarks,              # Класс для работы с landmarks
-    analyze_shadows_and_lighting,  # Анализ освещения
-    enhance_lighting,           # Улучшение освещения
-    analyze_depth_for_liveness, # 3D depth estimation
-    LightingAnalysis,           # Dataclass для результатов
-    DepthAnalysis,              # Dataclass для depth
-    combine_liveness_scores,    # Комбинирование оценок
+    analyze_depth_for_liveness,  # 3D depth estimation
 )
+from ..utils.face_alignment_utils import (
+    analyze_shadows_and_lighting,  # Анализ освещения
+)
+from ..utils.face_alignment_utils import (
+    combine_liveness_scores,  # Комбинирование оценок
+)
+from ..utils.face_alignment_utils import (
+    detect_face_landmarks,  # MediaPipe → 68-point landmarks
+)
+from ..utils.face_alignment_utils import enhance_lighting  # Улучшение освещения
+from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -65,7 +72,7 @@ class OptimizedMLService:
     - MTCNN для детекции лиц - fast & accurate
     - MediaPipe для 468→68 point landmarks - кросс-платформенный
     - MiniFASNetV2 для anti-spoofing - 98.5% certified
-    
+
     Обновления:
     - ✅ Полностью удалена зависимость от dlib
     - ✅ Используется MediaPipe для всех landmarks

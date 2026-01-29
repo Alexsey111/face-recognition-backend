@@ -9,22 +9,21 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, Query, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..db.database import get_async_db
-from ..models.request import VerifyRequest
-from ..models.response import VerifyResponse, SessionResponse
-from ..models.verification import VerificationSessionCreate, VerificationRequest
-from ..routes.auth import get_current_user
-from ..services.verify_service import VerifyService
-from ..utils.exceptions import ValidationError, ProcessingError, NotFoundError
-from ..utils.logger import get_logger
-
-from ..models.reference import Reference
-from ..services.cache_service import CacheService
 from ..dependencies import get_cache_service
+from ..models.reference import Reference
+from ..models.request import VerifyRequest
+from ..models.response import SessionResponse, VerifyResponse
+from ..models.verification import VerificationRequest, VerificationSessionCreate
+from ..routes.auth import get_current_user
+from ..services.cache_service import CacheService
+from ..services.verify_service import VerifyService
+from ..utils.exceptions import NotFoundError, ProcessingError, ValidationError
+from ..utils.logger import get_logger
 
 router = APIRouter(tags=["Verify"])
 logger = get_logger(__name__)

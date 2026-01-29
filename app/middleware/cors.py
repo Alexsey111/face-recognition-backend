@@ -3,12 +3,13 @@ Middleware для настройки CORS (Cross-Origin Resource Sharing).
 Конфигурация политики CORS для API.
 """
 
-from typing import List, Optional, Dict, Any
+import time
+from typing import Any, Dict, List, Optional
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response, JSONResponse
-import time
+from starlette.responses import JSONResponse, Response
 
 from ..config import settings
 from ..utils.logger import get_logger

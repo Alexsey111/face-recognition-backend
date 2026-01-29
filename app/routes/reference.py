@@ -4,26 +4,28 @@ Reference API Routes - Управление эталонными изображ�
 Упрощённая версия с использованием ReferenceService.
 """
 
+import uuid
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Query, Request
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from ..config import settings
+from ..db.database import get_async_db
+from ..dependencies import get_cache_service
+from ..models.reference import ReferenceCompare
 from ..models.request import ReferenceCreateRequest, ReferenceUpdateRequest
 from ..models.response import (
-    ReferenceResponse,
-    ReferenceListResponse,
     BaseResponse,
+    ReferenceListResponse,
+    ReferenceResponse,
 )
-from ..models.reference import ReferenceCompare
-from ..services.reference_service import ReferenceService
+from ..routes.auth import get_current_user
 from ..services.cache_service import CacheService
 from ..services.encryption_service import EncryptionService
-from ..db.database import get_async_db
-from ..routes.auth import get_current_user
-from ..dependencies import get_cache_service
+from ..services.reference_service import ReferenceService
+from ..utils.exceptions import NotFoundError, ValidationError
 from ..utils.logger import get_logger
-from ..utils.exceptions import ValidationError, NotFoundError
-from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import APIRouter, Query, Request, Depends
-from typing import Optional
-import uuid
 
 router = APIRouter(tags=["Reference"])
 logger = get_logger(__name__)
@@ -65,6 +67,7 @@ async def get_references(
         else:
             # Если user_id не указан, получаем все через прямой запрос
             from sqlalchemy import select
+
             from ..db.models import Reference
 
             result = await db.execute(select(Reference))
@@ -400,7 +403,9 @@ async def update_reference_image(
             store_original=settings.STORE_ORIGINAL_IMAGES,
         )
 
-        logger.info(f"Reference updated: {reference_id} -> {new_ref.id} (v{new_ref.version})")
+        logger.info(
+            f"Reference updated: {reference_id} -> {new_ref.id} (v{new_ref.version})"
+        )
 
         # ==================== Cache Invalidation & Warm-up ====================
         # Инвалидируем старый кэш
@@ -410,7 +415,9 @@ async def update_reference_image(
         # Получаем и кэшируем новый embedding
         if new_ref.embedding_encrypted:
             encryption_service = EncryptionService()
-            embedding = await encryption_service.decrypt_embedding(new_ref.embedding_encrypted)
+            embedding = await encryption_service.decrypt_embedding(
+                new_ref.embedding_encrypted
+            )
 
             if embedding is not None:
                 await cache.cache_reference_embedding(
@@ -419,10 +426,16 @@ async def update_reference_image(
                     version=new_ref.version,
                     metadata={
                         "quality_score": new_ref.quality_score,
-                        "created_at": new_ref.created_at.isoformat() if new_ref.created_at else None,
+                        "created_at": (
+                            new_ref.created_at.isoformat()
+                            if new_ref.created_at
+                            else None
+                        ),
                     },
                 )
-                logger.info(f"📦 Cached new reference (v{new_ref.version}) for user {user_id}")
+                logger.info(
+                    f"📦 Cached new reference (v{new_ref.version}) for user {user_id}"
+                )
 
         # Инвалидируем user stats
         await cache.invalidate_user_stats(user_id)

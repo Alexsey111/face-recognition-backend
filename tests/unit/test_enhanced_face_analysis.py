@@ -7,27 +7,28 @@
 3. 3D Depth Estimation для liveness detection
 """
 
-import pytest
-import numpy as np
-from PIL import Image
-from unittest.mock import Mock, AsyncMock, patch
-import sys
 import os
+import sys
+from unittest.mock import AsyncMock, Mock, patch
+
+import numpy as np
+import pytest
+from PIL import Image
 
 # Добавляем путь к модулям
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from app.utils.face_alignment_utils import (
-    FaceLandmarks,
-    detect_face_landmarks,
-    align_face,
-    analyze_shadows_and_lighting,
-    enhance_lighting,
-    analyze_depth_for_liveness,
-    combine_liveness_scores,
-    estimate_depth_map,
-    LightingAnalysis,
     DepthAnalysis,
+    FaceLandmarks,
+    LightingAnalysis,
+    align_face,
+    analyze_depth_for_liveness,
+    analyze_shadows_and_lighting,
+    combine_liveness_scores,
+    detect_face_landmarks,
+    enhance_lighting,
+    estimate_depth_map,
 )
 
 

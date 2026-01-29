@@ -3,9 +3,10 @@
 Сервис для записи audit trail событий в БД.
 """
 
-from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
-from sqlalchemy import select, and_, func
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..db.models import AuditLog

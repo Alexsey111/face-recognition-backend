@@ -3,11 +3,12 @@
 Модуль с покрытием 0% - цель: увеличить до 80%+
 """
 
+from unittest.mock import MagicMock, Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock
 from fastapi import FastAPI, Request
-from starlette.responses import Response, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse, Response
 
 # Mock настроек
 with patch("app.middleware.cors.settings") as mock_settings:
@@ -16,13 +17,13 @@ with patch("app.middleware.cors.settings") as mock_settings:
 
     from app.middleware.cors import (
         CORSMiddleware,
-        SecurityHeadersMiddleware,
         PreFlightHandlerMiddleware,
-        setup_cors,
-        is_cors_request,
-        get_allowed_origins,
+        SecurityHeadersMiddleware,
         add_allowed_origin,
+        get_allowed_origins,
+        is_cors_request,
         remove_allowed_origin,
+        setup_cors,
         validate_cors_config,
     )
 

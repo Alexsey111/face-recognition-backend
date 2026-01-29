@@ -3,15 +3,15 @@ Pytest configuration and fixtures for testing.
 Объединённая версия с mock services и реальной БД.
 """
 
-import sys
 import os
+import sys
 from pathlib import Path
 
 # Добавляем корневую директорию проекта в sys.path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-'''# Mock cv2 to avoid import issues
+"""# Mock cv2 to avoid import issues
 sys.modules['cv2'] = type(sys)('cv2_mock')
 sys.modules['cv2.dnn'] = type(sys)('cv2_dnn_mock')
 
@@ -22,28 +22,28 @@ sys.modules['torchvision'] = type(sys)('torchvision_mock')
 
 # Mock facenet_pytorch
 sys.modules['facenet_pytorch'] = type(sys)('facenet_pytorch_mock')
-#sys.modules['PIL'] = type(sys)('PIL_mock')'''
+#sys.modules['PIL'] = type(sys)('PIL_mock')"""
 
 import asyncio
-import uuid
 import gc
+import uuid
 from typing import AsyncGenerator, Generator
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.config import settings
-from app.main import app
 from app.db.database import get_db
-
+from app.main import app
 
 # =============================================================================
 # Event Loop Configuration
 # =============================================================================
 # Измени блок в conftest.py на этот:
+
 
 @pytest_asyncio.fixture(scope="session")
 async def initialized_service():
@@ -51,13 +51,15 @@ async def initialized_service():
     Инициализирует AntiSpoofingService один раз для всех тестов.
     Это значительно ускоряет прогон за счет однократной загрузки весов.
     """
-    from app.services.anti_spoofing_service import AntiSpoofingService
-    import torch
     import gc
+
+    import torch
+
+    from app.services.anti_spoofing_service import AntiSpoofingService
 
     # Создаем и инициализируем сервис
     svc = AntiSpoofingService()
-    
+
     try:
         await svc.initialize()
     except Exception as e:
@@ -67,16 +69,17 @@ async def initialized_service():
 
     # Очистка ресурсов только в самом конце сессии
     try:
-        if hasattr(svc, 'model') and svc.model is not None:
+        if hasattr(svc, "model") and svc.model is not None:
             svc.model.cpu()
             del svc.model
-        
+
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-            
+
         gc.collect()
     except Exception as e:
         print(f"Ошибки при очистке ML-ресурсов: {e}")
+
 
 '''@pytest.fixture(scope="function")
 def event_loop():
@@ -352,7 +355,7 @@ async def cache():
 # Test Client Fixtures
 # =============================================================================
 
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 from starlette.testclient import TestClient
 
 

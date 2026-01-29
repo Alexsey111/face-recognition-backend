@@ -3,14 +3,15 @@ Middleware для аутентификации и авторизации.
 JWT токены, проверка прав доступа и управление сессиями.
 """
 
-from typing import Optional, Dict, Any
-from fastapi import Request, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
-import jwt
-from datetime import datetime, timezone, timedelta
 import hashlib
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Optional
+
+import jwt
+from fastapi import HTTPException, Request, status
+from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from ..config import settings
 from ..utils.logger import get_logger

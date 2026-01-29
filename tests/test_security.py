@@ -3,18 +3,19 @@
 Проверка интеграции компонентов безопасности и защиты от OWASP Top 10 уязвимостей.
 """
 
-import pytest
 import asyncio
-import json
 import base64
-from unittest.mock import Mock, patch, AsyncMock
-from datetime import datetime, timezone, timedelta
+import json
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, Mock, patch
 
+import pytest
+
+from app.config import settings
 from app.services.auth_service import AuthService
 from app.services.encryption_service import EncryptionService
-from app.utils.validators import validate_email, validate_password, sanitize_string
 from app.utils.exceptions import UnauthorizedError, ValidationError
-from app.config import settings
+from app.utils.validators import sanitize_string, validate_email, validate_password
 
 
 class TestSecurityIntegration:

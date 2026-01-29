@@ -11,12 +11,12 @@ Logging Middleware (production-safe).
 
 import time
 import uuid
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from ..utils.logger import get_logger, LogContext
+from ..utils.logger import LogContext, get_logger
 
 logger = get_logger(__name__)
 

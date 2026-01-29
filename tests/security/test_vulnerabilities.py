@@ -2,11 +2,12 @@
 Security тесты для проверки уязвимостей.
 """
 
+import uuid
+
 import pytest
-import uuid
 from fastapi.testclient import TestClient
+
 from app.main import create_test_app
-import uuid
 
 
 @pytest.fixture
@@ -73,13 +74,18 @@ class TestInputValidation:
         )
         login_response = client.post(
             "/api/v1/auth/login",
-            data={"username": f"test_{unique_id}@example.com", "password": "password123"},
+            data={
+                "username": f"test_{unique_id}@example.com",
+                "password": "password123",
+            },
         )
 
         if login_response.status_code != 200:
             pytest.skip(f"Login failed with status {login_response.status_code}")
 
-        token = login_response.json().get("access_token") or login_response.json().get("tokens", {}).get("access_token")
+        token = login_response.json().get("access_token") or login_response.json().get(
+            "tokens", {}
+        ).get("access_token")
         if not token:
             pytest.skip("No access token in login response")
 
@@ -104,17 +110,25 @@ class TestInputValidation:
         unique_id = uuid.uuid4().hex[:8]
         client.post(
             "/api/v1/auth/register",
-            json={"email": f"malicious_{unique_id}@example.com", "password": "password123"},
+            json={
+                "email": f"malicious_{unique_id}@example.com",
+                "password": "password123",
+            },
         )
         login_response = client.post(
             "/api/v1/auth/login",
-            data={"username": f"malicious_{unique_id}@example.com", "password": "password123"},
+            data={
+                "username": f"malicious_{unique_id}@example.com",
+                "password": "password123",
+            },
         )
 
         if login_response.status_code != 200:
             pytest.skip(f"Login failed with status {login_response.status_code}")
 
-        token = login_response.json().get("access_token") or login_response.json().get("tokens", {}).get("access_token")
+        token = login_response.json().get("access_token") or login_response.json().get(
+            "tokens", {}
+        ).get("access_token")
         if not token:
             pytest.skip("No access token in login response")
 
@@ -145,20 +159,28 @@ class TestRateLimiting:
         # Регистрация
         register_response = client.post(
             "/api/v1/auth/register",
-            json={"email": f"ratelimit_{unique_id}@example.com", "password": "password123"},
+            json={
+                "email": f"ratelimit_{unique_id}@example.com",
+                "password": "password123",
+            },
         )
         if register_response.status_code not in [200, 201]:
             pytest.skip(f"Registration failed: {register_response.status_code}")
 
         login_response = client.post(
             "/api/v1/auth/login",
-            data={"username": f"ratelimit_{unique_id}@example.com", "password": "password123"},
+            data={
+                "username": f"ratelimit_{unique_id}@example.com",
+                "password": "password123",
+            },
         )
 
         if login_response.status_code != 200:
             pytest.skip(f"Login failed: {login_response.status_code}")
 
-        token = login_response.json().get("access_token") or login_response.json().get("tokens", {}).get("access_token")
+        token = login_response.json().get("access_token") or login_response.json().get(
+            "tokens", {}
+        ).get("access_token")
         if not token:
             pytest.skip("No access token in login response")
 
@@ -191,20 +213,28 @@ class TestDataPrivacy:
         # Регистрация и создание reference
         register_response = client.post(
             "/api/v1/auth/register",
-            json={"email": f"privacy_{unique_id}@example.com", "password": "password123"},
+            json={
+                "email": f"privacy_{unique_id}@example.com",
+                "password": "password123",
+            },
         )
         if register_response.status_code not in [200, 201]:
             pytest.skip(f"Registration failed: {register_response.status_code}")
 
         login_response = client.post(
             "/api/v1/auth/login",
-            data={"username": f"privacy_{unique_id}@example.com", "password": "password123"},
+            data={
+                "username": f"privacy_{unique_id}@example.com",
+                "password": "password123",
+            },
         )
 
         if login_response.status_code != 200:
             pytest.skip(f"Login failed: {login_response.status_code}")
 
-        token = login_response.json().get("access_token") or login_response.json().get("tokens", {}).get("access_token")
+        token = login_response.json().get("access_token") or login_response.json().get(
+            "tokens", {}
+        ).get("access_token")
         if not token:
             pytest.skip("No access token in login response")
 
@@ -226,7 +256,8 @@ class TestDataPrivacy:
             response_data = ref_response.json()
             # Проверяем, что в ответе нет raw embedding в открытом виде
             assert (
-                "embedding" not in response_data or response_data.get("embedding") is None
+                "embedding" not in response_data
+                or response_data.get("embedding") is None
             )
         elif ref_response.status_code in [404, 422]:
             # Endpoint может не существовать или требовать другой формат

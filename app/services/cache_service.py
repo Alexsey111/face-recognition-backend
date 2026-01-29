@@ -5,10 +5,11 @@ Production-safe версия.
 """
 
 import json
-from typing import Any, Optional, Dict
 from datetime import datetime
+from typing import Any, Dict, Optional
+
 import redis.asyncio as redis
-from redis.exceptions import RedisError, ConnectionError
+from redis.exceptions import ConnectionError, RedisError
 
 try:
     from prometheus_client import Counter
@@ -27,18 +28,16 @@ except Exception:
     Counter = _NoopCounter
 
 from ..config import settings
-from ..utils.logger import get_logger
 from ..utils.exceptions import CacheError
+from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
 # Reuse application-level cache metrics to avoid duplicate registration
 try:
-    from ..middleware.metrics import (
-        cache_hits_total as CACHE_HITS,
-        cache_misses_total as CACHE_MISSES,
-    )
+    from ..middleware.metrics import cache_hits_total as CACHE_HITS
+    from ..middleware.metrics import cache_misses_total as CACHE_MISSES
 except Exception:
     # Fallback to local Counter definitions if metrics module isn't importable
     CACHE_HITS = Counter("cache_hits_total", "Total cache hits", ["cache_name"])

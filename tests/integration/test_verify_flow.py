@@ -3,11 +3,13 @@ Integration тесты для полного flow верификации.
 Тестируют взаимодействие ML Service, DB, Cache, Storage.
 """
 
-import pytest
-from fastapi.testclient import TestClient
-from app.main import create_test_app
 import base64
 import uuid
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.main import create_test_app
 
 
 @pytest.fixture
@@ -96,7 +98,9 @@ class TestReferenceCreation:
         elif response.status_code in [400, 401, 404]:
             pytest.skip(f"Reference creation returned: {response.status_code}")
         else:
-            pytest.skip(f"Reference creation failed with status: {response.status_code}")
+            pytest.skip(
+                f"Reference creation failed with status: {response.status_code}"
+            )
 
     def test_create_reference_low_quality(self, client, test_user_token):
         """Тест создания reference с низким качеством."""
@@ -104,8 +108,9 @@ class TestReferenceCreation:
             pytest.skip("No valid token")
 
         # Создаем низкокачественное изображение
-        from PIL import Image
         import io
+
+        from PIL import Image
 
         img = Image.new("RGB", (50, 50), color=(100, 100, 100))
         buf = io.BytesIO()
@@ -349,6 +354,10 @@ class TestCacheIntegration:
         if response1.status_code == 200 and response2.status_code == 200:
             pass  # Кэш работает или просто оба запроса успешны
         elif response1.status_code in [404, 500] or response2.status_code in [404, 500]:
-            pytest.skip("One or both requests failed due to missing reference or service error")
+            pytest.skip(
+                "One or both requests failed due to missing reference or service error"
+            )
         else:
-            pytest.skip(f"Unexpected statuses: {response1.status_code}, {response2.status_code}")
+            pytest.skip(
+                f"Unexpected statuses: {response1.status_code}, {response2.status_code}"
+            )

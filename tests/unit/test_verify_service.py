@@ -2,14 +2,14 @@
 Unit-тесты для VerifyService.
 """
 
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
-from datetime import datetime, timezone, timedelta
 
+from app.db.models import Reference, VerificationSession
 from app.services.verify_service import VerifyService
-from app.db.models import VerificationSession, Reference
-from app.utils.exceptions import ValidationError, ProcessingError, NotFoundError
-
+from app.utils.exceptions import NotFoundError, ProcessingError, ValidationError
 
 # ======================================================================
 # Fixtures
@@ -426,6 +426,7 @@ async def test_get_verification_history_with_filters(
 # ДОПОЛНИТЕЛЬНЫЕ ТЕСТЫ ДЛЯ ПОВЫШЕНИЯ ПОКРЫТИЯ
 # ======================================================================
 
+
 @pytest.mark.asyncio
 async def test_get_verification_session_success(
     verify_service,
@@ -434,7 +435,9 @@ async def test_get_verification_session_success(
 ):
     """Тест успешного получения сессии верификации."""
 
-    with patch.object(verify_service.cache_service, 'get_verification_session', new_callable=AsyncMock) as mock_cache:
+    with patch.object(
+        verify_service.cache_service, "get_verification_session", new_callable=AsyncMock
+    ) as mock_cache:
         mock_cache.return_value = mock_verification_session
 
         session = await verify_service.get_verification_session("session-123")
@@ -451,9 +454,15 @@ async def test_get_verification_session_from_db(
 ):
     """Тест получения сессии из БД при отсутствии в кэше."""
 
-    with patch.object(verify_service.cache_service, 'get_verification_session', new_callable=AsyncMock) as mock_cache, \
-         patch("app.services.verify_service.VerificationSessionCRUD") as mock_crud:
-        
+    with (
+        patch.object(
+            verify_service.cache_service,
+            "get_verification_session",
+            new_callable=AsyncMock,
+        ) as mock_cache,
+        patch("app.services.verify_service.VerificationSessionCRUD") as mock_crud,
+    ):
+
         mock_cache.return_value = None
         mock_crud.get_session = AsyncMock(return_value=mock_verification_session)
 
@@ -513,7 +522,9 @@ async def test_verify_face_with_auto_enroll(
     verify_service._cache_verification_result = AsyncMock()
 
     # Mock auto_enroll
-    with patch.object(verify_service, '_auto_enroll_reference', new_callable=AsyncMock) as mock_auto_enroll:
+    with patch.object(
+        verify_service, "_auto_enroll_reference", new_callable=AsyncMock
+    ) as mock_auto_enroll:
         result = await verify_service.verify_face(
             user_id=mock_user_id,
             image_data=mock_image_data.encode(),
@@ -628,7 +639,7 @@ async def test_sanitize_ml_result(
         "face_detected": True,
         "nested": {
             "value": np.array([1, 2, 3]),
-        }
+        },
     }
 
     sanitized = verify_service._sanitize_ml_result(ml_result)
@@ -690,10 +701,13 @@ async def test_apply_filters_date_range(
         VerificationSession(session_id="3", created_at=tomorrow),
     ]
 
-    filtered = verify_service._apply_filters(sessions, {
-        "date_from": yesterday.isoformat(),
-        "date_to": now.isoformat(),
-    })
+    filtered = verify_service._apply_filters(
+        sessions,
+        {
+            "date_from": yesterday.isoformat(),
+            "date_to": now.isoformat(),
+        },
+    )
 
     assert len(filtered) == 2
 
@@ -830,7 +844,9 @@ async def test_send_verification_webhook_failure(
 ):
     """Тест неудачной отправки webhook."""
 
-    verify_service.webhook_service.emit_event = AsyncMock(side_effect=Exception("Webhook error"))
+    verify_service.webhook_service.emit_event = AsyncMock(
+        side_effect=Exception("Webhook error")
+    )
 
     # Не должно выбрасывать исключение
     await verify_service.send_verification_webhook(

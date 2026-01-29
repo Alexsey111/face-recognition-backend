@@ -2,12 +2,14 @@
 Integration тесты для webhook системы.
 """
 
-import pytest
 import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
-from app.services.webhook_service import WebhookService
+
+import pytest
+
 from app.db.models import WebhookConfig, WebhookLog, WebhookStatus
+from app.services.webhook_service import WebhookService
 
 
 @pytest.mark.asyncio
@@ -68,15 +70,16 @@ async def test_webhook_retry_on_failure(db_session):
     await db_session.commit()
 
     webhook_service = WebhookService(db_session)
-    
+
     # Mock the _send_with_retry to simulate retries
     original_send = webhook_service._send_with_retry
-    
+
     async def mock_send_with_retry(*args, **kwargs):
         # Simulate one retry attempt
         await asyncio.sleep(0.1)
         # Update the log with an attempt
         from sqlalchemy import select, update
+
         result = await db_session.execute(
             select(WebhookLog).where(WebhookLog.webhook_config_id == config.id)
         )
@@ -86,12 +89,12 @@ async def test_webhook_retry_on_failure(db_session):
             log.status = WebhookStatus.FAILED
             await db_session.commit()
         raise Exception("Simulated failure for test")
-    
-    with patch.object(webhook_service, '_send_with_retry', mock_send_with_retry):
+
+    with patch.object(webhook_service, "_send_with_retry", mock_send_with_retry):
         await webhook_service.emit_event(
             event_type="test.event", user_id="test-user-123", payload={"test": "data"}
         )
-        
+
         # Ждем обработки
         await asyncio.sleep(0.5)
 
