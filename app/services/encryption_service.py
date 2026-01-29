@@ -1,19 +1,19 @@
+import asyncio
 import base64
-import os
 import json
+import os
 import secrets
 from datetime import datetime, timezone
-from typing import Optional, Tuple, Dict, Any
-import asyncio
+from typing import Any, Dict, Optional, Tuple
 
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 from ..config import settings
-from ..utils.logger import get_logger
 from ..utils.exceptions import EncryptionError
+from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -233,7 +233,7 @@ class EncryptionService:
     def encrypt_data_sync(self, data: bytes) -> bytes:
         """
         Синхронное шифрование данных (без async).
-        
+
         Used by BiometricEncryption for synchronous operations.
         """
         import base64
@@ -262,7 +262,7 @@ class EncryptionService:
     def decrypt_data_sync(self, token: bytes) -> Tuple[bytes, dict]:
         """
         Синхронная расшифровка данных (без async).
-        
+
         Used by BiometricEncryption for synchronous operations.
         """
         import base64
@@ -273,7 +273,7 @@ class EncryptionService:
 
         # Extract nonce and encrypted data
         nonce = token[: self.NONCE_LENGTH]
-        encrypted_data = token[self.NONCE_LENGTH:]
+        encrypted_data = token[self.NONCE_LENGTH :]
 
         # Decrypt payload
         decrypted_bytes = self._aesgcm.decrypt(nonce, encrypted_data, None)

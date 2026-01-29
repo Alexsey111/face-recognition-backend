@@ -1,18 +1,19 @@
 # app/db/crud.py
-from sqlalchemy import select, update, delete, func, desc, and_
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError
-from datetime import datetime, timedelta, timezone
-from typing import Optional, List, Dict, Any
 import logging
 import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import and_, delete, desc, func, select, update
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # Импортируем модели из правильного места (как мы определили в прошлом шаге)
 from app.db.models import (
-    User,
-    Reference,
-    VerificationSession,
     AuditLog,
+    Reference,
+    User,
+    VerificationSession,
     VerificationStatus,
 )
 

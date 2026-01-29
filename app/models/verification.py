@@ -3,10 +3,11 @@ Pydantic модели для работы с сессиями верификац
 Модели для создания, управления и представления сессий верификации.
 """
 
-from typing import Optional, List, Dict, Any, Union
-from pydantic import BaseModel, Field, field_validator, ConfigDict
-from datetime import datetime, timedelta, timezone
 import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Union
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class VerificationSessionModel(BaseModel):

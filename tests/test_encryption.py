@@ -3,16 +3,17 @@
 Проверка функций шифрования/дешифрования и безопасности.
 """
 
-import pytest
-import numpy as np
 import base64
 import json
 import os
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
 
+import numpy as np
+import pytest
+
+from app.config import settings
 from app.services.encryption_service import EncryptionService
 from app.utils.exceptions import EncryptionError
-from app.config import settings
 
 
 class TestEncryptionService:

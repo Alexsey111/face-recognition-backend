@@ -3,11 +3,12 @@
 Сервис управления сессиями загрузки файлов.
 """
 
-import pytest
 import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
+
+import pytest
 
 from app.services.session_service import SessionService, UploadSession, utcnow
 
@@ -55,7 +56,8 @@ class TestUploadSession:
             session_id="test-id",
             user_id="user123",
             created_at=datetime.now(timezone.utc),
-            expiration_at=datetime.now(timezone.utc) + timedelta(hours=1),  # Истекает через час
+            expiration_at=datetime.now(timezone.utc)
+            + timedelta(hours=1),  # Истекает через час
         )
 
         assert session.is_expired() is False
@@ -66,7 +68,8 @@ class TestUploadSession:
             session_id="test-id",
             user_id="user123",
             created_at=datetime.now(timezone.utc) - timedelta(hours=2),
-            expiration_at=datetime.now(timezone.utc) - timedelta(hours=1),  # Истекла час назад
+            expiration_at=datetime.now(timezone.utc)
+            - timedelta(hours=1),  # Истекла час назад
         )
 
         assert session.is_expired() is True
@@ -77,7 +80,8 @@ class TestUploadSession:
             session_id="test-id",
             user_id="user123",
             created_at=datetime.now(timezone.utc) - timedelta(seconds=61),
-            expiration_at=datetime.now(timezone.utc) - timedelta(seconds=1),  # Истекла 1 секунду назад
+            expiration_at=datetime.now(timezone.utc)
+            - timedelta(seconds=1),  # Истекла 1 секунду назад
         )
 
         assert session.is_expired() is True
@@ -295,11 +299,15 @@ class TestSessionServiceAttachFileToSession:
             expiration_at=datetime.now(timezone.utc) + timedelta(hours=23),
         )
 
-        with patch.object(SessionService, "get_session", new_callable=AsyncMock) as mock_get, \
-             patch("app.services.session_service.CacheService") as MockCacheService:
-            
+        with (
+            patch.object(
+                SessionService, "get_session", new_callable=AsyncMock
+            ) as mock_get,
+            patch("app.services.session_service.CacheService") as MockCacheService,
+        ):
+
             mock_get.return_value = existing_session
-            
+
             mock_cache = AsyncMock()
             mock_redis = AsyncMock()
             mock_redis.ttl.return_value = 3600  # 1 час TTL
@@ -317,7 +325,9 @@ class TestSessionServiceAttachFileToSession:
     @pytest.mark.asyncio
     async def test_attach_file_session_not_found(self):
         """Тест прикрепления файла к несуществующей сессии"""
-        with patch.object(SessionService, "get_session", new_callable=AsyncMock) as mock_get:
+        with patch.object(
+            SessionService, "get_session", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.return_value = None
 
             with pytest.raises(ValueError, match="Session not found or expired"):
@@ -335,10 +345,14 @@ class TestSessionServiceAttachFileToSession:
             expiration_at=datetime.now(timezone.utc) + timedelta(days=1),
         )
 
-        with patch.object(SessionService, "get_session", new_callable=AsyncMock) as mock_get:
+        with patch.object(
+            SessionService, "get_session", new_callable=AsyncMock
+        ) as mock_get:
             mock_get.return_value = session
 
-            with pytest.raises(PermissionError, match="Session does not belong to user"):
+            with pytest.raises(
+                PermissionError, match="Session does not belong to user"
+            ):
                 await SessionService.attach_file_to_session(
                     "session-id", "user_wrong", "key", 1024, "hash"
                 )
@@ -471,13 +485,20 @@ class TestSessionServiceGetUserSessions:
     async def test_get_user_sessions_with_sessions(self):
         """Тест получения сессий пользователя с несколькими сессиями"""
         # Мок данных для скана
-        with patch("app.services.session_service.CacheService") as MockCacheService, \
-             patch.object(SessionService, "get_session", new_callable=AsyncMock) as mock_get_session:
-            
+        with (
+            patch("app.services.session_service.CacheService") as MockCacheService,
+            patch.object(
+                SessionService, "get_session", new_callable=AsyncMock
+            ) as mock_get_session,
+        ):
+
             mock_cache = AsyncMock()
             mock_redis = AsyncMock()
             # Возвращаем ключи сессий
-            mock_redis.scan.return_value = (0, [b"upload_session:session1", b"upload_session:session2"])
+            mock_redis.scan.return_value = (
+                0,
+                [b"upload_session:session1", b"upload_session:session2"],
+            )
             mock_cache.redis = mock_redis
             MockCacheService.return_value = mock_cache
 
@@ -506,9 +527,13 @@ class TestSessionServiceGetUserSessions:
     @pytest.mark.asyncio
     async def test_get_user_sessions_filters_by_user(self):
         """Тест что get_user_sessions фильтрует по user_id"""
-        with patch("app.services.session_service.CacheService") as MockCacheService, \
-             patch.object(SessionService, "get_session", new_callable=AsyncMock) as mock_get_session:
-            
+        with (
+            patch("app.services.session_service.CacheService") as MockCacheService,
+            patch.object(
+                SessionService, "get_session", new_callable=AsyncMock
+            ) as mock_get_session,
+        ):
+
             mock_cache = AsyncMock()
             mock_redis = AsyncMock()
             mock_redis.scan.return_value = (0, [b"upload_session:session1"])
@@ -549,7 +574,7 @@ class TestSessionServiceEdgeCases:
     async def test_session_expiration_time(self):
         """Тест что срок действия сессии настраивается через settings"""
         from app.config import settings
-        
+
         with patch("app.services.session_service.CacheService") as MockCacheService:
             mock_cache = AsyncMock()
             MockCacheService.return_value = mock_cache
@@ -559,6 +584,6 @@ class TestSessionServiceEdgeCases:
             # Проверяем что expiration_at - created_at = UPLOAD_EXPIRATION_DAYS
             delta = session.expiration_at - session.created_at
             expected_delta = timedelta(days=settings.UPLOAD_EXPIRATION_DAYS)
-            
+
             # Допускаем небольшую погрешность из-за времени выполнения
             assert abs((delta - expected_delta).total_seconds()) < 5

@@ -11,24 +11,24 @@ boto3 используется через executor (boto3 НЕ async).
 
 from __future__ import annotations
 
-import io
-import mimetypes
 import asyncio
 import functools
+import io
 import json
+import mimetypes
 import socket
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
 from botocore.config import Config
-from botocore.exceptions import ClientError, NoCredentialsError, EndpointConnectionError
+from botocore.exceptions import ClientError, EndpointConnectionError, NoCredentialsError
 from PIL import Image, UnidentifiedImageError
 
 from ..config import settings
-from ..utils.logger import get_logger
 from ..utils.exceptions import StorageError, ValidationError
+from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
 

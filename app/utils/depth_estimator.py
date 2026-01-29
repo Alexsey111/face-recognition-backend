@@ -8,7 +8,7 @@
 
 Методы:
 1. Depth-from-focus/defocus - оценка глубины по размытию
-2. Texture gradient analysis - анализ текстурных градиентов  
+2. Texture gradient analysis - анализ текстурных градиентов
 3. Shading-based depth - оценка по паттернам освещения
 4. Size consistency - проверка согласованности размеров
 5. 3D morphable model fitting - оценка соответствия 3D модели
@@ -16,11 +16,12 @@
 Возвращает depth_score для оценки "объёмности" лица.
 """
 
+import asyncio
+from typing import Any, Dict, Optional, Tuple
+
 import cv2
 import numpy as np
 from PIL import Image
-from typing import Dict, Any, Tuple, Optional
-import asyncio
 
 from ..utils.logger import get_logger
 

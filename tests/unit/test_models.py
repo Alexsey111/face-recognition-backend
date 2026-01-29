@@ -1,16 +1,17 @@
 import pytest
 from pydantic import ValidationError
-from app.models.user import (
-    UserModel,
-    UserCreate,
-    UserUpdate,
-    UserResponse,
-    UserListResponse,
-)
+
 from app.models.reference import ReferenceCreate
+from app.models.request import UploadRequest, UserLogin
+from app.models.response import BaseResponse, ReferenceResponse, VerifyResponse
+from app.models.user import (
+    UserCreate,
+    UserListResponse,
+    UserModel,
+    UserResponse,
+    UserUpdate,
+)
 from app.models.verification import VerificationRequest
-from app.models.response import ReferenceResponse, VerifyResponse, BaseResponse
-from app.models.request import UserLogin, UploadRequest
 
 
 class TestUserModels:

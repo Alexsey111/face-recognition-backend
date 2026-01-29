@@ -14,8 +14,8 @@ from typing import Optional, Tuple
 import numpy as np
 
 from ..config import settings
-from ..utils.logger import get_logger
 from ..services.encryption_service import EncryptionService
+from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -23,7 +23,7 @@ logger = get_logger(__name__)
 class BiometricEncryption:
     """
     Удобная обёртка для шифрования биометрических данных.
-    
+
     Features:
     - AES-256-GCM шифрование эмбеддингов
     - SHA-256 хеширование для integrity check
@@ -41,37 +41,37 @@ class BiometricEncryption:
     def encrypt_embedding(self, embedding: np.ndarray) -> bytes:
         """
         Шифрование эмбеддинга лица.
-        
+
         Args:
             embedding: NumPy массив эмбеддинга
-            
+
         Returns:
             Зашифрованные данные (bytes)
         """
         if not isinstance(embedding, np.ndarray):
             raise ValueError("Embedding must be a numpy array")
-        
+
         if embedding.size == 0:
             raise ValueError("Embedding cannot be empty")
-        
+
         # Сохраняем для возможного безопасного удаления
         self._embedding_buffer = embedding.tobytes()
-        
+
         # Шифруем
         encrypted = self.encryption.encrypt_data_sync(self._embedding_buffer)
-        
+
         # Очищаем буфер после успешного шифрования
         self._secure_delete_buffer()
-        
+
         return encrypted
 
     def decrypt_embedding(self, encrypted: bytes) -> np.ndarray:
         """
         Расшифровка эмбеддинга.
-        
+
         Args:
             encrypted: Зашифрованные данные
-            
+
         Returns:
             NumPy массив эмбеддинга
         """
@@ -81,15 +81,15 @@ class BiometricEncryption:
     def hash_template(self, embedding: np.ndarray) -> str:
         """
         Создание необратимого хеша эмбеддинга.
-        
+
         Используется для:
         - Проверки целостности данных
         - Быстрого сравнения (без расшифровки)
         - Detecting tampering
-        
+
         Args:
             embedding: NumPy массив эмбеддинга
-            
+
         Returns:
             SHA-256 hex digest
         """
@@ -102,11 +102,11 @@ class BiometricEncryption:
     ) -> bool:
         """
         Проверка целостности эмбеддинга.
-        
+
         Args:
             embedding: Текущий эмбеддинг
             expected_hash: Ожидаемый хеш
-            
+
         Returns:
             True если целостность подтверждена
         """
@@ -116,10 +116,10 @@ class BiometricEncryption:
     def generate_secure_token(self, length: int = 32) -> str:
         """
         Генерация криптографически безопасного токена.
-        
+
         Args:
             length: Длина токена в байтах
-            
+
         Returns:
             Hex-encoded токен
         """
@@ -128,9 +128,9 @@ class BiometricEncryption:
     def secure_zero(self, data: bytearray) -> None:
         """
         Безопасное обнуление данных (secure deletion).
-        
+
         Перезаписывает данные случайными байтами перед удалением.
-        
+
         Args:
             data: bytearray для обнуления
         """
@@ -147,7 +147,7 @@ class BiometricEncryption:
     def secure_delete_embedding(self, embedding: np.ndarray) -> None:
         """
         Безопасное удаление эмбеддинга из памяти.
-        
+
         Args:
             embedding: NumPy массив для удаления
         """
@@ -157,11 +157,11 @@ class BiometricEncryption:
             for i in range(0, len(data), 1024):
                 end = min(i + 1024, len(data))
                 data[i:end] = np.zeros(end - i, dtype=np.float32)
-            
+
             # Освобождение памяти
             del data
             embedding.fill(0)
-            
+
             logger.debug("Embedding securely deleted")
         except Exception as e:
             logger.warning(f"Secure delete failed: {e}")
@@ -188,10 +188,11 @@ class BiometricEncryption:
 # Secure memory management utilities
 # =============================================================================
 
+
 class SecureMemoryManager:
     """
     Менеджер безопасной работы с памятью.
-    
+
     Обеспечивает:
     - Автоматическую очистку конфиденциальных данных
     - Отслеживание чувствительных буферов
@@ -214,7 +215,7 @@ class SecureMemoryManager:
     def secure_cleanup(cls) -> int:
         """
         Безопасная очистка всех зарегистрированных буферов.
-        
+
         Returns:
             Количество очищенных буферов
         """
@@ -232,7 +233,7 @@ class SecureMemoryManager:
     def scrub_variable(cls, var: any) -> None:
         """
         Попытка обнулить переменную.
-        
+
         Поддерживает:
         - bytearray
         - bytes (копия для модификации)
@@ -267,7 +268,7 @@ from typing import Any
 def secure_context(data: Any):
     """
     Контекстный менеджер для безопасной работы с данными.
-    
+
     Usage:
         with secure_context(embedding) as data:
             # работа с данными
@@ -295,8 +296,8 @@ _biometric_encryption: Optional[BiometricEncryption] = None
 def get_biometric_encryption() -> BiometricEncryption:
     """Получение singleton экземпляра BiometricEncryption."""
     global _biometric_encryption
-    
+
     if _biometric_encryption is None:
         _biometric_encryption = BiometricEncryption()
-    
+
     return _biometric_encryption

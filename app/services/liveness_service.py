@@ -9,24 +9,24 @@ Liveness Service - Проверка живости лица (Anti-Spoofing).
 - Challenge-response механизм
 """
 
+import random
 import time
 import uuid
-import random
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..db.crud import VerificationSessionCRUD
-from ..services.ml_service import MLService
-from ..services.anti_spoofing_service import AntiSpoofingService
-from ..services.validation_service import ValidationService
-from ..services.cache_service import CacheService
-from ..services.webhook_service import WebhookService
-from ..utils.logger import get_logger
-from ..utils.exceptions import ValidationError, ProcessingError
 from ..middleware.metrics import record_liveness
+from ..services.anti_spoofing_service import AntiSpoofingService
+from ..services.cache_service import CacheService
+from ..services.ml_service import MLService
+from ..services.validation_service import ValidationService
+from ..services.webhook_service import WebhookService
+from ..utils.exceptions import ProcessingError, ValidationError
+from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
 

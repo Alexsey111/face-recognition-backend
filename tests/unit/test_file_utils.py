@@ -3,14 +3,15 @@
 Валидация, конвертация, ресайз и метаданные изображений.
 """
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
-from io import BytesIO
-from PIL import Image, ImageFile
 import hashlib
+from io import BytesIO
+from unittest.mock import MagicMock, Mock, patch
 
+import pytest
+from PIL import Image, ImageFile
+
+from app.utils.exceptions import ProcessingError, ValidationError
 from app.utils.file_utils import FileUtils, ImageValidator
-from app.utils.exceptions import ValidationError, ProcessingError
 
 
 class TestFileUtils:
@@ -219,7 +220,7 @@ class TestImageValidator:
     # Validation tests
     # ======================================================
 
-    @patch('app.utils.file_utils.logger')
+    @patch("app.utils.file_utils.logger")
     def test_validate_valid_image(self, mock_logger, valid_image_content):
         """Тест валидации валидного изображения"""
         # Не должно вызывать исключение
@@ -253,7 +254,7 @@ class TestImageValidator:
 
         assert "Image resolution too small" in str(exc_info.value)
 
-    @patch('app.utils.file_utils.logger')
+    @patch("app.utils.file_utils.logger")
     def test_validate_minimum_dimensions(self, mock_logger):
         """Тест что изображение ровно 50x50 проходит валидацию"""
         img = Image.new("RGB", (50, 50), color="white")
@@ -284,7 +285,7 @@ class TestImageValidator:
     # validate_image API
     # ======================================================
 
-    @patch('app.utils.file_utils.logger')
+    @patch("app.utils.file_utils.logger")
     def test_validate_image_valid(self, mock_logger, valid_image_content):
         """Тест validate_image с валидным изображением"""
         is_valid, error_msg = ImageValidator.validate_image(
@@ -303,9 +304,7 @@ class TestImageValidator:
 
     def test_validate_image_invalid_content(self):
         """Тест validate_image с битым содержимым"""
-        is_valid, error_msg = ImageValidator.validate_image(
-            b"not an image", "test.jpg"
-        )
+        is_valid, error_msg = ImageValidator.validate_image(b"not an image", "test.jpg")
 
         assert is_valid is False
         assert len(error_msg) > 0

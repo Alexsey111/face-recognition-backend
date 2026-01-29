@@ -8,14 +8,14 @@ Prometheus Metrics Middleware (production-safe).
 - Error metrics (HTTP vs business)
 """
 
-import time
 import re
-from typing import Optional
+import time
 from contextlib import contextmanager
 from functools import wraps
+from typing import Optional
 
-from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
 
 # =============================================================================
 # Prometheus imports with safe fallback
@@ -23,12 +23,12 @@ from fastapi import Request
 
 try:
     from prometheus_client import (
-        Counter,
-        Histogram,
-        Gauge,
-        Info,
         REGISTRY,
         CollectorRegistry,
+        Counter,
+        Gauge,
+        Histogram,
+        Info,
     )
 
     PROMETHEUS_AVAILABLE = True
@@ -153,7 +153,10 @@ consent_operations_total = Counter(
 encryption_operations_total = Counter(
     "encryption_operations_total",
     "Total encryption/decryption operations",
-    ["operation", "status"],  # operation: 'encrypt'/'decrypt', status: 'success'/'failure'
+    [
+        "operation",
+        "status",
+    ],  # operation: 'encrypt'/'decrypt', status: 'success'/'failure'
     registry=app_registry,
 )
 

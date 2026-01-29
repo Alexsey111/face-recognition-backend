@@ -1,17 +1,16 @@
+import asyncio
+import contextvars
+import functools
+import inspect
+import json
 import logging
 import sys
-import json
 import time
-import asyncio
-import inspect
-import functools
-import contextvars
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
-from typing import Optional, Callable, Any, Dict, Mapping
+from typing import Any, Callable, Dict, Mapping, Optional
 
 from ..config import settings
-
 
 # =========================
 # Sensitive data redaction

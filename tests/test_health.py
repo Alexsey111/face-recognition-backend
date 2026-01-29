@@ -2,25 +2,26 @@
 Проверка работоспособности и мониторинга сервиса.
 """
 
+import asyncio
+import os
+import time
+from unittest.mock import MagicMock, Mock, patch
+
+import psutil
 import pytest
 import pytest_asyncio
-from unittest.mock import Mock, patch, MagicMock
-from fastapi.testclient import TestClient
 from fastapi import status
-import time
-import psutil
-import os
-import asyncio
+from fastapi.testclient import TestClient
 
-from app.main import create_test_app
 from app import __version__
+from app.main import create_test_app
 
 
 @pytest_asyncio.fixture
 async def health_client():
     """Create async test client with proper lifespan."""
     app = create_test_app()
-    from httpx import AsyncClient, ASGITransport
+    from httpx import ASGITransport, AsyncClient
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:

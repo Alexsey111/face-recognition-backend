@@ -3,10 +3,11 @@ Pydantic модели для запросов API.
 Модели для валидации входных данных.
 """
 
-from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, field_validator, ValidationInfo, model_validator
 import base64
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
+
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 
 def validate_image_data_static(v: str) -> str:

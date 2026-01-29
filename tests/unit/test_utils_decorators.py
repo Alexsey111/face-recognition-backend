@@ -2,19 +2,21 @@
 Тесты для утилитных декораторов
 """
 
-import pytest
 import asyncio
 import time
 from unittest.mock import Mock, patch
+
+import pytest
+
 from app.utils.decorators import (
-    validate_input,
+    cache_result,
+    deprecated,
     log_request,
     measure_time,
-    retry_on_failure,
-    cache_result,
-    require_auth,
     rate_limit,
-    deprecated,
+    require_auth,
+    retry_on_failure,
+    validate_input,
 )
 
 

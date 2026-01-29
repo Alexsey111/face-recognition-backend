@@ -20,29 +20,27 @@ class _DBManagerProxy:
 
 db_manager = _DBManagerProxy()
 
-# Все модели
-from .models import (
-    User,
-    Reference,
-    VerificationSession,
-    AuditLog,
-    SystemConfig,
-    ApiKey,
-    WebhookConfig,
-    WebhookLog,
-    VerificationStatus,
-    ActionType,
-    WebhookEventType,
-    WebhookStatus,
+# CRUD-классы (самые часто используемые)
+from .crud import (  # Если будешь часто использовать — добавь сюда и другие; AuditLogCRUD,
+    ReferenceCRUD,
+    UserCRUD,
+    VerificationSessionCRUD,
 )
 
-# CRUD-классы (самые часто используемые)
-from .crud import (
-    UserCRUD,
-    ReferenceCRUD,
-    VerificationSessionCRUD,
-    # Если будешь часто использовать — добавь сюда и другие
-    # AuditLogCRUD,
+# Все модели
+from .models import (
+    ActionType,
+    ApiKey,
+    AuditLog,
+    Reference,
+    SystemConfig,
+    User,
+    VerificationSession,
+    VerificationStatus,
+    WebhookConfig,
+    WebhookEventType,
+    WebhookLog,
+    WebhookStatus,
 )
 
 __all__ = [

@@ -1,24 +1,24 @@
 # app/db/models.py
-import uuid
 import enum
+import uuid
 from datetime import datetime
-from typing import Optional, List
+from typing import List, Optional
 
 from sqlalchemy import (
-    Column,
-    String,
-    Integer,
-    Float,
+    JSON,
     Boolean,
+    Column,
+    Float,
     ForeignKey,
     Index,
+    Integer,
     LargeBinary,
-    JSON,
+    String,
     Text,
     func,
 )
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import DateTime
-from sqlalchemy.orm import relationship, Mapped, mapped_column
 
 # Импортируем Base из database модуля
 from .database import Base

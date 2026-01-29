@@ -2,12 +2,12 @@
 Unit-тесты для LivenessService.
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
 
 from app.services.liveness_service import LivenessService
-from app.utils.exceptions import ValidationError, ProcessingError
-
+from app.utils.exceptions import ProcessingError, ValidationError
 
 # ======================================================================
 # Fixtures

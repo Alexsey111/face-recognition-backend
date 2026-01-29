@@ -3,10 +3,11 @@ Pydantic модели для ответов API.
 Модели для валидации выходных данных.
 """
 
-from typing import Optional, List, Dict, Any, Union
-from pydantic import BaseModel, Field, ConfigDict
-from datetime import datetime, timezone
 import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Union
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class BaseResponse(BaseModel):

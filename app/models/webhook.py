@@ -2,10 +2,11 @@
 Pydantic модели для webhook системы.
 """
 
-from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field, field_validator, ConfigDict
 from datetime import datetime
 from enum import Enum
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class WebhookEventType(str, Enum):

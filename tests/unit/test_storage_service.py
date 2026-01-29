@@ -4,16 +4,21 @@
 """
 
 import asyncio
-import pytest
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
-from io import BytesIO
-from PIL import Image
-from datetime import datetime, timezone
 import json
 import uuid
+from datetime import datetime, timezone
+from io import BytesIO
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
-from app.services.storage_service import StorageService, ALLOWED_IMAGE_MIME_TYPES, MAX_IMAGE_SIZE_BYTES
-from app.utils.exceptions import ValidationError, StorageError
+import pytest
+from PIL import Image
+
+from app.services.storage_service import (
+    ALLOWED_IMAGE_MIME_TYPES,
+    MAX_IMAGE_SIZE_BYTES,
+    StorageService,
+)
+from app.utils.exceptions import StorageError, ValidationError
 
 
 class TestStorageServiceConstants:
@@ -85,7 +90,7 @@ class TestStorageServiceHelpers:
     def test_detect_image_mime_jpeg(self):
         """Тест определения MIME типа для JPEG"""
         service = StorageService()
-        
+
         img = Image.new("RGB", (100, 100), color="red")
         output = BytesIO()
         img.save(output, format="JPEG")
@@ -100,7 +105,7 @@ class TestStorageServiceHelpers:
     def test_detect_image_mime_png(self):
         """Тест определения MIME типа для PNG"""
         service = StorageService()
-        
+
         img = Image.new("RGB", (200, 200), color="blue")
         output = BytesIO()
         img.save(output, format="PNG")
@@ -251,9 +256,11 @@ class TestStorageServiceUploadImage:
     @pytest.mark.asyncio
     async def test_upload_image_success(self, valid_jpeg_data):
         """Тест успешной загрузки изображения"""
-        with patch("app.services.storage_service.settings") as mock_settings, \
-             patch.object(StorageService, "__init__", lambda s: None):
-            
+        with (
+            patch("app.services.storage_service.settings") as mock_settings,
+            patch.object(StorageService, "__init__", lambda s: None),
+        ):
+
             # Setup mock settings
             mock_settings.MAX_IMAGE_WIDTH = 4096
             mock_settings.MAX_IMAGE_HEIGHT = 4096
@@ -262,7 +269,7 @@ class TestStorageServiceUploadImage:
             mock_settings.S3_REGION = "us-east-1"
             mock_settings.S3_USE_SSL = False
             mock_settings.S3_PUBLIC_READ = False
-            
+
             service = StorageService()
             service.endpoint_url = "http://minio:9000"
             service.bucket_name = "test-bucket"
@@ -315,8 +322,7 @@ class TestStorageServiceUploadImage:
                 mock_run.return_value = {"ETag": '"test"'}
 
                 result = await service.upload_image(
-                    valid_jpeg_data,
-                    key="custom/path/image.jpg"
+                    valid_jpeg_data, key="custom/path/image.jpg"
                 )
 
                 assert result["key"] == "custom/path/image.jpg"
@@ -334,16 +340,17 @@ class TestStorageServiceUploadImage:
             service.use_ssl = False
             service.public_read = False
 
-            with patch.object(service, "_run", new_callable=AsyncMock) as mock_run, \
-                 patch.object(service, "_prepare_metadata") as mock_prepare, \
-                 patch.object(service, "_detect_image_mime") as mock_detect:
-                
+            with (
+                patch.object(service, "_run", new_callable=AsyncMock) as mock_run,
+                patch.object(service, "_prepare_metadata") as mock_prepare,
+                patch.object(service, "_detect_image_mime") as mock_detect,
+            ):
+
                 mock_detect.return_value = ("image/jpeg", 500, 500)
                 mock_prepare.return_value = {"user_id": "test"}
 
                 await service.upload_image(
-                    valid_jpeg_data,
-                    metadata={"user_id": "test"}
+                    valid_jpeg_data, metadata={"user_id": "test"}
                 )
 
                 mock_prepare.assert_called_once_with({"user_id": "test"})
@@ -517,8 +524,12 @@ class TestStorageServiceHealthCheck:
             service.region = "us-east-1"
             service.public_read = False
 
-            with patch.object(service, "_run", new_callable=AsyncMock) as mock_run, \
-                 patch.object(service, "_create_bucket", new_callable=AsyncMock) as mock_create:
+            with (
+                patch.object(service, "_run", new_callable=AsyncMock) as mock_run,
+                patch.object(
+                    service, "_create_bucket", new_callable=AsyncMock
+                ) as mock_create,
+            ):
                 # First call returns 404, second call for create_bucket succeeds
                 mock_run.return_value = {"ResponseMetadata": {"HTTPStatusCode": 200}}
                 mock_create.return_value = None
@@ -647,11 +658,12 @@ class TestStorageServicePresignedUrl:
             service.bucket_name = "test-bucket"
 
             with patch.object(service, "_run", new_callable=AsyncMock) as mock_run:
-                mock_run.return_value = "https://test-bucket.s3.amazonaws.com/image.jpg?signature=abc"
+                mock_run.return_value = (
+                    "https://test-bucket.s3.amazonaws.com/image.jpg?signature=abc"
+                )
 
                 result = await service.generate_presigned_url(
-                    file_key="images/test.jpg",
-                    operation="get_object"
+                    file_key="images/test.jpg", operation="get_object"
                 )
 
                 assert result.startswith("https://")
@@ -666,11 +678,12 @@ class TestStorageServicePresignedUrl:
             service.bucket_name = "test-bucket"
 
             with patch.object(service, "_run", new_callable=AsyncMock) as mock_run:
-                mock_run.return_value = "https://test-bucket.s3.amazonaws.com/image.jpg?signature=abc"
+                mock_run.return_value = (
+                    "https://test-bucket.s3.amazonaws.com/image.jpg?signature=abc"
+                )
 
                 result = await service.generate_presigned_url(
-                    file_key="images/test.jpg",
-                    operation="put_object"
+                    file_key="images/test.jpg", operation="put_object"
                 )
 
                 assert result.startswith("https://")
@@ -684,10 +697,11 @@ class TestStorageServicePresignedUrl:
             service._reconnect_lock = asyncio.Lock()
             service.bucket_name = "test-bucket"
 
-            with pytest.raises(ValidationError, match="Invalid presigned URL operation"):
+            with pytest.raises(
+                ValidationError, match="Invalid presigned URL operation"
+            ):
                 await service.generate_presigned_url(
-                    file_key="images/test.jpg",
-                    operation="delete_object"
+                    file_key="images/test.jpg", operation="delete_object"
                 )
 
     @pytest.mark.asyncio
@@ -703,9 +717,7 @@ class TestStorageServicePresignedUrl:
                 mock_run.return_value = "https://test-bucket.s3.amazonaws.com/image.jpg?signature=abc&X-Amz-Expires=7200"
 
                 result = await service.generate_presigned_url(
-                    file_key="images/test.jpg",
-                    expires_in=7200,
-                    operation="get_object"
+                    file_key="images/test.jpg", expires_in=7200, operation="get_object"
                 )
 
                 assert result.startswith("https://")
@@ -784,10 +796,12 @@ class TestStorageServiceUploadImageExtended:
             service.use_ssl = False
             service.public_read = True
 
-            with patch.object(service, "_run", new_callable=AsyncMock) as mock_run, \
-                 patch.object(service, "_detect_image_mime") as mock_detect, \
-                 patch.object(service, "_generate_object_key") as mock_gen_key:
-                
+            with (
+                patch.object(service, "_run", new_callable=AsyncMock) as mock_run,
+                patch.object(service, "_detect_image_mime") as mock_detect,
+                patch.object(service, "_generate_object_key") as mock_gen_key,
+            ):
+
                 mock_detect.return_value = ("image/jpeg", 500, 500)
                 mock_gen_key.return_value = "images/test.jpg"
                 mock_run.return_value = {"ETag": '"test"'}
@@ -810,9 +824,11 @@ class TestStorageServiceUploadImageExtended:
             service.use_ssl = False
             service.public_read = False
 
-            with patch.object(service, "_run", new_callable=AsyncMock) as mock_run, \
-                 patch.object(service, "_detect_image_mime") as mock_detect:
-                
+            with (
+                patch.object(service, "_run", new_callable=AsyncMock) as mock_run,
+                patch.object(service, "_detect_image_mime") as mock_detect,
+            ):
+
                 mock_detect.return_value = ("image/png", 500, 500)
                 mock_run.return_value = {"ETag": '"test"'}
 
@@ -833,9 +849,11 @@ class TestStorageServiceUploadImageExtended:
             service.use_ssl = False
             service.public_read = False
 
-            with patch.object(service, "_run", new_callable=AsyncMock) as mock_run, \
-                 patch.object(service, "_detect_image_mime") as mock_detect:
-                
+            with (
+                patch.object(service, "_run", new_callable=AsyncMock) as mock_run,
+                patch.object(service, "_detect_image_mime") as mock_detect,
+            ):
+
                 mock_detect.return_value = ("image/webp", 500, 500)
                 mock_run.return_value = {"ETag": '"test"'}
 
@@ -858,13 +876,14 @@ class TestStorageServiceUploadImageExtended:
             service.use_ssl = False
             service.public_read = False
 
-            with patch.object(service, "_run", new_callable=AsyncMock) as mock_run, \
-                 patch.object(service, "_detect_image_mime") as mock_detect:
-                
+            with (
+                patch.object(service, "_run", new_callable=AsyncMock) as mock_run,
+                patch.object(service, "_detect_image_mime") as mock_detect,
+            ):
+
                 mock_detect.return_value = ("image/jpeg", 500, 500)
                 mock_run.side_effect = ClientError(
-                    {"Error": {"Code": "AccessDenied"}},
-                    "PutObject"
+                    {"Error": {"Code": "AccessDenied"}}, "PutObject"
                 )
 
                 with pytest.raises(StorageError, match="Upload failed"):
@@ -906,8 +925,7 @@ class TestStorageServiceRetryLogic:
                 call_count += 1
                 if call_count < 2:
                     raise ClientError(
-                        {"Error": {"Code": "ServiceUnavailable"}},
-                        "Operation"
+                        {"Error": {"Code": "ServiceUnavailable"}}, "Operation"
                     )
                 return "success"
 
@@ -965,8 +983,12 @@ class TestStorageServiceCreateBucket:
             service.region = "us-east-1"
             service.public_read = True
 
-            with patch.object(service, "_run", new_callable=AsyncMock) as mock_run, \
-                 patch.object(service, "_setup_public_policy", new_callable=AsyncMock) as mock_policy:
+            with (
+                patch.object(service, "_run", new_callable=AsyncMock) as mock_run,
+                patch.object(
+                    service, "_setup_public_policy", new_callable=AsyncMock
+                ) as mock_policy,
+            ):
                 mock_run.return_value = {"Location": "us-east-1"}
                 mock_policy.return_value = None
 
@@ -989,8 +1011,7 @@ class TestStorageServiceCreateBucket:
 
             with patch.object(service, "_run", new_callable=AsyncMock) as mock_run:
                 mock_run.side_effect = ClientError(
-                    {"Error": {"Code": "BucketAlreadyExists"}},
-                    "CreateBucket"
+                    {"Error": {"Code": "BucketAlreadyExists"}}, "CreateBucket"
                 )
 
                 with pytest.raises(StorageError, match="Bucket creation failed"):
@@ -1029,8 +1050,7 @@ class TestStorageServiceSetupPublicPolicy:
 
             with patch.object(service, "_run", new_callable=AsyncMock) as mock_run:
                 mock_run.side_effect = ClientError(
-                    {"Error": {"Code": "AccessDenied"}},
-                    "PutBucketPolicy"
+                    {"Error": {"Code": "AccessDenied"}}, "PutBucketPolicy"
                 )
 
                 # Should not raise, just log warning
@@ -1065,6 +1085,7 @@ class TestStorageServiceDeleteImageExtended:
 # ДОПОЛНИТЕЛЬНЫЕ ТЕСТЫ ДЛЯ ПОВЫШЕНИЯ ПОКРЫТИЯ
 # ======================================================================
 
+
 class TestStorageServiceRunMethod:
     """Тесты для метода _run (retry logic)"""
 
@@ -1093,12 +1114,16 @@ class TestStorageServiceRunMethod:
             service.s3_client = AsyncMock()
             service._reconnect_lock = asyncio.Lock()
 
-            mock_func = AsyncMock(side_effect=[
-                ClientError({"Error": {"Code": "InternalError"}}, "TestOperation"),
-                "success"
-            ])
+            mock_func = AsyncMock(
+                side_effect=[
+                    ClientError({"Error": {"Code": "InternalError"}}, "TestOperation"),
+                    "success",
+                ]
+            )
 
-            with patch.object(service, "_init_client", new_callable=AsyncMock) as mock_init:
+            with patch.object(
+                service, "_init_client", new_callable=AsyncMock
+            ) as mock_init:
                 result = await service._run(mock_func, "arg1")
 
                 assert result == "success"
@@ -1157,10 +1182,17 @@ class TestStorageServiceHealthCheck:
 
             error_404 = ClientError({"Error": {"Code": "404"}}, "HeadBucket")
 
-            with patch.object(service, "_run", new_callable=AsyncMock) as mock_run, \
-                 patch.object(service, "_create_bucket", new_callable=AsyncMock) as mock_create:
+            with (
+                patch.object(service, "_run", new_callable=AsyncMock) as mock_run,
+                patch.object(
+                    service, "_create_bucket", new_callable=AsyncMock
+                ) as mock_create,
+            ):
 
-                mock_run.side_effect = [error_404, True]  # Первый вызов - 404, второй - успех
+                mock_run.side_effect = [
+                    error_404,
+                    True,
+                ]  # Первый вызов - 404, второй - успех
 
                 result = await service.health_check()
 
@@ -1200,13 +1232,21 @@ class TestStorageServiceCreateBucket:
             service.region = "us-east-1"
             service.public_read = True
 
-            with patch.object(service, "_run", new_callable=AsyncMock) as mock_run, \
-                 patch.object(service, "_setup_public_policy", new_callable=AsyncMock) as mock_setup:
+            with (
+                patch.object(service, "_run", new_callable=AsyncMock) as mock_run,
+                patch.object(
+                    service, "_setup_public_policy", new_callable=AsyncMock
+                ) as mock_setup,
+            ):
 
                 await service._create_bucket()
 
                 # Проверяем, что create_bucket вызван без LocationConstraint
-                create_calls = [call for call in mock_run.call_args_list if "create_bucket" in str(call)]
+                create_calls = [
+                    call
+                    for call in mock_run.call_args_list
+                    if "create_bucket" in str(call)
+                ]
                 assert len(create_calls) == 1
                 mock_setup.assert_called_once()
 
@@ -1221,13 +1261,21 @@ class TestStorageServiceCreateBucket:
             service.region = "eu-west-1"
             service.public_read = False
 
-            with patch.object(service, "_run", new_callable=AsyncMock) as mock_run, \
-                 patch.object(service, "_setup_public_policy", new_callable=AsyncMock) as mock_setup:
+            with (
+                patch.object(service, "_run", new_callable=AsyncMock) as mock_run,
+                patch.object(
+                    service, "_setup_public_policy", new_callable=AsyncMock
+                ) as mock_setup,
+            ):
 
                 await service._create_bucket()
 
                 # Проверяем, что create_bucket вызван с LocationConstraint
-                create_calls = [call for call in mock_run.call_args_list if "create_bucket" in str(call)]
+                create_calls = [
+                    call
+                    for call in mock_run.call_args_list
+                    if "create_bucket" in str(call)
+                ]
                 assert len(create_calls) == 1
                 mock_setup.assert_not_called()  # public_read=False
 
@@ -1245,8 +1293,18 @@ class TestStorageServiceListFiles:
             service.bucket_name = "test-bucket"
 
             mock_files = [
-                {"Key": "file1.jpg", "Size": 1024, "LastModified": datetime.now(timezone.utc), "ETag": '"etag1"'},
-                {"Key": "file2.png", "Size": 2048, "LastModified": datetime.now(timezone.utc), "ETag": '"etag2"'},
+                {
+                    "Key": "file1.jpg",
+                    "Size": 1024,
+                    "LastModified": datetime.now(timezone.utc),
+                    "ETag": '"etag1"',
+                },
+                {
+                    "Key": "file2.png",
+                    "Size": 2048,
+                    "LastModified": datetime.now(timezone.utc),
+                    "ETag": '"etag2"',
+                },
             ]
 
             with patch.object(service, "_run", new_callable=AsyncMock) as mock_run:
@@ -1285,7 +1343,9 @@ class TestStorageServiceListFiles:
             service._reconnect_lock = asyncio.Lock()
             service.bucket_name = "test-bucket"
 
-            error_404 = ClientError({"Error": {"Code": "NoSuchBucket"}}, "ListObjectsV2")
+            error_404 = ClientError(
+                {"Error": {"Code": "NoSuchBucket"}}, "ListObjectsV2"
+            )
 
             with patch.object(service, "_run", new_callable=AsyncMock) as mock_run:
                 mock_run.side_effect = error_404
@@ -1311,9 +1371,7 @@ class TestStorageServiceGeneratePresignedUrl:
                 mock_run.return_value = "https://presigned-url.com"
 
                 url = await service.generate_presigned_url(
-                    file_key="test.jpg",
-                    expires_in=1800,
-                    operation="get_object"
+                    file_key="test.jpg", expires_in=1800, operation="get_object"
                 )
 
                 assert url == "https://presigned-url.com"
@@ -1331,9 +1389,7 @@ class TestStorageServiceGeneratePresignedUrl:
                 mock_run.return_value = "https://presigned-url.com"
 
                 url = await service.generate_presigned_url(
-                    file_key="test.jpg",
-                    expires_in=1800,
-                    operation="put_object"
+                    file_key="test.jpg", expires_in=1800, operation="put_object"
                 )
 
                 assert url == "https://presigned-url.com"
@@ -1347,10 +1403,11 @@ class TestStorageServiceGeneratePresignedUrl:
             service._reconnect_lock = asyncio.Lock()
             service.bucket_name = "test-bucket"
 
-            with pytest.raises(ValidationError, match="Invalid presigned URL operation"):
+            with pytest.raises(
+                ValidationError, match="Invalid presigned URL operation"
+            ):
                 await service.generate_presigned_url(
-                    file_key="test.jpg",
-                    operation="invalid_operation"
+                    file_key="test.jpg", operation="invalid_operation"
                 )
 
 
@@ -1379,7 +1436,8 @@ class TestStorageServiceHelpersExtended:
                 "user_id": "test-user",
                 "quality_score": 0.95,
                 "very_long_key_" + "x" * 200: "value",  # Слишком длинный ключ
-                "normal_key": "very_long_value_" + "x" * 2000,  # Слишком длинное значение
+                "normal_key": "very_long_value_"
+                + "x" * 2000,  # Слишком длинное значение
             }
 
             prepared = service._prepare_metadata(metadata)
@@ -1428,15 +1486,19 @@ class TestStorageServiceUploadImageExtended:
             service.bucket_name = "test-bucket"
             service.public_read = False
 
-            with patch.object(service, "_run", new_callable=AsyncMock) as mock_run, \
-                 patch.object(service, "_detect_image_mime", new_callable=AsyncMock) as mock_detect:
+            with (
+                patch.object(service, "_run", new_callable=AsyncMock) as mock_run,
+                patch.object(
+                    service, "_detect_image_mime", new_callable=AsyncMock
+                ) as mock_detect,
+            ):
 
                 mock_detect.return_value = ("image/jpeg", 100, 100)
 
                 result = await service.upload_image(
                     image_data=b"fake_jpeg_data",
                     key="custom/key.jpg",
-                    metadata={"test": "value"}
+                    metadata={"test": "value"},
                 )
 
                 assert result["key"] == "custom/key.jpg"
@@ -1451,7 +1513,9 @@ class TestStorageServiceUploadImageExtended:
             service._reconnect_lock = asyncio.Lock()
             service.bucket_name = "test-bucket"
 
-            with patch.object(service, "_detect_image_mime", new_callable=AsyncMock) as mock_detect:
+            with patch.object(
+                service, "_detect_image_mime", new_callable=AsyncMock
+            ) as mock_detect:
                 mock_detect.return_value = ("image/bmp", 100, 100)
 
                 with pytest.raises(ValidationError, match="Unsupported image type"):
@@ -1466,8 +1530,12 @@ class TestStorageServiceUploadImageExtended:
             service._reconnect_lock = asyncio.Lock()
             service.bucket_name = "test-bucket"
 
-            with patch("app.services.storage_service.settings") as mock_settings, \
-                 patch.object(service, "_detect_image_mime", new_callable=AsyncMock) as mock_detect:
+            with (
+                patch("app.services.storage_service.settings") as mock_settings,
+                patch.object(
+                    service, "_detect_image_mime", new_callable=AsyncMock
+                ) as mock_detect,
+            ):
 
                 mock_settings.MAX_IMAGE_WIDTH = 100
                 mock_settings.MAX_IMAGE_HEIGHT = 100

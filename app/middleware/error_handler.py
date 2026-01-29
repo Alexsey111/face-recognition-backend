@@ -3,29 +3,30 @@ Middleware для обработки ошибок.
 Централизованная обработка исключений и форматирование ответов с ошибками.
 """
 
-from typing import Any, Dict, List
-from fastapi import Request, HTTPException
-from fastapi.responses import JSONResponse
-from fastapi.encoders import jsonable_encoder
-from starlette.middleware.base import BaseHTTPMiddleware
 import traceback
-from datetime import datetime, timezone
 import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, List
+
+from fastapi import HTTPException, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from ..config import settings
-from ..utils.logger import get_logger
 from ..utils.exceptions import (
-    ValidationError,
-    ProcessingError,
-    DatabaseError,
-    NotFoundError,
-    UnauthorizedError,
-    EncryptionError,
-    StorageError,
     CacheError,
+    DatabaseError,
+    EncryptionError,
     MLServiceError,
+    NotFoundError,
+    ProcessingError,
+    StorageError,
+    UnauthorizedError,
+    ValidationError,
     WebhookError,
 )
+from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
 

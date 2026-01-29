@@ -11,25 +11,25 @@ Verify Service - Верификация лиц против эталонных �
 
 import time
 import uuid
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, Optional, List
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
+from ..db.crud import ReferenceCRUD, VerificationSessionCRUD
 from ..db.models import VerificationSession
-from ..db.crud import VerificationSessionCRUD, ReferenceCRUD
-from ..services.ml_service import MLService
-from ..services.encryption_service import EncryptionService
-from ..services.validation_service import ValidationService
-from ..services.cache_service import CacheService
-from ..services.webhook_service import WebhookService
-from ..utils.logger import get_logger
-from ..utils.exceptions import ValidationError, ProcessingError, NotFoundError
-from ..utils.constants import CONFIDENCE_LEVELS
 from ..middleware.metrics import record_verification, track_processing
 from ..services.audit_service import AuditService
+from ..services.cache_service import CacheService
+from ..services.encryption_service import EncryptionService
+from ..services.ml_service import MLService
+from ..services.validation_service import ValidationService
+from ..services.webhook_service import WebhookService
+from ..utils.constants import CONFIDENCE_LEVELS
+from ..utils.exceptions import NotFoundError, ProcessingError, ValidationError
+from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
 

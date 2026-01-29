@@ -15,21 +15,20 @@ import json
 import logging
 import sys
 from io import StringIO
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-
 # Import directly from logger module to avoid app imports
 from app.utils.logger import (
-    _redact,
     SENSITIVE_KEYS,
-    LogContext,
-    StructuredFormatter,
-    SafeStreamHandler,
     EmptyMessageFilter,
-    log_with_context,
+    LogContext,
+    SafeStreamHandler,
+    StructuredFormatter,
+    _redact,
     audit_event,
+    log_with_context,
 )
 
 

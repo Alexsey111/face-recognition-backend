@@ -17,10 +17,13 @@ Blink Detection:
 
 Accuracy: >95% on standard datasets
 """
+
 from __future__ import annotations
-from typing import List, Tuple, Dict, Any, Optional
-import numpy as np
+
 import logging
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +48,7 @@ MIN_EAR_DROP: float = 0.05
 # ============================================================================
 # Eye Aspect Ratio Calculation
 # ============================================================================
+
 
 def calculate_eye_aspect_ratio(
     eye_landmarks: np.ndarray,
@@ -144,6 +148,7 @@ def extract_eye_landmarks(
 # Blink Detection in Sequence
 # ============================================================================
 
+
 def detect_blinks_in_sequence(
     landmarks_sequence: List[np.ndarray],
     fps: float = 30.0,
@@ -174,12 +179,16 @@ def detect_blinks_in_sequence(
             - stats: Dictionary with detailed statistics.
     """
     if len(landmarks_sequence) < 3:
-        return False, 0, {
-            "error": "Too few frames (minimum 3 required)",
-            "blink_frames": [],
-            "avg_ear": 0.0,
-            "total_frames": 0,
-        }
+        return (
+            False,
+            0,
+            {
+                "error": "Too few frames (minimum 3 required)",
+                "blink_frames": [],
+                "avg_ear": 0.0,
+                "total_frames": 0,
+            },
+        )
 
     # Calculate EAR for each frame
     ear_values: List[float] = []
@@ -192,12 +201,16 @@ def detect_blinks_in_sequence(
             ear_values.append(0.3)  # Assume open eyes on error
 
     if not ear_values:
-        return False, 0, {
-            "error": "Failed to calculate EAR values",
-            "blink_frames": [],
-            "avg_ear": 0.0,
-            "total_frames": 0,
-        }
+        return (
+            False,
+            0,
+            {
+                "error": "Failed to calculate EAR values",
+                "blink_frames": [],
+                "avg_ear": 0.0,
+                "total_frames": 0,
+            },
+        )
 
     # Detect blinks using state machine
     blink_count = 0
@@ -236,24 +249,32 @@ def detect_blinks_in_sequence(
                 # Validate blink
                 is_valid = True
                 if duration_ms < MIN_BLINK_DURATION_MS:
-                    quality_issues.append(f"Blink #{blink_count + 1} too short ({duration_ms:.0f}ms)")
+                    quality_issues.append(
+                        f"Blink #{blink_count + 1} too short ({duration_ms:.0f}ms)"
+                    )
                     is_valid = False
                 if duration_ms > MAX_BLINK_DURATION_MS:
-                    quality_issues.append(f"Blink #{blink_count + 1} too long ({duration_ms:.0f}ms)")
+                    quality_issues.append(
+                        f"Blink #{blink_count + 1} too long ({duration_ms:.0f}ms)"
+                    )
                     is_valid = False
                 if ear_drop < min_ear_drop:
-                    quality_issues.append(f"Blink #{blink_count + 1} insufficient EAR drop ({ear_drop:.3f})")
+                    quality_issues.append(
+                        f"Blink #{blink_count + 1} insufficient EAR drop ({ear_drop:.3f})"
+                    )
                     is_valid = False
 
                 if is_valid:
                     blink_count += 1
-                    blink_frames.append({
-                        "start_frame": blink_start_frame,
-                        "end_frame": blink_end_frame,
-                        "duration_ms": round(duration_ms, 1),
-                        "ear_drop": round(ear_drop, 3),
-                        "min_ear": round(min_ear_during_blink, 3),
-                    })
+                    blink_frames.append(
+                        {
+                            "start_frame": blink_start_frame,
+                            "end_frame": blink_end_frame,
+                            "duration_ms": round(duration_ms, 1),
+                            "ear_drop": round(ear_drop, 3),
+                            "min_ear": round(min_ear_during_blink, 3),
+                        }
+                    )
                     logger.debug(
                         f"Blink detected: frames {blink_start_frame}-{blink_end_frame}, "
                         f"duration={duration_ms:.1f}ms, drop={ear_drop:.3f}"
@@ -298,6 +319,7 @@ def detect_blinks_in_sequence(
 # ============================================================================
 # Real-time Blink Detector (Stateful)
 # ============================================================================
+
 
 class BlinkDetector:
     """
@@ -378,7 +400,9 @@ class BlinkDetector:
             "blink_count": self.blink_count,
             "current_ear": round(avg_ear, 3),
             "state": self.state,
-            "avg_ear_window": round(np.mean(self.ear_history), 3) if self.ear_history else 0.0,
+            "avg_ear_window": (
+                round(np.mean(self.ear_history), 3) if self.ear_history else 0.0
+            ),
         }
 
     def get_stats(self) -> Dict[str, Any]:
@@ -399,6 +423,3 @@ class BlinkDetector:
 # For backward compatibility with old import names
 extract_eye_landmarks_from_68 = extract_eye_landmarks
 calculate_ear = calculate_eye_aspect_ratio
-
-
-

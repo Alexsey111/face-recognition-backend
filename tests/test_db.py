@@ -1,23 +1,24 @@
+import uuid
+from datetime import datetime, timezone  # Используем aware datetime
+from typing import Any, Dict, List, Optional
+
 import pytest
-from app.db.crud import UserCRUD, ReferenceCRUD, VerificationSessionCRUD, AuditLogCRUD
+
+# Pydantic импорты
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from sqlalchemy import and_, desc, func, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.db.crud import AuditLogCRUD, ReferenceCRUD, UserCRUD, VerificationSessionCRUD
 
 # Импорты моделей из app.models
 from app.db.models import (
-    User,
-    Reference,
-    VerificationSession,
     AuditLog,
+    Reference,
+    User,
+    VerificationSession,
     VerificationStatus,
 )
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-import uuid
-from datetime import datetime, timezone  # Используем aware datetime
-from sqlalchemy import select, func, desc, and_
-from typing import Optional, List, Dict, Any
-
-# Pydantic импорты
-from pydantic import BaseModel, Field, EmailStr
-from pydantic import ConfigDict
 
 # Импортируем схемы из app.models.user
 from app.models.user import UserCreate, UserUpdate

@@ -6,13 +6,14 @@
 для выравнивания по центрам глаз.
 """
 
+import asyncio
+from typing import Any, Dict, Optional, Tuple
+
 import cv2
 import numpy as np
-from PIL import Image
-from typing import Tuple, Optional, Dict, Any
-import asyncio
 import torch
 from facenet_pytorch import MTCNN
+from PIL import Image
 
 from ..utils.logger import get_logger
 

@@ -4,31 +4,31 @@ JWT токены, refresh tokens, управление сессиями и ро�
 """
 
 import asyncio
-import time
-from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any, List
-from uuid import uuid4
-import jwt
 import hashlib
 import secrets
+import time
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
+from uuid import uuid4
+
+import jwt
 from passlib.context import CryptContext
 from prometheus_client import Histogram
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
-from ..utils.logger import get_logger
-from ..utils.exceptions import (
-    UnauthorizedError,
-    ForbiddenError,
-    ValidationError,
-    AuthenticationError,
-)
-from ..services.encryption_service import EncryptionService
-from ..services.database_service import BiometricService
-from ..services.audit_service import AuditService
 from ..middleware.metrics import record_auth, record_token
+from ..services.audit_service import AuditService
+from ..services.database_service import BiometricService
+from ..services.encryption_service import EncryptionService
+from ..utils.exceptions import (
+    AuthenticationError,
+    ForbiddenError,
+    UnauthorizedError,
+    ValidationError,
+)
+from ..utils.logger import get_logger
 
 # Redis integration for token revocation
 try:

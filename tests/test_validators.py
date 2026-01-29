@@ -3,30 +3,31 @@
 Проверка функций валидации email, паролей, изображений и других данных.
 """
 
-import pytest
 import base64
 import math
 from unittest.mock import Mock
 
+import pytest
+
+from app.utils.exceptions import ValidationError
 from app.utils.validators import (
-    validate_email,
-    validate_username,
-    validate_password,
-    validate_image_format,
-    validate_image_size,
-    validate_uuid,
+    _detect_image_format,
+    sanitize_html,
+    sanitize_string,
     validate_date,
-    validate_url,
+    validate_email,
+    validate_embedding,
     validate_file_hash,
     validate_file_upload,
-    validate_embedding,
+    validate_image_format,
+    validate_image_size,
+    validate_password,
     validate_similarity_threshold,
-    sanitize_string,
-    sanitize_html,
     validate_sql_safe,
-    _detect_image_format,
+    validate_url,
+    validate_username,
+    validate_uuid,
 )
-from app.utils.exceptions import ValidationError
 
 
 class TestEmailValidation:

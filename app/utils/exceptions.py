@@ -3,7 +3,7 @@
 Простые классы исключений для различных типов ошибок.
 """
 
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
 
 
 class BaseAppException(Exception):

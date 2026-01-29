@@ -11,7 +11,7 @@ import json
 import os
 import re
 import socket
-from typing import Optional, Tuple, List, Dict, Any
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import cv2
@@ -36,14 +36,14 @@ except Exception:
     HEIF_SUPPORTED = False
 
 from ..config import settings
+from ..utils.exceptions import ValidationError
 from ..utils.file_utils import (
+    MAX_FILE_SIZE,
+    SUPPORTED_EXTENSIONS,
     ImageFileHandler,
     validate_image_file,
-    SUPPORTED_EXTENSIONS,
-    MAX_FILE_SIZE,
 )
 from ..utils.logger import get_logger
-from ..utils.exceptions import ValidationError
 
 logger = get_logger(__name__)
 
@@ -310,7 +310,7 @@ class ValidationService:
 
             # Используем DNN модель для детекции масок
             if self._mask_net is not None:
-                (h, w) = img.shape[:2]
+                h, w = img.shape[:2]
                 blob = cv2.dnn.blobFromImage(
                     cv2.resize(img, (300, 300)), 1.0, (300, 300), (104.0, 177.0, 123.0)
                 )
@@ -323,7 +323,7 @@ class ValidationService:
 
                     if confidence > 0.5:
                         box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
-                        (startX, startY, endX, endY) = box.astype("int")
+                        startX, startY, endX, endY = box.astype("int")
 
                         # Проверяем, находится ли обнаруженное лицо в пределах
                         # известных координат лиц
@@ -597,7 +597,9 @@ class ValidationService:
         laplacian_var = np.var(gray)
 
         if laplacian_var < 100:  # Пороговое значение для размытости
-            logger.warning(f"Изображение может быть размытым (variance: {laplacian_var:.2f})")
+            logger.warning(
+                f"Изображение может быть размытым (variance: {laplacian_var:.2f})"
+            )
 
     def get_supported_formats_info(self) -> dict:
         """

@@ -19,21 +19,23 @@
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
 from ..config import settings
-from ..services.storage_service import StorageService
-from ..services.session_service import SessionService
+from ..db.database import get_async_db_manager
 from ..services.cache_service import CacheService
 from ..services.database_service import DatabaseService
+from ..services.session_service import SessionService
+from ..services.storage_service import StorageService
 from ..utils.logger import get_logger
-from ..db.database import get_async_db_manager
 
 logger = get_logger(__name__)
+
 
 def utcnow() -> datetime:
     """Единая точка получения UTC-времени"""
     return datetime.now(timezone.utc)
+
 
 class CleanupTasks:
     """Асинхронные фоновые задачи очистки"""
@@ -148,39 +150,37 @@ class CleanupTasks:
         """
         Удаляет биометрические шаблоны пользователей, которые не использовались
         более указанного количества дней (по умолчанию 3 года = 1095 дней).
-        
+
         Это обеспечивает compliance с GDPR "right to be forgotten" и принципом
         минимизации хранения данных.
-        
+
         Args:
             days: Количество дней неактивности перед удалением (default: 1095 = 3 года)
-            
+
         Returns:
             int: Количество удалённых шаблонов
         """
         async with get_async_db_manager().get_session() as db:
             try:
                 db_service = DatabaseService(db)
-                
+
                 # Удаляем только soft-deleted записи старше указанного срока
                 from sqlalchemy import text
-                
-                result = await db.execute(
-                    text(f"""
+
+                result = await db.execute(text(f"""
                         DELETE FROM biometric_templates 
                         WHERE is_active = False 
                         AND updated_at < NOW() - INTERVAL '{days} days'
-                    """)
-                )
+                    """))
                 await db.commit()
-                
+
                 deleted = result.rowcount
                 logger.info(
                     f"🗑️ Cleanup: removed {deleted} inactive biometric templates "
                     f"(inactive > {days} days)"
                 )
                 return deleted
-                
+
             except Exception as e:
                 await db.rollback()
                 logger.exception("cleanup_inactive_biometric_templates failed")
@@ -193,35 +193,29 @@ class CleanupTasks:
     async def cleanup_raw_photos(days: int = 30) -> Dict[str, int]:
         """
         Удаляет исходные (raw) фотографии пользователей согласно политике хранения.
-        
+
         Эталонные фото хранятся в MinIO в бакете с lifecycle rule:
         - 30 дней для обычных пользователей
         - 90 дней для корпоративных клиентов
-        
+
         Args:
             days: Количество дней хранения raw фото (default: 30)
-            
+
         Returns:
             Dict с информацией об удалённых файлах
         """
         storage = StorageService()
         cutoff_date = utcnow() - timedelta(days=days)
-        
-        result = {
-            "scanned": 0,
-            "deleted": 0,
-            "errors": 0,
-            "deleted_keys": []
-        }
-        
+
+        result = {"scanned": 0, "deleted": 0, "errors": 0, "deleted_keys": []}
+
         try:
             # Сканируем бакеет на предмет старых файлов
             async for file_info in storage.list_files_async(
-                prefix="references/", 
-                limit=5000
+                prefix="references/", limit=5000
             ):
                 result["scanned"] += 1
-                
+
                 last_modified = file_info.get("last_modified")
                 if last_modified and last_modified < cutoff_date:
                     try:
@@ -231,13 +225,13 @@ class CleanupTasks:
                     except Exception as e:
                         logger.error(f"Failed to delete {file_info['key']}: {e}")
                         result["errors"] += 1
-                        
+
             logger.info(
                 f"📸 Photo cleanup: scanned={result['scanned']}, "
                 f"deleted={result['deleted']}, errors={result['errors']}"
             )
             return result
-            
+
         except Exception as e:
             logger.error(f"cleanup_raw_photos failed: {e}")
             return result
@@ -258,12 +252,10 @@ class CleanupTasks:
                     days=days,
                 )
                 await db.commit()
-                
-                logger.info(
-                    "🧹 Cleanup: removed %s old webhook log records", deleted
-                )
+
+                logger.info("🧹 Cleanup: removed %s old webhook log records", deleted)
                 return deleted
-                
+
             except Exception:
                 await db.rollback()
                 logger.exception("cleanup_old_webhook_logs failed")
@@ -295,7 +287,7 @@ class CleanupTasks:
     async def run_full_cleanup() -> Dict[str, Any]:
         """
         Полная очистка системы с соблюдением политики хранения данных.
-        
+
         Выполняет все cleanup задачи согласно retention policy:
         - Upload sessions (Redis TTL)
         - Raw photos (30 дней)
@@ -325,11 +317,11 @@ class CleanupTasks:
 
         # Calculate totals
         total_deleted = (
-            results["raw_photos"].get("deleted", 0) +
-            results["verification_sessions"] +
-            results["audit_logs"] +
-            results["inactive_biometric_templates"] +
-            results["webhook_logs"]
+            results["raw_photos"].get("deleted", 0)
+            + results["verification_sessions"]
+            + results["audit_logs"]
+            + results["inactive_biometric_templates"]
+            + results["webhook_logs"]
         )
 
         logger.info(

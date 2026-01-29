@@ -3,18 +3,19 @@
 Login, logout, refresh tokens и управление сессиями.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, EmailStr, Field
-from typing import Optional, Dict, Any, List, AsyncGenerator
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..db.database import get_db
 from ..services.auth_service import AuthService
 from ..services.database_service import BiometricService
-from ..utils.validators import validate_email, validate_password
+from ..utils.exceptions import NotFoundError, UnauthorizedError, ValidationError
 from ..utils.logger import get_logger
-from ..utils.exceptions import ValidationError, UnauthorizedError, NotFoundError
-from ..db.database import get_db
-from sqlalchemy.ext.asyncio import AsyncSession
+from ..utils.validators import validate_email, validate_password
 
 logger = get_logger(__name__)
 

@@ -1,27 +1,27 @@
 """Tests for metrics middleware."""
 
 import time
-from unittest.mock import patch, MagicMock
 from contextlib import contextmanager
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from app.middleware.metrics import (
     PROMETHEUS_AVAILABLE,
-    record_verification,
-    record_liveness,
-    record_upload,
-    record_reference,
-    record_auth,
-    record_token,
-    record_business_error,
-    record_error,
-    track_db_query,
-    track_processing,
-    initialize_metrics,
+    MetricsMiddleware,
     get_metrics,
     get_metrics_content_type,
-    MetricsMiddleware,
+    initialize_metrics,
+    record_auth,
+    record_business_error,
+    record_error,
+    record_liveness,
+    record_reference,
+    record_token,
+    record_upload,
+    record_verification,
+    track_db_query,
+    track_processing,
 )
 
 

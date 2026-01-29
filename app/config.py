@@ -4,15 +4,15 @@
 Загрузка настроек из переменных окружения.
 """
 
-from pathlib import Path
-from typing import List, Optional
-from pydantic import Field, field_validator, model_validator, ConfigDict, ValidationInfo
-from pydantic_settings import BaseSettings
 import os
 import secrets
 import warnings
+from pathlib import Path
+from typing import List, Optional
 
 from dotenv import load_dotenv
+from pydantic import ConfigDict, Field, ValidationInfo, field_validator, model_validator
+from pydantic_settings import BaseSettings
 
 # Загружаем .env явно
 env_path = Path(__file__).parent.parent / ".env"
@@ -107,11 +107,11 @@ class Settings(BaseSettings):
     RAW_PHOTO_RETENTION_DAYS: int = 30  # 30 дней для исходных фото
     AUDIT_LOG_RETENTION_DAYS: int = 365  # 1 год для аудит логов
     WEBHOOK_LOG_RETENTION_DAYS: int = 30  # 30 дней для webhook логов
-    
+
     # GDPR Compliance: Право на удаление данных (Right to be Forgotten)
     ENABLE_GDPR_AUTO_DELETE: bool = True
     GDPR_DELETE_BATCH_SIZE: int = 100
-    
+
     # Политика хранения для корпоративных клиентов (расширенная)
     CORPORATE_RAW_PHOTO_RETENTION_DAYS: int = 90
     CORPORATE_BIOMETRIC_RETENTION_DAYS: int = 1825  # 5 лет
@@ -247,7 +247,7 @@ class Settings(BaseSettings):
         ge=0.0,
         le=1.0,
         description="Порог cosine similarity для верификации. "
-                    "Рекомендуется: 0.75 (баланс FAR/FRR)",
+        "Рекомендуется: 0.75 (баланс FAR/FRR)",
     )
 
     # Дополнительные пороги для уровней уверенности
@@ -288,7 +288,7 @@ class Settings(BaseSettings):
     )
 
     # Расчётный порог на основе FAR/FRR
-    # Для FaceNet (casia-webface): 
+    # Для FaceNet (casia-webface):
     # - При FAR=0.1% порог ~0.65-0.70
     # - При FAR=0.01% порог ~0.75-0.80
     # - При FAR=0.001% порог ~0.85-0.90

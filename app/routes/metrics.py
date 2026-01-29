@@ -1,16 +1,17 @@
 """
 API эндпоинты для просмотра метрик
 """
+
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
-from app.services.metrics_service import MetricsService, get_metrics_service
-from app.middleware.metrics import get_metrics, get_metrics_content_type
-from app.utils.logger import get_logger
 from app.dependencies import get_current_user
+from app.middleware.metrics import get_metrics, get_metrics_content_type
 from app.models.response import BaseResponse
+from app.services.metrics_service import MetricsService, get_metrics_service
+from app.utils.logger import get_logger
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
 logger = get_logger(__name__)
@@ -19,6 +20,7 @@ logger = get_logger(__name__)
 # ============================================================================
 # Prometheus Metrics
 # ============================================================================
+
 
 @router.get("/prometheus")
 async def get_prometheus_metrics() -> Dict[str, str]:
@@ -32,16 +34,16 @@ async def get_prometheus_metrics() -> Dict[str, str]:
 
     # FastAPI ожидает Response объект для установки заголовков
     from fastapi import Response
+
     return Response(
-        content=metrics,
-        media_type=content_type,
-        headers={"Content-Type": content_type}
+        content=metrics, media_type=content_type, headers={"Content-Type": content_type}
     )
 
 
 # ============================================================================
 # Biometric Metrics (FAR/FRR/EER)
 # ============================================================================
+
 
 @router.get("/biometric", response_model=BaseResponse)
 async def get_biometric_metrics(
@@ -155,6 +157,7 @@ async def get_biometric_metrics_history(
 # Service Status
 # ============================================================================
 
+
 @router.get("/health", response_model=BaseResponse)
 async def metrics_health(
     user: Dict[str, Any] = Depends(get_current_user),
@@ -198,6 +201,7 @@ async def metrics_health(
 # ============================================================================
 # Service Status (Public)
 # ============================================================================
+
 
 @router.get("/status")
 async def metrics_status_public() -> Dict[str, Any]:

@@ -1,20 +1,22 @@
-import pytest
 import logging
 from unittest.mock import Mock, patch
-from app.utils.logger import setup_logger, get_logger
+
+import pytest
+
 from app.utils.constants import (
-    IMAGE_FORMATS,
-    IMAGE_FORMAT_ALIASES,
-    FILE_LIMITS,
-    SIMILARITY_LIMITS,
     CONFIDENCE_LEVELS,
-    USER_ROLES,
-    TIME_PERIODS,
     EMAIL_REGEX,
-    USERNAME_REGEX,
+    FILE_LIMITS,
+    IMAGE_FORMAT_ALIASES,
+    IMAGE_FORMATS,
     PASSWORD_REGEX,
+    SIMILARITY_LIMITS,
+    TIME_PERIODS,
+    USER_ROLES,
+    USERNAME_REGEX,
 )
-from app.utils.decorators import retry_on_failure, validate_input, log_execution_time
+from app.utils.decorators import log_execution_time, retry_on_failure, validate_input
+from app.utils.logger import get_logger, setup_logger
 
 
 class TestLogger:

@@ -14,11 +14,12 @@
 - Оценки качества входного изображения
 """
 
+import asyncio
+from typing import Any, Dict, Optional, Tuple
+
 import cv2
 import numpy as np
 from PIL import Image
-from typing import Dict, Any, Tuple, Optional
-import asyncio
 
 from ..utils.logger import get_logger
 
@@ -722,7 +723,7 @@ _analyzer: Optional[LightingAnalyzer] = None
 
 
 async def get_lighting_analyzer(
-    face_region: Optional[Tuple[int, int, int, int]] = None
+    face_region: Optional[Tuple[int, int, int, int]] = None,
 ) -> LightingAnalyzer:
     """Получение singleton экземпляра LightingAnalyzer."""
     global _analyzer

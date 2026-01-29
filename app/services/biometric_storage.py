@@ -42,24 +42,25 @@ import json
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
 try:
     import blosc2  # type: ignore
+
     BLOSC2_AVAILABLE = True
 except ImportError:
     blosc2 = None
     BLOSC2_AVAILABLE = False
 
 from ..config import settings
-from ..utils.logger import get_logger
-from ..utils.exceptions import StorageError, ValidationError, NotFoundError
-from ..services.encryption_service import EncryptionService
-from ..services.audit_service import AuditService
 from ..db.database import get_async_db_manager
 from ..db.models import BiometricTemplate
+from ..services.audit_service import AuditService
+from ..services.encryption_service import EncryptionService
+from ..utils.exceptions import NotFoundError, StorageError, ValidationError
+from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -67,13 +68,13 @@ logger = get_logger(__name__)
 class BiometricStorage:
     """
     Сервис для безопасного хранения биометрических шаблонов.
-    
+
     Security Features:
     - AES-256-GCM шифрование с аутентификацией
     - Сжатие данных перед шифрованием (blosc2)
     - Версионирование шаблонов
     - Аудит всех операций чтения/записи
-    
+
     Data Format:
     {
         "v": "1.0",           # Версия формата
@@ -98,11 +99,11 @@ class BiometricStorage:
         self.encryption = encryption_service or EncryptionService()
         self.audit = audit_service
         self.db_manager = get_async_db_manager()
-        
+
         # Настройки сжатия
         self.compressor = getattr(settings, "BIOMETRIC_COMPRESSOR", "lz4")
         self.compress_level = getattr(settings, "BIOMETRIC_COMPRESS_LEVEL", 5)
-        
+
         logger.info(
             f"BiometricStorage initialized | Compressor: {self.compressor} | "
             f"Level: {self.compress_level}"
@@ -118,31 +119,33 @@ class BiometricStorage:
     ) -> str:
         """
         Сохранить зашифрованный биометрический шаблон.
-        
+
         Args:
             user_id: Идентификатор пользователя
             embedding: NumPy массив эмбеддинга
             model_type: Тип модели (FaceNet, ArcFace, etc.)
             metadata: Дополнительные метаданные
             replace: Заменить существующий шаблон
-            
+
         Returns:
             template_id: UUID сохраненного шаблона
         """
         start_time = time.time()
         template_id = str(uuid.uuid4())
-        
+
         try:
             # Валидация эмбеддинга
             if not isinstance(embedding, np.ndarray):
                 raise ValidationError("Embedding must be a numpy array")
-            
+
             if embedding.size == 0:
                 raise ValidationError("Embedding cannot be empty")
-            
+
             if embedding.ndim != 1:
-                raise ValidationError(f"Embedding must be 1D array, got {embedding.ndim}D")
-            
+                raise ValidationError(
+                    f"Embedding must be 1D array, got {embedding.ndim}D"
+                )
+
             # Подготовка данных
             data = self._prepare_data(
                 user_id=user_id,
@@ -150,10 +153,10 @@ class BiometricStorage:
                 model_type=model_type,
                 metadata=metadata,
             )
-            
+
             # Сжатие
             compressed = self._compress(data)
-            
+
             # Шифрование
             encrypted = await self.encryption.encrypt(
                 data=compressed,
@@ -161,18 +164,18 @@ class BiometricStorage:
                     "type": "biometric_template",
                     "user_id": user_id,
                     "model": model_type,
-                }
+                },
             )
-            
+
             # Сохранение в БД
             async with self.db_manager.get_session() as db:
                 # Проверка наличия существующего шаблона
                 existing = await db.execute(
                     f"SELECT id FROM {BiometricTemplate.__tablename__} WHERE user_id = :user_id",
-                    {"user_id": user_id}
+                    {"user_id": user_id},
                 )
                 existing_id = existing.scalar_oneOrNone()
-                
+
                 if existing_id and replace:
                     # Обновление существующего
                     await db.execute(
@@ -185,14 +188,14 @@ class BiometricStorage:
                             "encrypted": encrypted,
                             "updated_at": datetime.now(timezone.utc),
                             "user_id": user_id,
-                        }
+                        },
                     )
                     template_id = existing_id
                     operation = "updated"
-                    
+
                 elif existing_id and not replace:
                     raise StorageError(f"Template for user {user_id} already exists")
-                    
+
                 else:
                     # Создание нового
                     template = BiometricTemplate(
@@ -205,9 +208,9 @@ class BiometricStorage:
                     )
                     db.add(template)
                     operation = "created"
-                    
+
                 await db.commit()
-            
+
             # Аудит
             if self.audit:
                 await self.audit.log(
@@ -220,16 +223,16 @@ class BiometricStorage:
                         "model_type": model_type,
                         "encrypted_size": len(encrypted),
                         "processing_time": time.time() - start_time,
-                    }
+                    },
                 )
-            
+
             logger.info(
                 f"Biometric template {operation}: user={user_id}, "
                 f"dim={embedding.shape[0]}, time={time.time() - start_time:.3f}s"
             )
-            
+
             return template_id
-            
+
         except Exception as e:
             logger.error(f"Failed to save biometric template: {e}")
             raise StorageError(f"Failed to save template: {str(e)}")
@@ -241,16 +244,16 @@ class BiometricStorage:
     ) -> Tuple[np.ndarray, Dict[str, Any]]:
         """
         Получить и расшифровать биометрический шаблон.
-        
+
         Args:
             user_id: Идентификатор пользователя
             version: Конкретная версия (latest = None)
-            
+
         Returns:
             Tuple[embedding, metadata]
         """
         start_time = time.time()
-        
+
         try:
             async with self.db_manager.get_session() as db:
                 if version is None:
@@ -259,28 +262,28 @@ class BiometricStorage:
                             FROM {BiometricTemplate.__tablename__} 
                             WHERE user_id = :user_id
                             ORDER BY version DESC LIMIT 1""",
-                        {"user_id": user_id}
+                        {"user_id": user_id},
                     )
                 else:
                     result = await db.execute(
                         f"""SELECT encrypted_data, metadata, version 
                             FROM {BiometricTemplate.__tablename__} 
                             WHERE user_id = :user_id AND version = :version""",
-                        {"user_id": user_id, "version": version}
+                        {"user_id": user_id, "version": version},
                     )
-                
+
                 row = result.fetchone()
-                
+
                 if not row:
                     raise NotFoundError(f"Template not found for user {user_id}")
-                
+
                 encrypted_data, metadata, template_version = row
-            
+
             # Расшифровка
             decrypted = await self.encryption.decrypt(encrypted_data)
             data = self._decompress(decrypted)
             embedding = self._extract_embedding(data)
-            
+
             # Аудит
             if self.audit:
                 await self.audit.log(
@@ -292,16 +295,16 @@ class BiometricStorage:
                         "version": template_version,
                         "embedding_dim": embedding.shape[0],
                         "processing_time": time.time() - start_time,
-                    }
+                    },
                 )
-            
+
             logger.info(
                 f"Biometric template retrieved: user={user_id}, "
                 f"version={template_version}, time={time.time() - start_time:.3f}s"
             )
-            
+
             return embedding, metadata
-            
+
         except NotFoundError:
             raise
         except Exception as e:
@@ -311,10 +314,10 @@ class BiometricStorage:
     async def delete_template(self, user_id: str) -> bool:
         """
         Удалить биометрический шаблон (soft delete).
-        
+
         Args:
             user_id: Идентификатор пользователя
-            
+
         Returns:
             True если удален, False если не найден
         """
@@ -327,12 +330,12 @@ class BiometricStorage:
                     {
                         "user_id": user_id,
                         "updated_at": datetime.now(timezone.utc),
-                    }
+                    },
                 )
                 await db.commit()
-                
+
                 deleted = result.rowcount > 0
-            
+
             if deleted and self.audit:
                 await self.audit.log(
                     action="biometric_template_deleted",
@@ -340,11 +343,13 @@ class BiometricStorage:
                     resource_id=user_id,
                     user_id=user_id,
                 )
-            
-            logger.info(f"Biometric template deleted: user={user_id}, deleted={deleted}")
-            
+
+            logger.info(
+                f"Biometric template deleted: user={user_id}, deleted={deleted}"
+            )
+
             return deleted
-            
+
         except Exception as e:
             logger.error(f"Failed to delete biometric template: {e}")
             raise StorageError(f"Failed to delete template: {str(e)}")
@@ -352,10 +357,10 @@ class BiometricStorage:
     async def list_versions(self, user_id: str) -> List[Dict[str, Any]]:
         """
         Получить список всех версий шаблонов пользователя.
-        
+
         Args:
             user_id: Идентификатор пользователя
-            
+
         Returns:
             Список версий с метаданными
         """
@@ -367,10 +372,10 @@ class BiometricStorage:
                         FROM {BiometricTemplate.__tablename__} 
                         WHERE user_id = :user_id
                         ORDER BY version DESC""",
-                    {"user_id": user_id}
+                    {"user_id": user_id},
                 )
                 rows = result.fetchall()
-            
+
             return [
                 {
                     "template_id": row[0],
@@ -383,7 +388,7 @@ class BiometricStorage:
                 }
                 for row in rows
             ]
-            
+
         except Exception as e:
             logger.error(f"Failed to list template versions: {e}")
             raise StorageError(f"Failed to list versions: {str(e)}")
@@ -395,24 +400,24 @@ class BiometricStorage:
     ) -> Dict[str, Any]:
         """
         Сравнить два эмбеддинга без сохранения в БД.
-        
+
         Args:
             embedding1: Первый эмбеддинг
             embedding2: Второй эмбеддинг
-            
+
         Returns:
             Dict с метриками схожести
         """
         # Нормализация
         e1 = embedding1 / (np.linalg.norm(embedding1) + 1e-8)
         e2 = embedding2 / (np.linalg.norm(embedding2) + 1e-8)
-        
+
         # Косинусная схожесть
         cosine_sim = float(np.dot(e1, e2))
-        
+
         # Евклидово расстояние
         euclidean_dist = float(np.linalg.norm(e1 - e2))
-        
+
         return {
             "cosine_similarity": round(cosine_sim, 6),
             "euclidean_distance": round(euclidean_dist, 6),
@@ -442,10 +447,10 @@ class BiometricStorage:
             "created_at": datetime.now(timezone.utc).isoformat(),
             "data": embedding.tobytes().hex(),  # Hex для JSON совместимости
         }
-        
+
         if metadata:
             data_dict["metadata"] = metadata
-        
+
         return json.dumps(data_dict, separators=(",", ":")).encode("utf-8")
 
     def _compress(self, data: bytes) -> bytes:
@@ -480,10 +485,10 @@ class BiometricStorage:
     def _extract_embedding(self, data: bytes) -> np.ndarray:
         """Извлечь эмбеддинг из данных."""
         data_dict = json.loads(data.decode("utf-8"))
-        
+
         embedding_hex = data_dict["data"]
         embedding = np.frombuffer(bytes.fromhex(embedding_hex), dtype=np.float32)
-        
+
         return embedding
 
     def get_stats(self) -> Dict[str, Any]:
@@ -507,10 +512,10 @@ _biometric_storage: Optional[BiometricStorage] = None
 async def get_biometric_storage() -> BiometricStorage:
     """Получение singleton экземпляра BiometricStorage."""
     global _biometric_storage
-    
+
     if _biometric_storage is None:
         _biometric_storage = BiometricStorage()
-    
+
     return _biometric_storage
 
 

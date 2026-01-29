@@ -1,7 +1,8 @@
 """Tests for authentication endpoints."""
 
-import pytest
 import uuid
+
+import pytest
 from fastapi import status
 
 
@@ -35,10 +36,15 @@ class TestAuthEndpoints:
             # Альтернативный успешный ответ
             data = response.json()
             user_data = data.get("user", data)
-            assert user_data.get("email") == unique_email or data.get("email") == unique_email
+            assert (
+                user_data.get("email") == unique_email
+                or data.get("email") == unique_email
+            )
         else:
             # Если ошибка - пропускаем тест
-            pytest.skip(f"Registration returned status {response.status_code}: {response.text}")
+            pytest.skip(
+                f"Registration returned status {response.status_code}: {response.text}"
+            )
 
     @pytest.mark.asyncio
     async def test_register_duplicate_email(self, async_client, test_user_123):
@@ -53,21 +59,30 @@ class TestAuthEndpoints:
         )
 
         # Ожидаем 409 Conflict, 400 Bad Request или 422 (разные форматы ошибок)
-        if response.status_code in [status.HTTP_409_CONFLICT, status.HTTP_400_BAD_REQUEST]:
+        if response.status_code in [
+            status.HTTP_409_CONFLICT,
+            status.HTTP_400_BAD_REQUEST,
+        ]:
             data = response.json()
             # Проверяем разные форматы ошибок
             error_msg = (
-                data.get("detail") or
-                data.get("error_details", {}).get("error") or
-                data.get("message") or
-                ""
+                data.get("detail")
+                or data.get("error_details", {}).get("error")
+                or data.get("message")
+                or ""
             )
-            assert "already" in error_msg.lower() or "exists" in error_msg.lower() or "conflict" in error_msg.lower()
+            assert (
+                "already" in error_msg.lower()
+                or "exists" in error_msg.lower()
+                or "conflict" in error_msg.lower()
+            )
         elif response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY:
             # Email уже существует - валидация может вернуть 422
             pass
         else:
-            pytest.skip(f"Unexpected status for duplicate registration: {response.status_code}")
+            pytest.skip(
+                f"Unexpected status for duplicate registration: {response.status_code}"
+            )
 
     @pytest.mark.asyncio
     async def test_register_weak_password(self, async_client):
@@ -87,10 +102,13 @@ class TestAuthEndpoints:
     async def test_login_success(self, async_client, test_user_123):
         """Test successful login."""
         from urllib.parse import urlencode
-        form_data = urlencode({
-            "username": "user-123@example.com",
-            "password": "testpassword",  # Default test password
-        })
+
+        form_data = urlencode(
+            {
+                "username": "user-123@example.com",
+                "password": "testpassword",  # Default test password
+            }
+        )
 
         response = await async_client.post(
             "/api/v1/auth/login",
@@ -101,7 +119,10 @@ class TestAuthEndpoints:
         if response.status_code == status.HTTP_200_OK:
             data = response.json()
             assert "access_token" in data or "tokens" in data
-            token_type = data.get("token_type", "").lower() or data.get("tokens", {}).get("token_type", "").lower()
+            token_type = (
+                data.get("token_type", "").lower()
+                or data.get("tokens", {}).get("token_type", "").lower()
+            )
             assert token_type == "bearer"
         elif response.status_code == status.HTTP_401_UNAUTHORIZED:
             # Пароль неверный - пропускаем
@@ -114,10 +135,13 @@ class TestAuthEndpoints:
         """Test login with wrong password."""
         # OAuth2PasswordRequestForm требует form data с правильным content-type
         from urllib.parse import urlencode
-        form_data = urlencode({
-            "username": "user-123@example.com",
-            "password": "ValidPass123!",  # Валидный формат, но неверный пароль
-        })
+
+        form_data = urlencode(
+            {
+                "username": "user-123@example.com",
+                "password": "ValidPass123!",  # Валидный формат, но неверный пароль
+            }
+        )
 
         response = await async_client.post(
             "/api/v1/auth/login",
@@ -126,16 +150,22 @@ class TestAuthEndpoints:
         )
 
         # Ожидаем 401 для неверного пароля или 422 для ошибки валидации
-        assert response.status_code in [status.HTTP_401_UNAUTHORIZED, status.HTTP_422_UNPROCESSABLE_ENTITY]
+        assert response.status_code in [
+            status.HTTP_401_UNAUTHORIZED,
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+        ]
 
     @pytest.mark.asyncio
     async def test_login_nonexistent_user(self, async_client):
         """Test login with non-existent user."""
         from urllib.parse import urlencode
-        form_data = urlencode({
-            "username": "nonexistent@example.com",
-            "password": "ValidPass123!",
-        })
+
+        form_data = urlencode(
+            {
+                "username": "nonexistent@example.com",
+                "password": "ValidPass123!",
+            }
+        )
 
         response = await async_client.post(
             "/api/v1/auth/login",
@@ -147,9 +177,13 @@ class TestAuthEndpoints:
         if response.status_code == status.HTTP_401_UNAUTHORIZED:
             assert True
         elif response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY:
-            pytest.skip(f"Login with non-existent user returned 422 - possible validation issue")
+            pytest.skip(
+                f"Login with non-existent user returned 422 - possible validation issue"
+            )
         else:
-            pytest.skip(f"Unexpected status for non-existent user login: {response.status_code}")
+            pytest.skip(
+                f"Unexpected status for non-existent user login: {response.status_code}"
+            )
 
     @pytest.mark.asyncio
     async def test_get_current_user(self, async_client, auth_headers):
@@ -183,10 +217,12 @@ class TestAuthEndpoints:
         from urllib.parse import urlencode
 
         # First login to get refresh token
-        form_data = urlencode({
-            "username": "user-123@example.com",
-            "password": "testpassword",
-        })
+        form_data = urlencode(
+            {
+                "username": "user-123@example.com",
+                "password": "testpassword",
+            }
+        )
 
         login_response = await async_client.post(
             "/api/v1/auth/login",
@@ -227,9 +263,7 @@ class TestAuthEndpoints:
         # Создаем валидные headers для test_user_123
         auth_service = AuthService()
         tokens = await auth_service.create_user_session(
-            user_id="user-123",
-            user_agent="test-agent",
-            ip_address="127.0.0.1"
+            user_id="user-123", user_agent="test-agent", ip_address="127.0.0.1"
         )
         headers = {"Authorization": f"Bearer {tokens['access_token']}"}
 

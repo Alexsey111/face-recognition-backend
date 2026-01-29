@@ -3,9 +3,10 @@
 Проверка работы с MinIO S3 хранилищем.
 """
 
-import pytest
-from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from io import BytesIO
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
+
+import pytest
 from PIL import Image
 
 
@@ -53,7 +54,7 @@ class TestImageValidator:
 
     def test_get_image_info(self):
         """Тест получения информации об изображении"""
-        from app.utils.file_utils import ImageValidator, FileUtils
+        from app.utils.file_utils import FileUtils, ImageValidator
 
         img = Image.new("RGB", (300, 200), color="purple")
         img_bytes = BytesIO()

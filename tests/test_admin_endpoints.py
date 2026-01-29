@@ -6,15 +6,16 @@ Covers:
 - /admin/errors - Error logs
 """
 
-import pytest
 import uuid
-from datetime import datetime, timezone, timedelta
-from unittest.mock import Mock, patch, AsyncMock
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 
 from app.routes.admin import (
     AdminStatsResponse,
-    UserActivityResponse,
     AuditLogResponse,
+    UserActivityResponse,
     get_client_ip,
     get_performance_metrics,
 )

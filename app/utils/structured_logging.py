@@ -8,23 +8,22 @@ Structured JSON Logging System.
 - Audit trail для всех операций
 """
 
-import logging
-import sys
 import json
+import logging
 import os
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Dict, Optional, Union
-from functools import lru_cache
-from io import StringIO
+import sys
 import threading
 import traceback as tb_lib
+from datetime import datetime, timezone
+from functools import lru_cache
+from io import StringIO
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+from typing import Any, Dict, Optional, Union
 
 from pythonjsonlogger import jsonlogger
-from logging.handlers import RotatingFileHandler
 
 from ..config import settings
-
 
 # ============================================================================
 # Log Levels

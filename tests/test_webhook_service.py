@@ -2,16 +2,17 @@
 Unit тесты для WebhookService.
 """
 
-import pytest
-import json
-import hmac
 import hashlib
+import hmac
+import json
 import uuid
-from datetime import datetime, timezone, timedelta
-from unittest.mock import Mock, AsyncMock, patch
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, Mock, patch
 
-from app.services.webhook_service import WebhookService
+import pytest
+
 from app.db.models import WebhookConfig, WebhookLog, WebhookStatus
+from app.services.webhook_service import WebhookService
 
 
 @pytest.fixture
@@ -379,6 +380,7 @@ class TestWebhookFlow:
 # ДОПОЛНИТЕЛЬНЫЕ ТЕСТЫ ДЛЯ ПОВЫШЕНИЯ ПОКРЫТИЯ
 # ======================================================================
 
+
 class TestEmitEvent:
     """Тесты для emit_event."""
 
@@ -402,6 +404,7 @@ class TestEmitEvent:
     ):
         """emit_event с активными конфигурациями."""
         import uuid as uuid_lib
+
         from app.db.models import WebhookConfig
 
         # Создаём уникальную конфигурацию в БД
@@ -420,7 +423,9 @@ class TestEmitEvent:
         db_session.add(test_config)
         await db_session.commit()
 
-        with patch.object(webhook_service, '_send_with_retry', new_callable=AsyncMock) as mock_send:
+        with patch.object(
+            webhook_service, "_send_with_retry", new_callable=AsyncMock
+        ) as mock_send:
             await webhook_service.emit_event(
                 event_type="verification.completed",
                 user_id="test-user-123",
@@ -436,7 +441,8 @@ class TestEmitEvent:
     ):
         """emit_event с пропуском дубликатов."""
         import uuid as uuid_lib
-        from app.db.models import WebhookLog, WebhookConfig
+
+        from app.db.models import WebhookConfig, WebhookLog
 
         # Создаём уникальную конфигурацию
         config_id = f"config-test-{uuid_lib.uuid4().hex[:8]}"
@@ -465,7 +471,9 @@ class TestEmitEvent:
         db_session.add(log)
         await db_session.commit()
 
-        with patch.object(webhook_service, '_send_with_retry', new_callable=AsyncMock) as mock_send:
+        with patch.object(
+            webhook_service, "_send_with_retry", new_callable=AsyncMock
+        ) as mock_send:
             await webhook_service.emit_event(
                 event_type="verification.completed",
                 user_id="test-user-123",
@@ -486,8 +494,14 @@ class TestSendWithRetry:
     ):
         """Успешная отправка с первой попытки."""
 
-        with patch.object(webhook_service, '_send_once', new_callable=AsyncMock) as mock_send_once, \
-             patch.object(webhook_service, '_update_log_success', new_callable=AsyncMock) as mock_update_success:
+        with (
+            patch.object(
+                webhook_service, "_send_once", new_callable=AsyncMock
+            ) as mock_send_once,
+            patch.object(
+                webhook_service, "_update_log_success", new_callable=AsyncMock
+            ) as mock_update_success,
+        ):
 
             mock_send_once.return_value = (True, 200, "OK")
 
@@ -507,9 +521,17 @@ class TestSendWithRetry:
     ):
         """Отправка с повтором после неудачи."""
 
-        with patch.object(webhook_service, '_send_once', new_callable=AsyncMock) as mock_send_once, \
-             patch.object(webhook_service, '_update_log_success', new_callable=AsyncMock) as mock_update_success, \
-             patch.object(webhook_service, '_update_log_retry', new_callable=AsyncMock) as mock_update_retry:
+        with (
+            patch.object(
+                webhook_service, "_send_once", new_callable=AsyncMock
+            ) as mock_send_once,
+            patch.object(
+                webhook_service, "_update_log_success", new_callable=AsyncMock
+            ) as mock_update_success,
+            patch.object(
+                webhook_service, "_update_log_retry", new_callable=AsyncMock
+            ) as mock_update_retry,
+        ):
 
             # Первая попытка неудачная, вторая успешная
             mock_send_once.side_effect = [(False, 500, "Error"), (True, 200, "OK")]
@@ -532,9 +554,17 @@ class TestSendWithRetry:
     ):
         """Все попытки неудачны."""
 
-        with patch.object(webhook_service, '_send_once', new_callable=AsyncMock) as mock_send_once, \
-             patch.object(webhook_service, '_update_log_retry', new_callable=AsyncMock) as mock_update_retry, \
-             patch.object(webhook_service, '_mark_log_failed', new_callable=AsyncMock) as mock_mark_failed:
+        with (
+            patch.object(
+                webhook_service, "_send_once", new_callable=AsyncMock
+            ) as mock_send_once,
+            patch.object(
+                webhook_service, "_update_log_retry", new_callable=AsyncMock
+            ) as mock_update_retry,
+            patch.object(
+                webhook_service, "_mark_log_failed", new_callable=AsyncMock
+            ) as mock_mark_failed,
+        ):
 
             mock_send_once.return_value = (False, 500, "Error")
 
@@ -555,43 +585,29 @@ class TestLogUpdates:
     """Тесты для обновления логов."""
 
     @pytest.mark.asyncio
-    async def test_update_log_success(
-        self, webhook_service, db_session
-    ):
+    async def test_update_log_success(self, webhook_service, db_session):
         """Обновление лога при успехе."""
         # Skip - требует полной схемы БД с webhook_logs и связанными таблицами
-        pytest.skip(
-            "Skipping - requires full DB schema with webhook_logs table"
-        )
+        pytest.skip("Skipping - requires full DB schema with webhook_logs table")
 
     @pytest.mark.asyncio
-    async def test_update_log_retry(
-        self, webhook_service, db_session, sample_config
-    ):
+    async def test_update_log_retry(self, webhook_service, db_session, sample_config):
         """Обновление лога при retry."""
         # Skip - требует полной схемы БД с webhook_logs и связанными таблицами
-        pytest.skip(
-            "Skipping - requires full DB schema with webhook_logs table"
-        )
+        pytest.skip("Skipping - requires full DB schema with webhook_logs table")
 
     @pytest.mark.asyncio
-    async def test_mark_log_failed(
-        self, webhook_service, db_session
-    ):
+    async def test_mark_log_failed(self, webhook_service, db_session):
         """Пометка лога как failed."""
         # Skip - требует полной схемы БД с webhook_logs и связанными таблицами
-        pytest.skip(
-            "Skipping - requires full DB schema with webhook_logs table"
-        )
+        pytest.skip("Skipping - requires full DB schema with webhook_logs table")
 
 
 class TestWebhookServiceClose:
     """Тесты для close метода."""
 
     @pytest.mark.asyncio
-    async def test_close_method(
-        self, webhook_service
-    ):
+    async def test_close_method(self, webhook_service):
         """Тест метода close."""
         # В текущей реализации close ничего не делает
         await webhook_service.close()
@@ -608,9 +624,7 @@ class TestSendWebhookWithConfig:
     ):
         """Тест отправки с существующей конфигурацией."""
         # Skip - требует реального UUID, который сервис преобразует внутри
-        pytest.skip(
-            "Skipping - requires proper UUID handling in service layer"
-        )
+        pytest.skip("Skipping - requires proper UUID handling in service layer")
 
 
 class TestWebhookHeaders:
@@ -661,9 +675,7 @@ class TestEmitEvent:
     ):
         """emit_event с пропуском дубликатов."""
         # Skip - тест требует изоляции от параллельных тестов, влияющих на mock
-        pytest.skip(
-            "Skipping - requires test isolation from parallel test runs"
-        )
+        pytest.skip("Skipping - requires test isolation from parallel test runs")
 
     @pytest.mark.asyncio
     async def test_send_webhook_with_config(
@@ -671,6 +683,4 @@ class TestEmitEvent:
     ):
         """Тест отправки с существующей конфигурацией."""
         # Skip - требует реального UUID, который сервис преобразует внутри
-        pytest.skip(
-            "Skipping - requires proper UUID handling in service layer"
-        )
+        pytest.skip("Skipping - requires proper UUID handling in service layer")

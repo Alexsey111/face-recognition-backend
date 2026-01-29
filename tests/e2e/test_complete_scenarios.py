@@ -2,10 +2,11 @@
 End-to-End тесты для полных пользовательских сценариев.
 """
 
-import pytest
+import asyncio
 import base64
 import uuid
-import asyncio
+
+import pytest
 
 
 class TestCompleteUserJourney:
@@ -281,8 +282,9 @@ class TestPerformanceScenarios:
         # Разрешаем: 200 (успех), 404 (нет reference), 400 (ошибка валидации),
         # 401 (не авторизован), 500 (ошибка ML сервиса - ожидаемо для mock данных)
         allowed_codes = [200, 404, 400, 401, 500, 503]
-        assert all(code in allowed_codes for code in status_codes), \
-            f"Unexpected status codes: {[c for c in status_codes if c not in allowed_codes]}"
+        assert all(
+            code in allowed_codes for code in status_codes
+        ), f"Unexpected status codes: {[c for c in status_codes if c not in allowed_codes]}"
 
         # Среднее время ответа должно быть разумным (< 30 сек для учёта возможных ML задержек)
         avg_time = sum(response_times) / len(response_times)
