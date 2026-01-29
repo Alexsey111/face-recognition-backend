@@ -723,7 +723,7 @@ _analyzer: Optional[LightingAnalyzer] = None
 
 
 async def get_lighting_analyzer(
-    face_region: Optional[Tuple[int, int, int, int]] = None
+    face_region: Optional[Tuple[int, int, int, int]] = None,
 ) -> LightingAnalyzer:
     """Получение singleton экземпляра LightingAnalyzer."""
     global _analyzer

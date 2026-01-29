@@ -8,7 +8,7 @@
 
 Методы:
 1. Depth-from-focus/defocus - оценка глубины по размытию
-2. Texture gradient analysis - анализ текстурных градиентов  
+2. Texture gradient analysis - анализ текстурных градиентов
 3. Shading-based depth - оценка по паттернам освещения
 4. Size consistency - проверка согласованности размеров
 5. 3D morphable model fitting - оценка соответствия 3D модели

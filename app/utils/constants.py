@@ -40,7 +40,7 @@ IMAGE_FORMAT_ALIASES = {
 # - WEBP requires additional check: header[:4] == b"RIFF" and header[8:12] == b"WEBP"
 # - HEIC/HEIF must be detected by presence of ftyp* within first ~32 bytes
 MAGIC_NUMBERS = {
-    "JPEG": [b"\xFF\xD8\xFF"],  # JPEG SOI
+    "JPEG": [b"\xff\xd8\xff"],  # JPEG SOI
     "PNG": [b"\x89PNG\r\n\x1a\n"],
     "GIF": [b"GIF87a", b"GIF89a"],
     "BMP": [b"BM"],

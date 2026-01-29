@@ -5,7 +5,7 @@
 Модель MiniFASNetV2 обеспечивает точность >98% согласно ТЗ.
 Источник: https://github.com/minivision-ai/Silent-Face-Anti-Spoofing
 
-Архитектура: 
+Архитектура:
 - Input: 80x80 RGB image
 - Output: Binary classification (Real/Spoof)
 - Parameters: ~0.4M

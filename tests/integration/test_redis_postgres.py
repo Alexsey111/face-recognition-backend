@@ -34,14 +34,10 @@ class TestPostgreSQLIntegration:
     async def test_postgresql_tables_exist(self, async_engine, test_user):
         """Test that required tables exist."""
         async with async_engine.connect() as conn:
-            result = await conn.execute(
-                text(
-                    """
+            result = await conn.execute(text("""
                 SELECT table_name FROM information_schema.tables
                 WHERE table_schema = 'public'
-            """
-                )
-            )
+            """))
             tables = [row[0] for row in result.fetchall()]
 
             required_tables = [
@@ -61,13 +57,11 @@ class TestPostgreSQLIntegration:
 
         try:
             await db_session.execute(
-                text(
-                    """
+                text("""
                     INSERT INTO users (id, email, password_hash, is_active, total_uploads, total_verifications, successful_verifications)
                     VALUES (:id, :email, :password_hash, TRUE, 0, 0, 0)
                     ON CONFLICT (id) DO NOTHING
-                """
-                ),
+                """),
                 {
                     "id": test_user_id,
                     "email": f"{test_user_id}@example.com",
@@ -108,13 +102,11 @@ class TestPostgreSQLIntegration:
         try:
             async with async_engine.begin() as conn:
                 await conn.execute(
-                    text(
-                        """
+                    text("""
                         INSERT INTO "references" (id, user_id, file_url, embedding_encrypted, embedding_hash, quality_score, image_filename, image_size_mb, image_format)
                         VALUES (:id, :user_id, :file_url, :embedding_encrypted, :embedding_hash, :quality_score, :image_filename, :image_size_mb, :image_format)
                         ON CONFLICT (id) DO NOTHING
-                    """
-                    ),
+                    """),
                     {
                         "id": ref_id,
                         "user_id": test_user,
@@ -154,13 +146,11 @@ class TestPostgreSQLIntegration:
         try:
             async with async_engine.begin() as conn:
                 await conn.execute(
-                    text(
-                        """
+                    text("""
                         INSERT INTO "references" (id, user_id, file_url, embedding_encrypted, embedding_hash, quality_score, image_filename, image_size_mb, image_format)
                         VALUES (:id, :user_id, :file_url, :embedding_encrypted, :embedding_hash, :quality_score, :image_filename, :image_size_mb, :image_format)
                         ON CONFLICT (id) DO NOTHING
-                    """
-                    ),
+                    """),
                     {
                         "id": ref_id,
                         "user_id": test_user,

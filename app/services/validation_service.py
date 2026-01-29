@@ -310,7 +310,7 @@ class ValidationService:
 
             # Используем DNN модель для детекции масок
             if self._mask_net is not None:
-                (h, w) = img.shape[:2]
+                h, w = img.shape[:2]
                 blob = cv2.dnn.blobFromImage(
                     cv2.resize(img, (300, 300)), 1.0, (300, 300), (104.0, 177.0, 123.0)
                 )
@@ -323,7 +323,7 @@ class ValidationService:
 
                     if confidence > 0.5:
                         box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
-                        (startX, startY, endX, endY) = box.astype("int")
+                        startX, startY, endX, endY = box.astype("int")
 
                         # Проверяем, находится ли обнаруженное лицо в пределах
                         # известных координат лиц
