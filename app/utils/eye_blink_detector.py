@@ -401,43 +401,4 @@ extract_eye_landmarks_from_68 = extract_eye_landmarks
 calculate_ear = calculate_eye_aspect_ratio
 
 
-# ============================================================================
-# Example usage
-# ============================================================================
 
-if __name__ == "__main__":
-    # Симуляция последовательности (для тестирования)
-    import random
-    
-    # Генерируем фейковые landmarks
-    def generate_fake_landmarks(eye_open: bool) -> np.ndarray:
-        """Генерация фейковых landmarks для тестирования."""
-        landmarks = np.random.rand(68, 2) * 100
-        
-        # Левый глаз (36-41)
-        if eye_open:
-            landmarks[37, 1] = 50  # Открытый глаз
-            landmarks[38, 1] = 50
-            landmarks[40, 1] = 50
-            landmarks[41, 1] = 50
-        else:
-            landmarks[37, 1] = 55  # Закрытый глаз (ближе к горизонтали)
-            landmarks[38, 1] = 55
-            landmarks[40, 1] = 55
-            landmarks[41, 1] = 55
-        
-        return landmarks
-    
-    # Симуляция последовательности: открыт-закрыт-открыт
-    sequence = []
-    for i in range(30):
-        if 10 <= i <= 13:  # Кадры 10-13: закрыт (моргание)
-            sequence.append(generate_fake_landmarks(eye_open=False))
-        else:
-            sequence.append(generate_fake_landmarks(eye_open=True))
-    
-    success, blink_count, stats = detect_blinks_in_sequence(sequence)
-    
-    print(f"Blink detection: {'SUCCESS' if success else 'FAILED'}")
-    print(f"Blinks detected: {blink_count}")
-    print(f"Stats: {stats}")

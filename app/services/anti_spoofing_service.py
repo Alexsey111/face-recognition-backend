@@ -11,11 +11,6 @@
 - Parameters: ~0.4M
 """
 
-"""
-Сертифицированный сервис Anti-Spoofing (Liveness Detection).
-Использует MiniFASNetV2 для защиты от фото/видео атак.
-"""
-
 import io
 import base64
 import time
