@@ -1,5 +1,5 @@
 # =============================================================================
-# CI/CD Pipeline for Face Recognition Service
+# CI/CD Pipeline for Face Recognition Service (Optimized for Ubuntu 24.04)
 # =============================================================================
 
 name: CI/CD Pipeline
@@ -30,10 +30,8 @@ env:
   DOCKER_REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
   MIN_COVERAGE: 80
-  # CPU-версия PyTorch для CI (снижает размер загрузки)
   TORCH_INDEX_URL: https://download.pytorch.org/whl/cpu
 
-# Останавливает запущенные ранее задачи при новом пуше в ту же ветку
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -55,7 +53,7 @@ jobs:
   # --------------------------------------------------------------------------
   lint:
     name: Code Quality Check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout code
@@ -138,7 +136,7 @@ jobs:
   # --------------------------------------------------------------------------
   security:
     name: Security Scan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout code
@@ -208,7 +206,7 @@ jobs:
   # --------------------------------------------------------------------------
   unit-tests:
     name: Unit Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     if: ${{ !inputs.skip_tests }}
     steps:
@@ -229,15 +227,14 @@ jobs:
             ${{ runner.os }}-pip-unit-
             ${{ runner.os }}-pip-
 
-      - name: Install system dependencies
+      - name: Install system dependencies (Ubuntu 24.04)
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-glx libglib2.0-0
+          sudo apt-get install -y libgl1 libglib2.0-0
 
       - name: Install dependencies (CPU PyTorch)
         run: |
           python -m pip install --upgrade pip wheel setuptools
-          # CPU-версия PyTorch для CI
           pip install torch torchvision --index-url ${{ env.TORCH_INDEX_URL }}
           pip install -r requirements.txt
           if [ -f requirements-dev.txt ]; then
@@ -305,7 +302,7 @@ jobs:
   # --------------------------------------------------------------------------
   integration-tests:
     name: Integration Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: unit-tests
     if: ${{ !inputs.skip_tests }}
@@ -352,15 +349,16 @@ jobs:
             ${{ runner.os }}-pip-integration-
             ${{ runner.os }}-pip-
 
-      - name: Install system dependencies
+      - name: Install system dependencies (Ubuntu 24.04)
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             libheif-dev \
             libde265-dev \
-            libgl1-mesa-glx \
+            libgl1 \
             libglib2.0-0 \
-            postgresql-client
+            postgresql-client \
+            redis-tools
 
       - name: Install Python dependencies (CPU PyTorch)
         run: |
@@ -382,7 +380,6 @@ jobs:
         env:
           DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
         run: |
-          # Если есть alembic миграции
           if [ -f alembic.ini ]; then
             alembic upgrade head
           fi
@@ -432,7 +429,7 @@ jobs:
   # --------------------------------------------------------------------------
   performance-tests:
     name: Performance Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
     steps:
@@ -487,16 +484,14 @@ jobs:
   # --------------------------------------------------------------------------
   build:
     name: Build Docker Image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     needs: [lint, security]
-    # Пропускаем unit/integration тесты для быстрого feedback
-    # if: needs.unit-tests.result == 'success' && needs.integration-tests.result == 'success'
     permissions:
       contents: read
       packages: write
     outputs:
-      image_tag: ${{ steps.meta.outputs.tags }}
+      image_tags: ${{ steps.meta.outputs.tags }}
       image_digest: ${{ steps.build.outputs.digest }}
     steps:
       - name: Checkout code
@@ -571,11 +566,11 @@ jobs:
           sarif_file: 'trivy-image-results.sarif'
 
   # --------------------------------------------------------------------------
-  # Validate Metrics (FAR/FRR) - только для main ветки
+  # Validate Metrics (FAR/FRR)
   # --------------------------------------------------------------------------
   validate-metrics:
     name: Validate FAR/FRR Metrics
-    runs-on: ubuntu-latest  # Используем обычный runner вместо self-hosted
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
@@ -613,7 +608,6 @@ jobs:
       - name: Prepare test dataset
         run: |
           mkdir -p tests/datasets/validation_dataset
-          # Здесь можно добавить загрузку тестового датасета из S3/GCS
           echo "::notice::Using minimal validation dataset"
 
       - name: Run metrics validation
@@ -653,7 +647,7 @@ jobs:
   # --------------------------------------------------------------------------
   deploy-staging:
     name: Deploy to Staging
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     needs: [build]
     if: |
@@ -692,7 +686,7 @@ jobs:
       - name: Deploy to Kubernetes
         if: steps.check_k8s.outputs.configured == 'true'
         run: |
-          IMAGE_TAG="${{ needs.build.outputs.image_tag }}"
+          IMAGE_TAG="$(echo '${{ needs.build.outputs.image_tags }}' | head -n1)"
           kubectl set image deployment/face-recognition-api \
             face-recognition-api="${IMAGE_TAG}" \
             -n staging
@@ -738,7 +732,7 @@ jobs:
   # --------------------------------------------------------------------------
   deploy-production:
     name: Deploy to Production
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: [build, validate-metrics]
     if: |
@@ -776,9 +770,8 @@ jobs:
       - name: Deploy to Kubernetes (Blue-Green)
         id: deploy
         run: |
-          IMAGE_TAG="${{ needs.build.outputs.image_tag }}"
+          IMAGE_TAG="$(echo '${{ needs.build.outputs.image_tags }}' | head -n1)"
           
-          # Deploy to green environment
           kubectl set image deployment/face-recognition-api-green \
             face-recognition-api="${IMAGE_TAG}" \
             -n production
@@ -866,10 +859,9 @@ jobs:
               "blocks": [
                 {
                   "type": "section",
-                
-                                    "text": {
+                  "text": {
                     "type": "mrkdwn",
-                    "text": "*Production Deployment Failed*\n\nCommit: `${{ github.sha }}`\nAuthor: ${{ github.actor }}\n\n⚠️ Rollback initiated\n🔍 Check workflow logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    "text": "*Production Deployment Failed*\n\nCommit: `${{ github.sha }}`\nAuthor: ${{ github.actor }}\n\n⚠️ Rollback initiated\n🔍 Check: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
                   }
                 }
               ]
@@ -880,7 +872,7 @@ jobs:
   # --------------------------------------------------------------------------
   post-deploy-verification:
     name: Post-Deployment Verification
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     needs: [deploy-production]
     if: success() && github.ref == 'refs/heads/main'
@@ -890,7 +882,6 @@ jobs:
 
       - name: Run E2E tests against production
         run: |
-          # Smoke tests
           curl -f -m 30 https://api.company.com/health || exit 1
           curl -f -m 30 https://api.company.com/metrics || exit 1
           
@@ -907,7 +898,7 @@ jobs:
   # --------------------------------------------------------------------------
   summary:
     name: Pipeline Summary
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: always()
     needs: [lint, security, unit-tests, integration-tests, build, deploy-staging, deploy-production]
     steps:
@@ -941,7 +932,8 @@ jobs:
           EOF
           
           if [ "${{ needs.build.result }}" == "success" ]; then
-            echo "- 🐳 Docker Image: \`${{ needs.build.outputs.image_tag }}\`" >> $GITHUB_STEP_SUMMARY
+            IMAGE_TAG="$(echo '${{ needs.build.outputs.image_tags }}' | head -n1)"
+            echo "- 🐳 Docker Image: \`${IMAGE_TAG}\`" >> $GITHUB_STEP_SUMMARY
           fi
           
           echo "" >> $GITHUB_STEP_SUMMARY
