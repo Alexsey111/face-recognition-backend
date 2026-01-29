@@ -136,9 +136,7 @@ async def lifespan(app: FastAPI):
             if stats.get("certified_liveness_enabled"):
                 logger.info(f"   ✅ Certified liveness (MiniFASNetV2): ENABLED")
             else:
-                logger.info(
-                    f"   ⚠️  Certified liveness: DISABLED (will use heuristics)"
-                )
+                logger.info(f"   ⚠️  Certified liveness: DISABLED (will use heuristics)")
 
         except Exception as e:
             logger.error(f"❌ Failed to initialize ML service: {str(e)}")

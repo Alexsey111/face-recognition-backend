@@ -167,11 +167,15 @@ class CleanupTasks:
                 # Удаляем только soft-deleted записи старше указанного срока
                 from sqlalchemy import text
 
-                result = await db.execute(text(f"""
+                result = await db.execute(
+                    text(
+                        f"""
                         DELETE FROM biometric_templates 
                         WHERE is_active = False 
                         AND updated_at < NOW() - INTERVAL '{days} days'
-                    """))
+                    """
+                    )
+                )
                 await db.commit()
 
                 deleted = result.rowcount

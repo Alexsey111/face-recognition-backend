@@ -1,0 +1,375 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+env:
+  PYTHON_VERSION: '3.12'
+  DOCKER_REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+permissions:
+  contents: write
+  packages: write
+  security-events: write
+
+jobs:
+  # --------------------------------------------------------------------------
+  # 1. Создание релиза
+  # --------------------------------------------------------------------------
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version from tag
+        id: get_version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Create Release
+        id: create_gh_release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate and upload checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "${{ github.sha }} ${{ github.ref_name }}" > checksums.txt
+          sha256sum checksums.txt >> checksums.txt
+          gh release upload ${{ github.ref_name }} checksums.txt --clobber
+
+  # --------------------------------------------------------------------------
+  # 2. Сборка и публикация Docker-образа
+  # --------------------------------------------------------------------------
+  build-release:
+    name: Build Release Image
+    runs-on: ubuntu-latest
+    needs: create-release
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKER_REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ needs.create-release.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # --------------------------------------------------------------------------
+  # 3. Публикация Helm Chart
+  # --------------------------------------------------------------------------
+  publish-helm:
+    name: Publish Helm Chart
+    runs-on: ubuntu-latest
+    needs: create-release
+    continue-on-error: true  # Не падать если нет helm репозитория
+    steps:
+      - name: Check if helm-charts repo exists
+        id: check_helm_repo
+        run: |
+          REPO="${{ github.repository }}-charts"
+          if gh repo view "$REPO" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "::warning::Helm charts repository not found: $REPO"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout helm-charts repo
+        if: steps.check_helm_repo.outputs.exists == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}-charts
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: helm-charts
+
+      - name: Setup Helm
+        if: steps.check_helm_repo.outputs.exists == 'true'
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Update Chart version
+        if: steps.check_helm_repo.outputs.exists == 'true'
+        working-directory: helm-charts
+        run: |
+          VERSION="${{ needs.create-release.outputs.version }}"
+          CHART_FILE="charts/face-recognition/Chart.yaml"
+          
+          if [ ! -f "$CHART_FILE" ]; then
+            echo "::warning::Chart.yaml not found at $CHART_FILE"
+            exit 0
+          fi
+          
+          # Удаляем 'v' prefix если есть
+          VERSION_NUMBER="${VERSION#v}"
+          
+          sed -i "s/^version: .*/version: ${VERSION_NUMBER}/" "$CHART_FILE"
+          sed -i "s/^appVersion: .*/appVersion: \"${VERSION}\"/" "$CHART_FILE"
+          
+          cat "$CHART_FILE"
+
+      - name: Package and push Helm chart
+        if: steps.check_helm_repo.outputs.exists == 'true'
+        working-directory: helm-charts
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          mkdir -p package
+          helm package charts/face-recognition/ --destination package/
+          
+          git add .
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Release ${{ needs.create-release.outputs.version }}"
+            git push origin main
+          fi
+
+  # --------------------------------------------------------------------------
+  # 4. Уведомление Docker Hub
+  # --------------------------------------------------------------------------
+  notify-dockerhub:
+    name: Notify Docker Hub
+    runs-on: ubuntu-latest
+    needs: build-release
+    steps:
+      - name: Check Docker Hub configuration
+        id: check_docker
+        run: |
+          if [ -n "${{ secrets.DOCKER_HUB_TRIGGER_ID }}" ]; then
+            echo "configured=true" >> $GITHUB_OUTPUT
+          else
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "::notice::Docker Hub trigger not configured, skipping notification"
+          fi
+
+      - name: Trigger Docker Hub build
+        if: steps.check_docker.outputs.configured == 'true'
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "https://hub.docker.com/api/build/v1/source/${{ secrets.DOCKER_HUB_TRIGGER_ID }}/trigger/" \
+            -H "Content-Type: application/json" \
+            -d '{"source_type": "Tag", "source_name": "${{ github.ref_name }}"}')
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | head -n-1)
+          
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "✅ Docker Hub notified successfully"
+          else
+            echo "::warning::Docker Hub notification failed with code $HTTP_CODE: $BODY"
+          fi
+
+  # --------------------------------------------------------------------------
+  # 5. Публикация в Amazon ECR
+  # --------------------------------------------------------------------------
+  publish-ecr:
+    name: Publish to Amazon ECR
+    runs-on: ubuntu-latest
+    needs: [build-release, create-release]
+    steps:
+      - name: Check AWS configuration
+        id: check_aws
+        run: |
+          if [ -n "${{ secrets.AWS_ACCESS_KEY_ID }}" ] && [ -n "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then
+            echo "configured=true" >> $GITHUB_OUTPUT
+          else
+            echo "configured=false" >> $GITHUB_OUTPUT
+            echo "::notice::AWS credentials not configured, skipping ECR publication"
+          fi
+
+      - name: Configure AWS credentials
+        if: steps.check_aws.outputs.configured == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_DEFAULT_REGION || 'us-east-1' }}
+
+      - name: Login to Amazon ECR
+        if: steps.check_aws.outputs.configured == 'true'
+        id: login_ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Checkout code
+        if: steps.check_aws.outputs.configured == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        if: steps.check_aws.outputs.configured == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push to ECR
+        if: steps.check_aws.outputs.configured == 'true'
+        env:
+          ECR_REGISTRY: ${{ steps.login_ecr.outputs.registry }}
+          ECR_REPOSITORY: face-recognition
+          IMAGE_TAG: ${{ needs.create-release.outputs.version }}
+        run: |
+          # Создаем репозиторий если не существует
+          aws ecr describe-repositories --repository-names $ECR_REPOSITORY || \
+            aws ecr create-repository --repository-name $ECR_REPOSITORY
+          
+          # Собираем и пушим образ
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            --tag $ECR_REGISTRY/$ECR_REPOSITORY:latest \
+            --build-arg VERSION=$IMAGE_TAG \
+            --push \
+            .
+
+  # --------------------------------------------------------------------------
+  # 6. Обновление документации
+  # --------------------------------------------------------------------------
+  update-docs:
+    name: Update Documentation
+    runs-on: ubuntu-latest
+    needs: [create-release, build-release]
+    continue-on-error: true
+    steps:
+      - name: Check if docs repo exists
+        id: check_docs_repo
+        run: |
+          REPO="${{ github.repository }}-docs"
+          if gh repo view "$REPO" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "::notice::Documentation repository not found: $REPO"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout docs repo
+        if: steps.check_docs_repo.outputs.exists == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}-docs
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: docs-repo
+      
+      - name: Update version references
+        if: steps.check_docs_repo.outputs.exists == 'true'
+        working-directory: docs-repo
+        run: |
+          VERSION="${{ needs.create-release.outputs.version }}"
+          
+          # Обновляем ссылки на версию в документации
+          find . -type f -name "*.md" -exec sed -i \
+            -e "s|ghcr.io/${{ github.repository }}:latest|ghcr.io/${{ github.repository }}:${VERSION}|g" \
+            -e "s|version: latest|version: ${VERSION}|g" {} +
+          
+          # Создаем файл с информацией о релизе
+          cat > RELEASE_${VERSION}.md << EOF
+          # Release ${VERSION}
+          
+          Released: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          Commit: ${{ github.sha }}
+          
+          ## Docker Images
+          - \`ghcr.io/${{ github.repository }}:${VERSION}\`
+          - \`ghcr.io/${{ github.repository }}:latest\`
+          
+          ## Changes
+          See [GitHub Release](https://github.com/${{ github.repository }}/releases/tag/${VERSION})
+          EOF
+      
+      - name: Create Pull Request
+        if: steps.check_docs_repo.outputs.exists == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          path: docs-repo
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "docs: update for release ${{ needs.create-release.outputs.version }}"
+          title: "📚 Update documentation for ${{ needs.create-release.outputs.version }}"
+          body: |
+            Auto-generated PR to update documentation for release ${{ needs.create-release.outputs.version }}
+            
+            ## Changes
+            - Updated version references in documentation
+            - Added release notes file
+            
+            **Release:** https://github.com/${{ github.repository }}/releases/tag/${{ needs.create-release.outputs.version }}
+          branch: "docs-update-${{ needs.create-release.outputs.version }}"
+          base: main
+          delete-branch: true
+
+  # --------------------------------------------------------------------------
+  # 7. Уведомление о завершении
+  # --------------------------------------------------------------------------
+  notify-complete:
+    name: Release Complete
+    runs-on: ubuntu-latest
+    needs: [create-release, build-release, publish-helm, notify-dockerhub, publish-ecr, update-docs]
+    if: always()
+    steps:
+      - name: Summary
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          # 🎉 Release ${{ needs.create-release.outputs.version }} Complete
+          
+          ## Status
+          - ✅ GitHub Release: Created
+          - ${{ needs.build-release.result == 'success' && '✅' || '❌' }} Docker Image: ${{ needs.build-release.result }}
+          - ${{ needs.publish-helm.result == 'success' && '✅' || needs.publish-helm.result == 'skipped' && '⏭️' || '❌' }} Helm Chart: ${{ needs.publish-helm.result }}
+          - ${{ needs.notify-dockerhub.result == 'success' && '✅' || needs.notify-dockerhub.result == 'skipped' && '⏭️' || '❌' }} Docker Hub: ${{ needs.notify-dockerhub.result }}
+          - ${{ needs.publish-ecr.result == 'success' && '✅' || needs.publish-ecr.result == 'skipped' && '⏭️' || '❌' }} Amazon ECR: ${{ needs.publish-ecr.result }}
+          - ${{ needs.update-docs.result == 'success' && '✅' || needs.update-docs.result == 'skipped' && '⏭️' || '❌' }} Documentation: ${{ needs.update-docs.result }}
+          
+          ## Artifacts
+          - 🐳 Image: \`ghcr.io/${{ github.repository }}:${{ needs.create-release.outputs.version }}\`
+          - 📦 Release: https://github.com/${{ github.repository }}/releases/tag/${{ needs.create-release.outputs.version }}
+          
+          ---
+          
+          **Triggered by:** ${{ github.actor }}
+          **Commit:** ${{ github.sha }}
+          EOF

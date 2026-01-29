@@ -1,16 +1,9 @@
-# =============================================================================
-# CI Requirements - CPU-версия PyTorch для GitHub Actions
-# =============================================================================
-# Использует CPU-версию PyTorch (~2GB) вместо GPU-версии (~4-7GB)
-# Ускоряет CI-сборку и снижает затраты на GitHub Actions minutes
-# =============================================================================
-
 # CPU-версия PyTorch для CI (значительно меньше размер, чем CUDA-версия)
 # PyTorch CPU wheels: ~2GB vs GPU wheels: ~4-7GB
 torch>=2.0.0 --index-url https://download.pytorch.org/whl/cpu
 torchvision>=0.15.0 --index-url https://download.pytorch.org/whl/cpu
 
-# Остальные зависимости из requirements.txt
+# Остальные зависимости (без изменений)
 # Core Framework
 fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
@@ -66,6 +59,7 @@ python-dotenv>=1.0.0
 structlog>=23.2.0
 
 # ML & AI (Face Recognition & Computer Vision)
+# torch и torchvision уже установлены выше с CPU-индексом
 facenet-pytorch>=2.5.3
 mtcnn>=0.1.1
 numpy>=1.26.0
